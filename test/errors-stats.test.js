@@ -56,3 +56,9 @@ test('usage stats record metadata only and aggregate today / week', async () => 
     assert.ok(!/mes|content/.test(file), 'no message content persisted');
     delete process.env.CLAUDE_SUBSCRIPTION_STATS_FILE;
 });
+
+test('Opus 5.5 safeguard refusals are recognized', () => {
+    const raw = "API Error: Opus 5.5 (1M context)'s safeguards flagged this message (https://www.anthropic.com/legal/aup). Details: `[reasoning_extraction]` Request ID: req_x";
+    assert.equal(explainError(raw).code, 'reasoning_extraction');
+    assert.equal(explainError("safeguards flagged this message Details: `[cyber]`").code, 'safeguards');
+});
