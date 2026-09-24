@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { diagnoseCache, describeDiag, nearestLabel, __resetCacheDiag } from '../lib/cache-diag.js';
+import { diagnoseCache, describeDiag, nearestLabel, explainCache, __resetCacheDiag } from '../lib/cache-diag.js';
 
 const U = (content) => ({ role: 'user', content });
 const A = (content) => ({ role: 'assistant', content });
@@ -69,8 +69,36 @@ test('a diff wandering inside one tagged section keeps the same split', () => {
     assert.equal(d3.splitAt, head.length);
 });
 
+test('a one-off early edit stops pinning the split after a few turns', () => {
+    __resetCacheDiag();
+    const a = '规则'.repeat(1000) + '\n';
+    const b = '设定'.repeat(1000) + '\n';
+    const sys = (toggle, wi) => `${a}${toggle}\n${b}<world_info>\n${wi}\n</world_info>`;
+    let h = [A('greeting'), U('u1')];
+    const turn = (toggle, wi) => { const d = diagnoseCache(sys(toggle, wi), h); h = [...h, A('a'), U('u')]; return d; };
+    turn('开关甲', '雪山');
+    const wiStart = (a + '开关甲\n' + b).length;
+    assert.equal(turn('开关甲', '沙漠').splitAt, wiStart);
+    assert.equal(turn('开关乙', '森林').splitAt, a.length);     // user flipped a toggle: split pulled forward
+    turn('开关乙', '海边');
+    turn('开关乙', '草原');
+    assert.equal(turn('开关乙', '雪原').splitAt, wiStart);      // edit is 3 turns old: back behind the toggles
+});
+
 test('no split when the change is too close to the start', () => {
     __resetCacheDiag();
     diagnoseCache('A\n' + 'x'.repeat(5000), [A('g'), U('u')]);
     assert.equal(diagnoseCache('B\n' + 'x'.repeat(5000), [A('g'), U('u'), A('a'), U('v')]).splitAt, null);
+});
+
+test('explainCache: split-covered change, history rewrite, effort switch', () => {
+    const e = (over) => ({ ok: true, model: 'm', effort: 'high', inputTokens: 2, cacheReadTokens: 30000, cacheCreationTokens: 10000, ...over });
+    const c = explainCache(e({ cacheDiag: { firstTurn: false, systemChanged: true, systemDiffAt: 36000, systemDiffLabel: '<world_info>', splitAt: 35000, historyDiffAt: 5, historyLen: 12 } }), e({}));
+    assert.equal(c.hitPct, 75);
+    assert.match(c.reasons[0], /前 35,000 字已单独缓存/);
+    assert.match(c.reasons[1], /第 6 \/ 12 条/);
+    const sw = explainCache(e({ cacheReadTokens: 0, cacheDiag: { firstTurn: false, systemChanged: false, historyDiffAt: null } }), e({ effort: 'medium' }));
+    assert.match(sw.reasons.join(), /思考深度/);
+    assert.match(explainCache(e({ cacheDiag: { firstTurn: true } })).reasons[0], /第一轮/);
+    assert.equal(explainCache({ ok: false }), null);
 });
