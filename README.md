@@ -38,6 +38,14 @@ v2.3 起，代理可以**独立运行**，不再依赖 SillyTavern 的 Node 服�
 新增模型：Claude Opus 5.5、Claude Sonnet 5（都有 1M 变体）。
 Sonnet 5 不支持 thinking 预算，所以「Always on」会按 adaptive 发送。
 
+v2.4：
+- **使用统计**：代理每次对话记录一行元数据到 `data/usage.jsonl`（模型、耗时、token、缓存命中；不含聊天内容），
+  面板显示今天 / 近 7 天汇总和最近一次失败原因；`GET /v1/usage/stats` 返回同样数据。
+- **中文错误提示**：常见失败（未登录、额度限制、服务繁忙、上下文过长、1M 不可用……）带中文原因和解决办法。
+- **预设思维链提示**：回复正文里有 `<thinking>` 块而原生思考为空时，面板提示如何让酒馆把它收进折叠框。
+- 修复：Fable 请求出错时被误报为「模型被替换」（CLI 的 `<synthetic>` 错误消息）。
+- Claude Agent SDK 升级到 0.3.x。
+
 ## What v2 gives you
 
 - **Current models** — Claude Fable 5.1/5, Opus 5/4.8/4.7/4.6/4.5, Sonnet 4.6/4.5,

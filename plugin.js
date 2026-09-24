@@ -31,6 +31,7 @@ import { fileURLToPath } from 'node:url';
 
 import { handleStatus } from './lib/status.js';
 import { handleQuota } from './lib/oauth.js';
+import { handleStats } from './lib/usage-stats.js';
 import { startStandaloneListener, stopStandaloneListener, probeExistingProxy, portInUseMessage } from './lib/listener.js';
 
 const DEFAULT_PORT = 8901;
@@ -138,6 +139,7 @@ export async function init(router) {
     router.use(express.json({ limit: '50mb' }));
     router.get('/status', handleStatus);
     router.get('/quota', handleQuota);
+    router.get('/stats', handleStats);
 
     installUiExtension();
 

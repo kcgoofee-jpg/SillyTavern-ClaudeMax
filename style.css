@@ -318,3 +318,73 @@
 .claude-max .cm-notes li + li {
     margin-top: 3px;
 }
+
+/* ── usage stats ── */
+
+.claude-max .cm-stats {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    transition: opacity 0.2s ease;
+}
+
+.claude-max .cm-stats.cm-loading {
+    opacity: 0.5;
+}
+
+.claude-max .cm-stat-title {
+    font-weight: 600;
+    font-size: 0.9em;
+    margin-bottom: 4px;
+}
+
+.claude-max .cm-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.claude-max .cm-stat {
+    padding: 5px 8px;
+    border: 1px solid var(--cm-border);
+    border-radius: 6px;
+    background: var(--cm-soft);
+    min-width: 0;
+}
+
+.claude-max .cm-stat-value {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.claude-max .cm-last-error {
+    padding: 8px 10px;
+    border-radius: 8px;
+    border: 1px solid color-mix(in srgb, var(--cm-bad) 50%, transparent);
+    background: color-mix(in srgb, var(--cm-bad) 10%, transparent);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.claude-max .cm-tip {
+    border-color: color-mix(in srgb, var(--cm-warn) 55%, transparent);
+    background: color-mix(in srgb, var(--cm-warn) 10%, transparent);
+}
+
+.claude-max .cm-last-error-title {
+    font-weight: 700;
+    font-size: 0.92em;
+}
+
+.claude-max .cm-raw {
+    word-break: break-all;
+    opacity: 0.5;
+}
+
+.claude-max [hidden] {
+    display: none !important;
+}

@@ -341,9 +341,99 @@
         }
     }
 
+    // ── Usage stats ──
+
+    const fmtK = (n) => (n >= 10000 ? `${Math.round(n / 1000)}k` : n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(n ?? 0));
+    const fmtSec = (ms) => (ms == null ? '–' : ms >= 60000 ? `${Math.floor(ms / 60000)}分${Math.round((ms % 60000) / 1000)}秒` : `${(ms / 1000).toFixed(1)}秒`);
+    const fmtPct = (x) => (x == null ? '–' : `${Math.round(x * 100)}%`);
+    const fmtWhen = (ts) => {
+        const d = new Date(ts);
+        const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        return d.toDateString() === new Date().toDateString() ? `今天 ${time}` : `${d.getMonth() + 1}/${d.getDate()} ${time}`;
+    };
+
+    function statsRow(title, a) {
+        const row = el('div', 'cm-stat-row');
+        row.append(el('div', 'cm-stat-title', title));
+        const grid = el('div', 'cm-stat-grid');
+        const cells = [
+            ['请求', a.failed ? `${a.requests}（失败 ${a.failed}）` : String(a.requests)],
+            ['输出', `${fmtK(a.outputTokens)} token`],
+            ['平均耗时', fmtSec(a.avgDurationMs)],
+            ['首字等待', fmtSec(a.avgTtftMs)],
+            ['缓存命中', fmtPct(a.cacheHitRate)],
+            ['带原生思考', `${a.withReasoning} 次`],
+        ];
+        for (const [k, v] of cells) {
+            const cell = el('div', 'cm-stat');
+            cell.append(el('small', 'cm-hint', k), el('div', 'cm-stat-value', v));
+            grid.append(cell);
+        }
+        row.append(grid);
+        return row;
+    }
+
+    async function refreshStats() {
+        const box = document.getElementById('claude_max_stats');
+        if (!box) return;
+        box.classList.add('cm-loading');
+        try {
+            const res = await fetchProxy('/stats', '/v1/usage/stats');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            box.replaceChildren();
+            if (!data.week?.requests) {
+                box.append(el('small', 'cm-hint', '还没有记录。从 v2.4 起每次对话都会记在这里（只记录耗时和 token 数，不记录聊天内容）。'));
+            } else {
+                box.append(statsRow('今天', data.today), statsRow('近 7 天', data.week));
+            }
+            if (data.lastError) {
+                const err = el('div', 'cm-last-error');
+                err.append(
+                    el('div', 'cm-last-error-title', `最近一次失败 · ${fmtWhen(data.lastError.at)} · ${data.lastError.model}`),
+                    el('div', null, data.lastError.message),
+                    el('small', 'cm-hint', `办法：${data.lastError.hint}`),
+                );
+                const raw = el('small', 'cm-hint cm-raw', `原始错误：${data.lastError.raw}`);
+                err.append(raw);
+                box.append(err);
+            }
+        } catch (err) {
+            box.replaceChildren(el('small', 'cm-hint', `统计暂不可用（${err instanceof Error ? err.message : err}）`));
+        } finally {
+            box.classList.remove('cm-loading');
+        }
+        checkInlineCot();
+    }
+
+    // Presets that make the model write its chain of thought INTO the reply
+    // (<thinking>…</thinking>) leave the native reasoning box empty, and ST's
+    // auto-parse only catches it when its prefix/suffix match those tags.
+    function checkInlineCot() {
+        const tip = document.getElementById('claude_max_cot_tip');
+        if (!tip) return;
+        const chat = SillyTavern.getContext().chat ?? [];
+        const last = [...chat].reverse().find((m) => !m.is_user && !m.is_system);
+        const match = last?.mes?.match(/<(thinking|think|cot|analysis)\b[^>]*>/i);
+        if (!match || last.extra?.reasoning) {
+            tip.hidden = true;
+            return;
+        }
+        const tag = match[1];
+        tip.hidden = false;
+        tip.replaceChildren(
+            el('div', 'cm-last-error-title', '当前预设把思维链写在了正文里'),
+            el('small', 'cm-hint',
+                `最近的回复里有 <${tag}> 块，所以原生思考框是空的：模型已经在正文里思考，就不会再启用原生思考，而且这部分也会占用输出长度和生成时间。` +
+                `想把它收进折叠框：酒馆「用户设置 → 推理 → 自动解析」，前缀填 <${tag}>、后缀填 </${tag}>。` +
+                '想改用原生思考：关掉预设里的思维链条目，并在上面把「思考模式」设为「始终思考」。'),
+        );
+    }
+
     function refreshAll() {
         refreshProxyStatus();
         refreshQuota();
+        refreshStats();
     }
 
     // ── Settings UI ──
@@ -436,6 +526,19 @@
         quotaBox.append(el('small', 'cm-hint', '展开面板时自动加载。'));
         content.append(quotaBox);
 
+        // Usage stats
+        const statsTools = el('div', 'cm-section-tools');
+        statsTools.append(iconButton('fa-rotate', '刷新统计', refreshStats));
+        content.append(section('使用统计', statsTools));
+        const statsBox = el('div', 'cm-stats');
+        statsBox.id = 'claude_max_stats';
+        statsBox.append(el('small', 'cm-hint', '展开面板时自动加载。'));
+        content.append(statsBox);
+        const cotTip = el('div', 'cm-last-error cm-tip');
+        cotTip.id = 'claude_max_cot_tip';
+        cotTip.hidden = true;
+        content.append(cotTip);
+
         // Advanced
         const adv = el('details', 'cm-details');
         adv.append(el('summary', null, '高级设置'));
@@ -499,5 +602,12 @@
     addExtensionSettings(settings);
     refreshProxyStatus();
     eventSource.on(eventTypes.CHAT_COMPLETION_SETTINGS_READY, onSettingsReady);
+    // Keep stats fresh while the panel is open.
+    const refreshIfOpen = () => {
+        const box = document.getElementById('claude_max_stats');
+        if (box && box.offsetParent !== null) setTimeout(refreshStats, 500);
+    };
+    eventSource.on(eventTypes.MESSAGE_RECEIVED, refreshIfOpen);
+    eventSource.on(eventTypes.CHAT_CHANGED, refreshIfOpen);
     console.log(`[claude-max] UI extension loaded${IS_TAURI ? ' (TauriTavern mode)' : ''}`);
 })();
