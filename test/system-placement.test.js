@@ -58,3 +58,11 @@ test('system_placement setting defaults to inline', () => {
     assert.equal(extractSettings({}).systemPlacement, 'inline');
     assert.equal(extractSettings({ claude_subscription: { system_placement: 'hoist' } }).systemPlacement, 'hoist');
 });
+
+test('buildSystemPrompt splits at the boundary only when asked', async () => {
+    const { buildSystemPrompt } = await import('../lib/system-prompt.js');
+    assert.equal(buildSystemPrompt('abcdef', false), 'abcdef');
+    assert.equal(buildSystemPrompt('abcdef', false, 3, null), 'abcdef');
+    assert.deepEqual(buildSystemPrompt('abcdef', false, 3, 'B'), { type: 'custom', prompt: ['abc', 'B', 'def'], snapshot: false });
+    assert.equal(buildSystemPrompt('abcdef', false, 6, 'B'), 'abcdef');
+});

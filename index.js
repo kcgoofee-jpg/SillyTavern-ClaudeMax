@@ -60,6 +60,7 @@
         identityMode: false,
         useResume: true,
         inlineSystem: true,
+        debugDump: false,
     };
 
     function getSettings() {
@@ -176,6 +177,7 @@
         lines.push(`  identity_mode: ${settings.identityMode}`);
         lines.push(`  use_resume: ${settings.useResume}`);
         lines.push(`  system_placement: ${settings.inlineSystem ? 'inline' : 'hoist'}`);
+        if (settings.debugDump) lines.push('  debug_dump: true');
         return lines.join('\n');
     }
 
@@ -654,6 +656,13 @@
             desc: '在角色卡前加上 Claude Code 官方前言，模型能正确说出自己是哪个型号，但会多耗 token 并带点编程助手味。角色扮演建议关闭。',
             checked: settings.identityMode,
             onChange: (v) => { settings.identityMode = v; save(); },
+        }));
+        adv.append(toggleRow({
+            id: 'claudeMaxDebugDump',
+            title: '调试：保存最近一次完整请求',
+            desc: '把最近一次发给 Claude 的系统提示词和聊天记录存到代理目录 data/debug/（只存本机，每次覆盖，上一份另存为 previous）。排查预设、世界书、缓存问题时打开，平时关闭。',
+            checked: settings.debugDump,
+            onChange: (v) => { settings.debugDump = v; save(); },
         }));
         content.append(adv);
 
