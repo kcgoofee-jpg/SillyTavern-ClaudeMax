@@ -291,8 +291,8 @@
         const render = () => {
             group.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.effort === (nextEffort ?? '')));
             status.textContent = nextEffort
-                ? `下一条回复用「${EFFORT_LABEL[nextEffort]}」，收到后自动恢复为「${EFFORT_LABEL[settings.effort]}」。换思考深度会让这一轮和恢复后的一轮各重写一次缓存。`
-                : '关键剧情想让模型多想一会儿时点一下，只影响下一条回复。';
+                ? `下一条回复用「${EFFORT_LABEL[nextEffort]}」，收到后自动恢复为「${EFFORT_LABEL[settings.effort]}」。实测：高约慢 1/3，超高约慢 3 倍、输出额度约 3.5 倍。换深度时系统提示词的缓存保留，聊天记录部分会在这一轮和恢复后的一轮各重写一次。`
+                : '关键剧情想让模型多想一会儿时点一下，只影响下一条回复。实测：高约慢 1/3，超高约慢 3 倍。';
         };
         for (const [value, label] of [['high', '高'], ['xhigh', '超高'], ['', '取消']]) {
             const b = el('button', 'cm-seg-btn', label);
@@ -742,7 +742,7 @@
                 ? '首次连接时 TauriTavern 会弹出授权框，允许访问代理地址即可。'
                 : '从手机或其他设备打开酒馆时，额度和状态会经由酒馆服务器转发读取。',
             '请把酒馆自带的「推理强度」保持为自动，由本面板的「思考深度」代替。',
-            '修改「思考深度」后的下一轮，提示词缓存会失效一次（官方说明），不要频繁来回切换。',
+            '修改「思考深度」后的下一轮，聊天记录部分的缓存会重写一次（系统提示词的缓存保留），不要频繁来回切换。',
             '订阅通道不支持温度、Top-P 等采样参数（Agent SDK 限制）。',
             '「(1M context)」模型提供 100 万上下文；部分套餐需要开通额外用量，失败时会自动退回普通版本一小时。',
         ]) {
