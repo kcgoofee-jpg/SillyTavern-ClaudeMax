@@ -111,6 +111,61 @@
         }
     }
 
+    // ── Preflight: warn before a request that Opus 5.5 is likely to refuse ──
+
+    // Opus 5.5's safeguards refuse prompts that make the model write its
+    // reasoning into the reply (category reasoning_extraction). Presets that
+    // prescribe a <thinking>/<cot> block in the output trip it every time.
+    const warnedPresets = new Set();
+    function preflightCheck(data) {
+        if (!/opus-5-5/i.test(String(data.model ?? ''))) return;
+        const preset = SillyTavern.getContext().chatCompletionSettings?.preset_settings_openai ?? '';
+        if (warnedPresets.has(preset)) return;
+        const text = (data.messages ?? [])
+            .filter((m) => m?.role === 'system')
+            .map((m) => (typeof m.content === 'string' ? m.content : ''))
+            .join('\n');
+        if (!/<\/?(thinking|cot)>/i.test(text)) return;
+        warnedPresets.add(preset);
+        toastr?.warning?.(
+            `当前预设「${preset}」要求模型把思考过程（<thinking>/<cot>）写进回复，Opus 5.5 的安全分类器很可能拦截这类请求（reasoning_extraction）。` +
+            '建议换用改成原生思考的预设，或改用 Opus 5 / Fable。',
+            'Claude Max',
+            { timeOut: 15000 },
+        );
+    }
+
+    // ── Preset-recommended settings ──
+
+    // A preset can ship `extensions.claude_max = { effort, thinking, ... }`;
+    // switching to it applies those values so preset and panel stay in sync.
+    const PRESET_FIELDS = {
+        effort: { label: '思考深度', valid: (v) => VALID_EFFORTS.includes(v) },
+        thinking: { label: '思考模式', valid: (v) => VALID_THINKING.includes(v) },
+        showReasoning: { label: '显示思考过程', valid: (v) => typeof v === 'boolean' },
+        useResume: { label: '会话续接', valid: (v) => typeof v === 'boolean' },
+        inlineSystem: { label: '深度注入保持原位', valid: (v) => typeof v === 'boolean' },
+        identityMode: { label: '身份模式', valid: (v) => typeof v === 'boolean' },
+    };
+
+    function applyPresetRecommendation() {
+        const ctx = SillyTavern.getContext();
+        const rec = ctx.chatCompletionSettings?.extensions?.claude_max;
+        if (!rec || typeof rec !== 'object') return;
+        const settings = getSettings();
+        const changed = [];
+        for (const [key, field] of Object.entries(PRESET_FIELDS)) {
+            if (rec[key] === undefined || !field.valid(rec[key]) || settings[key] === rec[key]) continue;
+            settings[key] = rec[key];
+            changed.push(field.label);
+        }
+        if (!changed.length) return;
+        saveSettingsDebounced();
+        rebuildPanel();
+        const preset = ctx.chatCompletionSettings?.preset_settings_openai ?? '当前预设';
+        toastr?.info?.(`已按预设「${preset}」的推荐调整：${changed.join('、')}。`, 'Claude Max', { timeOut: 8000 });
+    }
+
     // ── Per-request injection (CHAT_COMPLETION_SETTINGS_READY) ──
 
     function buildIncludeBodyYaml(settings) {
@@ -137,6 +192,7 @@
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
             data.custom_include_body = (cleaned ? cleaned + '\n' : '') + buildIncludeBodyYaml(settings);
+            preflightCheck(data);
         } catch (err) {
             console.error('[claude-max] failed to inject settings', err);
         }
@@ -605,6 +661,21 @@
         content.append(notes);
     }
 
+    function rebuildPanel() {
+        const old = document.querySelector('.inline-drawer.claude-max');
+        const wasOpen = old?.querySelector('.inline-drawer-content')?.offsetParent != null;
+        const anchor = old?.nextSibling ?? null;
+        const parent = old?.parentElement;
+        old?.remove();
+        addExtensionSettings(getSettings());
+        const fresh = document.querySelector('.inline-drawer.claude-max');
+        if (parent && fresh && anchor) parent.insertBefore(fresh, anchor);
+        if (wasOpen) {
+            fresh?.querySelector('.inline-drawer-toggle')?.click();
+        }
+        refreshProxyStatus();
+    }
+
     // ── Boot ──
 
     const settings = getSettings();
@@ -618,5 +689,6 @@
     };
     eventSource.on(eventTypes.MESSAGE_RECEIVED, refreshIfOpen);
     eventSource.on(eventTypes.CHAT_CHANGED, refreshIfOpen);
+    eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, applyPresetRecommendation);
     console.log(`[claude-max] UI extension loaded${IS_TAURI ? ' (TauriTavern mode)' : ''}`);
 })();

@@ -62,3 +62,9 @@ test('Opus 5.5 safeguard refusals are recognized', () => {
     assert.equal(explainError(raw).code, 'reasoning_extraction');
     assert.equal(explainError("safeguards flagged this message Details: `[cyber]`").code, 'safeguards');
 });
+
+test('promptShape run-length encodes roles without content', async () => {
+    const { promptShape } = await import('../lib/usage-stats.js');
+    const S = { role: 'system', content: 'x' }, U = { role: 'user', content: 'y' }, A = { role: 'assistant', content: 'z' };
+    assert.equal(promptShape([S, S, S, A, S, U, A, U]), 'S3 A1 S1 U1 A1 U1');
+});

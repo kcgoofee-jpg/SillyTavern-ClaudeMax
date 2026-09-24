@@ -45,6 +45,9 @@ v2.4：
 - **预设思维链提示**：回复正文里有 `<thinking>` 块而原生思考为空时，面板提示如何让酒馆把它收进折叠框。
 - 修复：Fable 请求出错时被误报为「模型被替换」（CLI 的 `<synthetic>` 错误消息）。
 - Claude Agent SDK 升级到 0.3.x。
+- **预设配合**：第一条用户消息之前的 system 条目全部进入系统提示词（夹在中间的伪造 assistant 回信留在历史里），整个预设可被缓存；之后的深度注入留在原位。
+- **预设推荐设置**：预设文件可带 `extensions.claude_max`（effort / thinking / showReasoning / useResume / inlineSystem），切换到该预设时面板自动应用。
+- **Opus 5.5 预检**：选了 Opus 5.5 而预设仍要求把 `<thinking>`/`<cot>` 写进回复时，发送前提示会被 reasoning_extraction 拦截。
 
 ## What v2 gives you
 
