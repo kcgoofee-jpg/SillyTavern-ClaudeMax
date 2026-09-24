@@ -43,18 +43,30 @@ test('nearestLabel falls back to a heading', () => {
     assert.equal(nearestLabel(t, t.length - 1), '# 世界设定');
 });
 
-test('split point settles at the start of the first line that changes and only moves earlier', () => {
+test('split point settles at the start of the enclosing tag and only moves earlier', () => {
     __resetCacheDiag();
     const head = '规则'.repeat(1000) + '\n';           // 2001 chars, stable
     const sys = (wi, tail = '尾部规则') => `${head}<Lore>\n${wi}\n</Lore>\n${tail}`;
     const h = [A('greeting'), U('u1')];
     assert.equal(diagnoseCache(sys('雪山'), h).splitAt, null);
     const d2 = diagnoseCache(sys('沙漠'), [...h, A('a1'), U('u2')]);
-    assert.equal(d2.splitAt, head.length + '<Lore>\n'.length);
+    assert.equal(d2.splitAt, head.length);          // snapped to the <Lore> line
     const d3 = diagnoseCache(sys('森林'), [...h, A('a1'), U('u2'), A('a2'), U('u3')]);
     assert.equal(d3.splitAt, d2.splitAt);           // stable → static part is byte-identical
     const d4 = diagnoseCache(sys('森林', '新尾部'), [...h, A('a1'), U('u2'), A('a2'), U('u3'), A('a3'), U('u4')]);
     assert.equal(d4.splitAt, d2.splitAt);           // a later change doesn't move it
+});
+
+test('a diff wandering inside one tagged section keeps the same split', () => {
+    __resetCacheDiag();
+    const head = '规则'.repeat(1000) + '\n';
+    const sys = (...lines) => `${head}<world_info>\n${lines.join('\n')}\n</world_info>`;
+    const h = [A('greeting'), U('u1')];
+    diagnoseCache(sys('甲', '乙', '丙'), h);
+    const d2 = diagnoseCache(sys('甲', '乙', '丁'), [...h, A('a1'), U('u2')]);
+    const d3 = diagnoseCache(sys('甲', '戊'), [...h, A('a1'), U('u2'), A('a2'), U('u3')]);
+    assert.equal(d2.splitAt, head.length);
+    assert.equal(d3.splitAt, head.length);
 });
 
 test('no split when the change is too close to the start', () => {

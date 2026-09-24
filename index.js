@@ -543,9 +543,9 @@
 
     const EFFORT_OPTIONS = [
         { value: 'auto', label: '自动', hint: '不指定，使用模型默认值（多数模型为「高」，Opus 5.5 为「中」）。' },
-        { value: 'low', label: '低', hint: '最快、最省额度。Opus 5.5 的耗时主要花在思考上，嫌慢先试这一档。' },
+        { value: 'low', label: '低', hint: '最快、最省额度，但长篇角色扮演容易漏规则、人设变浅，一般不推荐。' },
         { value: 'medium', label: '中', hint: '速度与质量的平衡点。' },
-        { value: 'high', label: '高', hint: '复杂剧情更连贯，回复稍慢。' },
+        { value: 'high', label: '高', hint: '复杂剧情更连贯、规则执行更完整，回复稍慢。长篇角色扮演推荐。' },
         { value: 'xhigh', label: '超高', hint: '更深入的推理，回复更慢、更耗额度。' },
         { value: 'max', label: '最大', hint: '最深度的思考，最慢、最耗额度。' },
     ];
