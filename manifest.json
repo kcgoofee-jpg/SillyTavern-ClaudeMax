@@ -5,8 +5,8 @@
     "optional": [],
     "js": "index.js",
     "css": "style.css",
-    "author": "LukaTheHero",
-    "version": "2.2.0",
-    "homePage": "https://github.com/LukaTheHero/SillyTavern-ClaudeSubscription",
+    "author": "LukaTheHero, kcgoofee-jpg",
+    "version": "2.3.0",
+    "homePage": "https://github.com/kcgoofee-jpg/SillyTavern-ClaudeSubscription",
     "auto_update": false
 }

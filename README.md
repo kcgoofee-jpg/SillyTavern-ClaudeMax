@@ -12,6 +12,32 @@ settings.
 
 [sdk]: https://docs.anthropic.com/en/docs/claude-code/sdk
 
+## 中文快速上手（独立代理 / TauriTavern）
+
+v2.3 起，代理可以**独立运行**，不再依赖 SillyTavern 的 Node 服务器插件。所以它也能配合
+[TauriTavern](https://github.com/Darkatse/TauriTavern) 使用。TauriTavern 的后端是 Rust，不支持服务器插件。
+
+1. **安装并登录**（只需一次）：
+   ```bash
+   git clone https://github.com/kcgoofee-jpg/SillyTavern-ClaudeSubscription
+   cd SillyTavern-ClaudeSubscription
+   npm install        # 不要加 --omit=optional，Claude CLI 就在 optional 依赖里
+   npm run login      # 用 SDK 自带的 Claude CLI 登录 Pro/Max 订阅
+   npm run auth       # 查看登录状态
+   ```
+   在 macOS 上，凭据保存在钥匙串（Keychain）里，代理会自动读取。
+2. **启动代理**：运行 `npm start`，监听 `http://127.0.0.1:8901/v1`。
+3. **TauriTavern**：
+   - 打开「扩展 → 安装扩展」，填入本仓库的 git 地址，安装前端面板。
+   - 打开扩展抽屉里的 **Claude Max** 面板，点击 Connect。
+   - 第一次连接时，TauriTavern 会弹出原生授权框，允许访问 `127.0.0.1:8901` 即可。
+   - 面板顶部的状态点显示代理是否在线、是否已登录。
+4. **原版 SillyTavern**：照常作为服务器插件安装（见下文英文说明）。
+   - 如果已经用 `npm start` 启动了独立代理，插件会自动复用它，不会重复监听端口。
+
+新增模型：Claude Opus 5.5、Claude Sonnet 5（都有 1M 变体）。
+Sonnet 5 不支持 thinking 预算，所以「Always on」会按 adaptive 发送。
+
 ## What v2 gives you
 
 - **Current models** — Claude Fable 5.1/5, Opus 5/4.8/4.7/4.6/4.5, Sonnet 4.6/4.5,

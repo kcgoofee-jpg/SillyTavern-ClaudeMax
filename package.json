@@ -1,10 +1,13 @@
 {
   "name": "sillytavern-claude-subscription",
-  "version": "2.2.0",
-  "description": "SillyTavern Server Plugin — OpenAI-compatible proxy backed by the Claude Agent SDK so chat bills against your Anthropic Pro/Max subscription. Fable 5.1 / Opus 5 / 1M context / reasoning effort / thinking display / quota meter.",
+  "version": "2.3.0",
+  "description": "OpenAI-compatible proxy backed by the Claude Agent SDK so chat bills against your Anthropic Pro/Max subscription. Runs standalone (TauriTavern / any frontend) or as a SillyTavern server plugin.",
   "main": "plugin.js",
   "type": "module",
   "scripts": {
+    "start": "node server.js",
+    "login": "node scripts/claude-cli.js auth login",
+    "auth": "node scripts/claude-cli.js auth status",
     "test": "node --test"
   },
   "license": "AGPL-3.0-or-later",
@@ -15,5 +18,8 @@
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.2.141",
     "express": "^4.21.0"
+  },
+  "bin": {
+    "claude-subscription-proxy": "server.js"
   }
 }

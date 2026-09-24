@@ -31,7 +31,7 @@ import { fileURLToPath } from 'node:url';
 
 import { handleStatus } from './lib/status.js';
 import { handleQuota } from './lib/oauth.js';
-import { startStandaloneListener, stopStandaloneListener } from './lib/listener.js';
+import { startStandaloneListener, stopStandaloneListener, probeExistingProxy, portInUseMessage } from './lib/listener.js';
 
 const DEFAULT_PORT = 8901;
 const DEFAULT_HOST = '127.0.0.1';
@@ -84,17 +84,24 @@ function installUiExtension() {
         const here = dirname(fileURLToPath(import.meta.url));
         if (!existsSync(join(here, 'manifest.json'))) return;
 
-        const stRoot = resolve(here, '..', '..');
-        const thirdParty = join(stRoot, 'public', 'scripts', 'extensions', 'third-party');
-        if (!existsSync(thirdParty)) {
-            console.warn(`[${info.id}] SillyTavern third-party extension dir not found at ${thirdParty} — install the UI extension manually (see README).`);
+        // plugins/<id>/ normally sits two levels under the ST root, but Node
+        // resolves symlinks for ESM — a symlinked dev checkout reports its
+        // real path. ST always runs with its root as cwd, so try that too.
+        const stRoot = [resolve(here, '..', '..'), process.cwd()]
+            .find((root) => existsSync(join(root, 'public', 'scripts', 'extensions')));
+        const thirdParty = stRoot ? join(stRoot, 'public', 'scripts', 'extensions', 'third-party') : null;
+        if (!thirdParty || !existsSync(thirdParty)) {
+            console.warn(`[${info.id}] SillyTavern third-party extension dir not found — install the UI extension manually (see README).`);
             return;
         }
 
         // Dialog-installed clone present? It's git-managed by ST — let it own
         // the extension and skip the auto-copy.
-        const dialogClone = join(thirdParty, 'SillyTavern-ClaudeSubscription');
-        if (existsSync(join(dialogClone, 'manifest.json'))) {
+        const dialogClones = [
+            join(thirdParty, 'SillyTavern-ClaudeSubscription'),
+            join(stRoot, 'data', 'default-user', 'extensions', 'SillyTavern-ClaudeSubscription'),
+        ];
+        if (dialogClones.some((dir) => existsSync(join(dir, 'manifest.json')))) {
             console.log(`[${info.id}] UI extension already installed via SillyTavern's extension installer — auto-install skipped`);
             return;
         }
@@ -144,6 +151,11 @@ export async function init(router) {
             '(use the "Claude Max" panel in the Extensions drawer to connect)',
         );
     } catch (err) {
+        if (err?.code === 'EADDRINUSE' && await probeExistingProxy({ port, host })) {
+            console.log(`[${info.id}] reusing the standalone proxy already running at http://${host}:${port}/v1 (npm start)`);
+            return;
+        }
+        if (err?.code === 'EADDRINUSE') console.error(portInUseMessage(port));
         console.error(
             `[${info.id}] failed to start standalone listener — chat completions will not work. ` +
             'Status endpoint on /api/plugins/claude-subscription/status remains available.',

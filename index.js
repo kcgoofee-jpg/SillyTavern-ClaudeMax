@@ -41,6 +41,10 @@
     const ctx = SillyTavern.getContext();
     const { eventSource, eventTypes, extensionSettings, saveSettingsDebounced } = ctx;
 
+    // TauriTavern has a Rust backend: no server plugins, so the ST-origin
+    // /api/plugins routes don't exist — talk to the standalone proxy directly.
+    const IS_TAURI = !!window.__TAURITAVERN__;
+
     const MODULE = 'claude_max';
     const DEFAULT_ENDPOINT = 'http://127.0.0.1:8901/v1';
 
@@ -95,10 +99,14 @@
             }
             $('#chat_completion_source').val('custom').trigger('change');
             $('#api_button_openai').trigger('click');
-            toastr?.success?.('Connecting to Claude Max — the model list will populate in a moment.', 'Claude Max');
+            toastr?.success?.('正在连接，模型列表稍后出现在「API 连接」的模型下拉框中。', 'Claude Max');
+            if (IS_TAURI) {
+                toastr?.info?.(`首次连接时 TauriTavern 会弹出授权框，请允许访问 ${settings.endpoint}。`, 'Claude Max', { timeOut: 10000 });
+            }
+            setTimeout(refreshAll, 800);
         } catch (err) {
             console.error('[claude-max] connect failed', err);
-            toastr?.error?.(String(err), 'Claude Max');
+            toastr?.error?.(`连接失败：${err}`, 'Claude Max');
         }
     }
 
@@ -132,252 +140,364 @@
         }
     }
 
+    // ── Proxy access ──
+
+    function proxyBase(settings) {
+        return normalizeEndpoint(settings.endpoint).replace(/\/v1$/, '');
+    }
+
+    /** GET a proxy route: ST's same-origin plugin route first (works when
+     *  the ST UI is opened from another device), then the proxy directly
+     *  (standalone mode / TauriTavern). */
+    async function fetchProxy(pluginPath, directPath) {
+        let res = null;
+        if (!IS_TAURI) {
+            try {
+                res = await fetch(`/api/plugins/claude-subscription${pluginPath}`, { signal: AbortSignal.timeout(12000) });
+            } catch { /* ST route unavailable — fall back below */ }
+        }
+        if (!res || !res.ok) {
+            res = await fetch(`${proxyBase(getSettings())}${directPath}`, { signal: AbortSignal.timeout(12000) });
+        }
+        return res;
+    }
+
+    // ── Small DOM helpers ──
+
+    function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+    }
+
+    function iconButton(iconClass, title, onClick) {
+        const btn = el('div', `menu_button cm-icon-btn fa-solid ${iconClass}`);
+        btn.title = title;
+        btn.setAttribute('role', 'button');
+        btn.tabIndex = 0;
+        btn.addEventListener('click', onClick);
+        return btn;
+    }
+
+    /** Segmented control: one choice out of a few, hint text follows it. */
+    function segmented({ label, options, current, onChange }) {
+        const wrap = el('div', 'cm-field');
+        wrap.append(el('div', 'cm-field-label', label));
+        const group = el('div', 'cm-seg');
+        group.setAttribute('role', 'radiogroup');
+        group.setAttribute('aria-label', label);
+        const hint = el('small', 'cm-hint');
+        const buttons = options.map((opt) => {
+            const b = el('button', 'cm-seg-btn', opt.label);
+            b.type = 'button';
+            b.setAttribute('role', 'radio');
+            b.addEventListener('click', () => select(opt.value, true));
+            group.append(b);
+            return b;
+        });
+        function select(value, fire) {
+            options.forEach((opt, i) => {
+                const on = opt.value === value;
+                buttons[i].classList.toggle('active', on);
+                buttons[i].setAttribute('aria-checked', String(on));
+                if (on) hint.textContent = opt.hint;
+            });
+            if (fire) onChange(value);
+        }
+        select(current, false);
+        wrap.append(group, hint);
+        return wrap;
+    }
+
+    /** Toggle row: title + one-line description, switch on the right. */
+    function toggleRow({ id, title, desc, checked, onChange }) {
+        const row = el('label', 'cm-toggle');
+        row.htmlFor = id;
+        const text = el('div', 'cm-toggle-text');
+        text.append(el('div', 'cm-toggle-title', title), el('small', 'cm-hint', desc));
+        const input = el('input');
+        input.type = 'checkbox';
+        input.id = id;
+        input.checked = checked;
+        input.addEventListener('change', () => onChange(input.checked));
+        const sw = el('span', 'cm-switch');
+        row.append(text, input, sw);
+        return row;
+    }
+
+    function section(title, extra) {
+        const head = el('div', 'cm-section-head');
+        head.append(el('div', 'cm-section-title', title));
+        if (extra) head.append(extra);
+        return head;
+    }
+
+    // ── Proxy status ──
+
+    function setDot(state) {
+        for (const dot of document.querySelectorAll('.cm-dot')) {
+            dot.dataset.state = state;
+        }
+    }
+
+    const SUBSCRIPTION_LABELS = { max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterprise' };
+    const SOURCE_LABELS = { keychain: '钥匙串', file: '凭据文件', env: '环境变量' };
+
+    async function refreshProxyStatus() {
+        const title = document.getElementById('claude_max_status_title');
+        const sub = document.getElementById('claude_max_status_sub');
+        if (!title || !sub) return;
+        setDot('pending');
+        title.textContent = '正在检测代理…';
+        sub.textContent = '';
+        try {
+            const res = await fetchProxy('/status', '/status');
+            const data = await res.json();
+            if (!res.ok || !data.ok) throw new Error(data.message || `HTTP ${res.status}`);
+            const cred = data.credential ?? {};
+            if (cred.present) {
+                setDot('online');
+                title.textContent = '代理在线，已登录';
+                const plan = SUBSCRIPTION_LABELS[cred.subscriptionType] ?? cred.subscriptionType ?? '订阅';
+                sub.textContent = `${plan} 订阅 · 凭据来自${SOURCE_LABELS[cred.source] ?? cred.source} · 代理 v${data.version}`;
+            } else {
+                setDot('warning');
+                title.textContent = '代理在线，但未登录';
+                sub.textContent = '在代理目录运行 npm run login 登录 Claude 订阅账号';
+            }
+        } catch {
+            setDot('offline');
+            title.textContent = '连接不到代理';
+            sub.textContent = IS_TAURI
+                ? '请先在代理目录运行 npm start 启动本地代理'
+                : '请确认服务器插件已加载，或在代理目录运行 npm start';
+        }
+    }
+
     // ── Quota meter ──
 
     const WINDOW_LABELS = {
-        five_hour: '5-hour window',
-        seven_day: '7-day (all models)',
-        seven_day_opus: '7-day (Opus)',
-        seven_day_sonnet: '7-day (Sonnet)',
-        seven_day_fable: '7-day (Fable)',
-        seven_day_oauth_apps: '7-day (apps)',
+        five_hour: '5 小时窗口',
+        seven_day: '7 天 · 全部模型',
+        seven_day_opus: '7 天 · Opus',
+        seven_day_sonnet: '7 天 · Sonnet',
+        seven_day_fable: '7 天 · Fable',
+        seven_day_oauth_apps: '7 天 · 第三方应用',
     };
 
+    function formatReset(ts) {
+        if (!ts) return '';
+        const d = new Date(ts);
+        const time = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false });
+        const sameDay = d.toDateString() === new Date().toDateString();
+        return sameDay ? `${time} 重置` : `${d.getMonth() + 1}/${d.getDate()} ${time} 重置`;
+    }
+
     async function refreshQuota() {
-        const settings = getSettings();
         const box = document.getElementById('claude_max_quota');
+        const stamp = document.getElementById('claude_max_quota_time');
         if (!box) return;
-        box.textContent = 'Loading…';
+        box.classList.add('cm-loading');
         try {
-            // Same-origin ST plugin route first — a direct fetch to the
-            // listener resolves 127.0.0.1 to the CLIENT device and fails
-            // whenever the ST UI is opened from a phone or another PC.
-            let res = null;
-            try {
-                res = await fetch('/api/plugins/claude-subscription/quota', { signal: AbortSignal.timeout(12000) });
-            } catch { /* ST route unavailable — fall back below */ }
-            if (!res || !res.ok) {
-                const base = normalizeEndpoint(settings.endpoint).replace(/\/v1$/, '');
-                res = await fetch(`${base}/v1/usage/quota`, { signal: AbortSignal.timeout(12000) });
-            }
+            const res = await fetchProxy('/quota', '/v1/usage/quota');
             if (!res.ok) throw new Error(`HTTP ${res.status}`);
             const data = await res.json();
-            box.innerHTML = '';
+            box.replaceChildren();
             if (!data.windows?.length) {
-                box.textContent = 'No quota data returned.';
+                box.append(el('small', 'cm-hint', '暂无额度数据'));
                 return;
             }
             for (const w of data.windows) {
                 const pct = w.utilization !== null ? Math.round(w.utilization * 100) : null;
-                const row = document.createElement('div');
-                row.classList.add('claude-max-quota-row');
-                const label = document.createElement('span');
-                label.textContent = WINDOW_LABELS[w.type] ?? w.type;
-                const bar = document.createElement('div');
-                bar.classList.add('claude-max-quota-bar');
-                const fill = document.createElement('div');
-                fill.classList.add('claude-max-quota-fill');
+                const row = el('div', 'cm-quota-row');
+                const top = el('div', 'cm-quota-top');
+                top.append(
+                    el('span', 'cm-quota-label', WINDOW_LABELS[w.type] ?? w.type),
+                    el('span', 'cm-quota-value', pct !== null ? `${pct}%` : '–'),
+                );
+                const bar = el('div', 'cm-quota-bar');
+                const fill = el('div', 'cm-quota-fill');
                 fill.style.width = `${Math.min(100, pct ?? 0)}%`;
                 if ((pct ?? 0) >= 90) fill.classList.add('critical');
                 else if ((pct ?? 0) >= 70) fill.classList.add('warning');
                 bar.append(fill);
-                const value = document.createElement('span');
-                const resets = w.resetsAt ? ` · resets ${new Date(w.resetsAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}` : '';
-                value.textContent = pct !== null ? `${pct}%${resets}` : `–${resets}`;
-                row.append(label, bar, value);
+                row.append(top, bar);
+                const reset = formatReset(w.resetsAt);
+                if (reset) row.append(el('small', 'cm-hint cm-quota-reset', reset));
                 box.append(row);
             }
             if (data.extraUsage?.isEnabled) {
-                const extra = document.createElement('div');
-                extra.classList.add('claude-max-quota-extra');
-                extra.textContent = `Extra Usage: ${data.extraUsage.usedCredits} / ${data.extraUsage.monthlyLimit} ${data.extraUsage.currency}`;
-                box.append(extra);
+                box.append(el('small', 'cm-hint',
+                    `额外用量：${data.extraUsage.usedCredits} / ${data.extraUsage.monthlyLimit} ${data.extraUsage.currency}`));
+            }
+            if (stamp) {
+                stamp.textContent = `更新于 ${new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', hour12: false })}`;
             }
         } catch (err) {
-            box.textContent = `Quota unavailable (${err instanceof Error ? err.message : err}). Is the server plugin running?`;
+            box.replaceChildren(el('small', 'cm-hint', `额度暂不可用（${err instanceof Error ? err.message : err}）`));
+        } finally {
+            box.classList.remove('cm-loading');
         }
+    }
+
+    function refreshAll() {
+        refreshProxyStatus();
+        refreshQuota();
     }
 
     // ── Settings UI ──
 
-    function makeSelectRow(labelText, id, values, current, onChange, labels = {}) {
-        const label = document.createElement('label');
-        label.htmlFor = id;
-        label.textContent = labelText;
-        label.classList.add('claude-max-label');
-        const select = document.createElement('select');
-        select.id = id;
-        select.classList.add('text_pole');
-        for (const v of values) {
-            const opt = document.createElement('option');
-            opt.value = v;
-            opt.textContent = labels[v] ?? v;
-            if (v === current) opt.selected = true;
-            select.append(opt);
-        }
-        select.addEventListener('change', () => onChange(select.value));
-        return [label, select];
-    }
+    const EFFORT_OPTIONS = [
+        { value: 'auto', label: '自动', hint: '不指定，使用模型默认值（多数模型为「高」，Opus 5.5 为「中」）。' },
+        { value: 'low', label: '低', hint: '最快、最省额度，适合日常闲聊。' },
+        { value: 'medium', label: '中', hint: '速度与质量的平衡点。' },
+        { value: 'high', label: '高', hint: '复杂剧情更连贯，回复稍慢。' },
+        { value: 'xhigh', label: '超高', hint: '更深入的推理，回复更慢、更耗额度。' },
+        { value: 'max', label: '最大', hint: '最深度的思考，最慢、最耗额度。' },
+    ];
 
-    function makeCheckboxRow(labelText, id, checked, onChange, hint) {
-        const wrap = document.createElement('label');
-        wrap.classList.add('checkbox_label');
-        wrap.htmlFor = id;
-        const box = document.createElement('input');
-        box.id = id;
-        box.type = 'checkbox';
-        box.checked = checked;
-        box.addEventListener('change', () => onChange(box.checked));
-        const text = document.createElement('span');
-        text.textContent = labelText;
-        if (hint) text.title = hint;
-        wrap.append(box, text);
-        return wrap;
-    }
-
-    /** Always-visible explanation paragraph (tooltips are hover-only and
-     *  nobody finds them). */
-    function makeHelp(text) {
-        const p = document.createElement('small');
-        p.classList.add('claude-max-help');
-        p.textContent = text;
-        return p;
-    }
+    const THINKING_OPTIONS = [
+        { value: 'adaptive', label: '自适应', hint: '由模型判断是否需要思考，简单对话不额外等待（推荐）。' },
+        { value: 'on', label: '始终思考', hint: '每次回复前都先思考。Sonnet 5 会按自适应处理。' },
+        { value: 'off', label: '关闭', hint: '不思考。Fable、Opus 4.7 及以上（含 Opus 5 / 5.5）总会思考，此项对它们无效。' },
+    ];
 
     function addExtensionSettings(settings) {
         const container = document.getElementById('extensions_settings') ?? document.body;
+        const save = () => saveSettingsDebounced();
 
-        const drawer = document.createElement('div');
-        drawer.classList.add('inline-drawer');
+        const drawer = el('div', 'inline-drawer claude-max');
+        const toggle = el('div', 'inline-drawer-toggle inline-drawer-header');
+        const heading = el('b', 'cm-heading');
+        heading.append(el('span', 'cm-dot'), document.createTextNode('Claude Max 订阅'));
+        toggle.append(heading, el('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down'));
+        const drawerContent = el('div', 'inline-drawer-content');
+        // ST slide-toggles the drawer content's display — keep our flex
+        // layout on an inner wrapper so it never fights that.
+        const content = el('div', 'cm-body');
+        drawerContent.append(content);
+        drawer.append(toggle, drawerContent);
         container.append(drawer);
 
-        const toggle = document.createElement('div');
-        toggle.classList.add('inline-drawer-toggle', 'inline-drawer-header');
-        const title = document.createElement('b');
-        title.textContent = 'Claude Max';
-        const icon = document.createElement('div');
-        icon.classList.add('inline-drawer-icon', 'fa-solid', 'fa-circle-chevron-down', 'down');
-        toggle.append(title, icon);
+        // Refresh live data whenever the drawer is opened.
+        toggle.addEventListener('click', () => setTimeout(() => {
+            if (drawerContent.offsetParent !== null) refreshAll();
+        }, 50));
 
-        const content = document.createElement('div');
-        content.classList.add('inline-drawer-content');
-        drawer.append(toggle, content);
+        // Status card + connect
+        const card = el('div', 'cm-card cm-status');
+        const statusText = el('div', 'cm-status-text');
+        const statusTitle = el('div', 'cm-status-title');
+        statusTitle.id = 'claude_max_status_title';
+        const statusSub = el('small', 'cm-hint');
+        statusSub.id = 'claude_max_status_sub';
+        statusText.append(statusTitle, statusSub);
+        card.append(el('span', 'cm-dot cm-dot-lg'), statusText, iconButton('fa-rotate', '重新检测', refreshProxyStatus));
+        content.append(card);
 
-        const connectBtn = document.createElement('div');
-        connectBtn.classList.add('menu_button', 'claude-max-connect');
-        connectBtn.textContent = 'Connect to Claude Max';
+        const connectBtn = el('div', 'menu_button cm-connect');
+        connectBtn.append(el('i', 'fa-solid fa-plug'), document.createTextNode(' 一键连接'));
         connectBtn.addEventListener('click', () => connect(getSettings()));
         content.append(connectBtn);
-        content.append(makeHelp(
-            'One click does the whole setup: switches the API to Chat Completion → Custom (OpenAI-compatible), ' +
-            'fills the endpoint below into "Custom Endpoint (Base URL)", and connects. When the model list ' +
-            'populates, pick whichever Claude you want — "(1M context)" variants give the extended window. ' +
-            'Prefer manual setup? API Connections → Chat Completion → source "Custom (OpenAI-compatible)" → ' +
-            'paste the endpoint below as the Base URL → Connect → choose a model.',
-        ));
+        content.append(el('small', 'cm-hint cm-center',
+            '自动切到 Chat Completion → Custom 并填好地址，连接后在模型下拉框里选择 Claude 模型。'));
 
-        const endpointLabel = document.createElement('label');
-        endpointLabel.classList.add('claude-max-label');
-        endpointLabel.textContent = 'Endpoint (advanced)';
-        const endpointInput = document.createElement('input');
+        // Reasoning
+        content.append(section('推理'));
+        content.append(segmented({
+            label: '思考深度',
+            options: EFFORT_OPTIONS,
+            current: settings.effort,
+            onChange: (v) => { settings.effort = VALID_EFFORTS.includes(v) ? v : 'auto'; save(); },
+        }));
+        content.append(segmented({
+            label: '思考模式',
+            options: THINKING_OPTIONS,
+            current: settings.thinking,
+            onChange: (v) => { settings.thinking = VALID_THINKING.includes(v) ? v : 'adaptive'; save(); },
+        }));
+        content.append(toggleRow({
+            id: 'claudeMaxShowReasoning',
+            title: '显示思考过程',
+            desc: '在回复上方的折叠框里显示思考摘要（需同时开启酒馆的「显示模型思维」）。只影响显示，不会进入聊天记录。',
+            checked: settings.showReasoning,
+            onChange: (v) => { settings.showReasoning = v; save(); },
+        }));
+
+        // Quota
+        const quotaStamp = el('small', 'cm-hint');
+        quotaStamp.id = 'claude_max_quota_time';
+        const quotaTools = el('div', 'cm-section-tools');
+        quotaTools.append(quotaStamp, iconButton('fa-rotate', '刷新额度', refreshQuota));
+        content.append(section('订阅额度', quotaTools));
+        const quotaBox = el('div', 'cm-quota');
+        quotaBox.id = 'claude_max_quota';
+        quotaBox.append(el('small', 'cm-hint', '展开面板时自动加载。'));
+        content.append(quotaBox);
+
+        // Advanced
+        const adv = el('details', 'cm-details');
+        adv.append(el('summary', null, '高级设置'));
+        const endpointField = el('div', 'cm-field');
+        endpointField.append(el('div', 'cm-field-label', '代理地址'));
+        const endpointInput = el('input', 'text_pole');
         endpointInput.type = 'text';
-        endpointInput.classList.add('text_pole');
         endpointInput.value = settings.endpoint;
+        endpointInput.placeholder = DEFAULT_ENDPOINT;
         endpointInput.addEventListener('input', () => {
             settings.endpoint = endpointInput.value || DEFAULT_ENDPOINT;
-            saveSettingsDebounced();
+            save();
         });
-        content.append(endpointLabel, endpointInput);
-
-        content.append(makeCheckboxRow('Enabled (inject Claude settings into requests)', 'claudeMaxEnabled', settings.enabled, (v) => {
-            settings.enabled = v; saveSettingsDebounced();
+        endpointField.append(endpointInput, el('small', 'cm-hint', `默认 ${DEFAULT_ENDPOINT}。修改了代理端口时同步改这里，再点一键连接。`));
+        adv.append(endpointField);
+        adv.append(toggleRow({
+            id: 'claudeMaxEnabled',
+            title: '把以上设置附加到请求',
+            desc: '只对指向本代理的连接生效，其他 Custom 端点不受影响。',
+            checked: settings.enabled,
+            onChange: (v) => { settings.enabled = v; save(); },
         }));
-
-        const [effortLabel, effortSelect] = makeSelectRow(
-            'Reasoning effort (Claude-native)', 'claudeMaxEffort', VALID_EFFORTS, settings.effort,
-            (v) => { settings.effort = VALID_EFFORTS.includes(v) ? v : 'auto'; saveSettingsDebounced(); },
-            { auto: 'Auto (model default)', xhigh: 'xhigh (deeper)', max: 'max (deepest)' },
-        );
-        content.append(effortLabel, effortSelect);
-        content.append(makeHelp(
-            'How hard Claude reasons before replying — low is fastest, max thinks longest and deepest. ' +
-            'Auto sends nothing (the model\'s default, roughly "high"). Applies from your next message. ' +
-            'Higher effort = better plot consistency on complex scenes, but slower replies and more quota.',
-        ));
-
-        const [thinkLabel, thinkSelect] = makeSelectRow(
-            'Thinking mode', 'claudeMaxThinking', VALID_THINKING, settings.thinking,
-            (v) => { settings.thinking = VALID_THINKING.includes(v) ? v : 'adaptive'; saveSettingsDebounced(); },
-            { adaptive: 'Adaptive (model decides — recommended)', on: 'Always on', off: 'Off (ignored by always-thinking models)' },
-        );
-        content.append(thinkLabel, thinkSelect);
-        content.append(makeHelp(
-            'Whether Claude uses extended thinking at all. Adaptive: the model thinks only when a message ' +
-            'warrants it — no latency tax on simple exchanges. Always on: every reply is preceded by thinking. ' +
-            'Off: no thinking (note: Fable 5/5.1 and Opus 4.7+ ALWAYS think — this setting can\'t disable it there, ' +
-            'and thinking is auto-disabled on other models when Max response length is under 2048 tokens).',
-        ));
-
-        content.append(makeCheckboxRow('Show reasoning (collapsible thinking box)', 'claudeMaxShowReasoning', settings.showReasoning, (v) => {
-            settings.showReasoning = v; saveSettingsDebounced();
+        adv.append(toggleRow({
+            id: 'claudeMaxResume',
+            title: '会话续接',
+            desc: '把聊天记录还原成真实多轮对话，角色区分更准，能用上提示缓存（更快、更省额度）。仅排查问题时关闭。',
+            checked: settings.useResume,
+            onChange: (v) => { settings.useResume = v; save(); },
         }));
-        content.append(makeHelp(
-            'Display toggle only — it does not change whether the model thinks. ON: the thinking summary ' +
-            'streams into SillyTavern\'s collapsible "thoughts" box above the reply (also enable "Show model ' +
-            'thoughts" in ST\'s user settings to see it). OFF: thinking stays hidden. Either way it is never ' +
-            'added to chat history or re-sent as context.',
-        ));
-
-        content.append(makeCheckboxRow('Identity mode (Claude Code preamble)', 'claudeMaxIdentity', settings.identityMode, (v) => {
-            settings.identityMode = v; saveSettingsDebounced();
+        adv.append(toggleRow({
+            id: 'claudeMaxIdentity',
+            title: '身份模式',
+            desc: '在角色卡前加上 Claude Code 官方前言，模型能正确说出自己是哪个型号，但会多耗 token 并带点编程助手味。角色扮演建议关闭。',
+            checked: settings.identityMode,
+            onChange: (v) => { settings.identityMode = v; save(); },
         }));
-        content.append(makeHelp(
-            'OFF (recommended): your character card / persona / world info is the ENTIRE system prompt — ' +
-            'nothing else frames the model. ON: prepends Anthropic\'s official Claude Code preamble before your ' +
-            'card, the same framing the claude CLI uses. Only reason to turn it on: without it, Claude models ' +
-            'lose self-awareness of which model they are (ask "are you Opus or Sonnet?" and they guess wrong). ' +
-            'It costs extra prompt tokens and leaks a coding-assistant flavor into roleplay, so leave it off ' +
-            'unless correct self-identification matters to you.',
-        ));
+        content.append(adv);
 
-        content.append(makeCheckboxRow('Session resume (multi-turn context + caching)', 'claudeMaxResume', settings.useResume, (v) => {
-            settings.useResume = v; saveSettingsDebounced();
-        }));
-        content.append(makeHelp(
-            'How your chat history reaches Claude. ON (recommended): each request replays the chat as a real ' +
-            'multi-turn Claude session — genuine user/assistant turns, which tracks who-said-what better and ' +
-            'lets Anthropic\'s prompt caching work (faster replies, less of your 5-hour/weekly quota burned on ' +
-            're-reading old context). Swipes and edits are handled naturally since history is rebuilt every ' +
-            'message. OFF: the whole chat is flattened into one "User:… / Assistant:…" text block — works, but ' +
-            'weaker turn awareness and no caching. Turn off only when troubleshooting.',
-        ));
-
-        const quotaHeader = document.createElement('div');
-        quotaHeader.classList.add('claude-max-quota-header');
-        const quotaTitle = document.createElement('b');
-        quotaTitle.textContent = 'Subscription quota';
-        const quotaRefresh = document.createElement('div');
-        quotaRefresh.classList.add('menu_button', 'fa-solid', 'fa-rotate', 'claude-max-quota-refresh');
-        quotaRefresh.title = 'Refresh quota';
-        quotaRefresh.addEventListener('click', refreshQuota);
-        quotaHeader.append(quotaTitle, quotaRefresh);
-        const quotaBox = document.createElement('div');
-        quotaBox.id = 'claude_max_quota';
-        quotaBox.textContent = 'Press refresh to load.';
-        content.append(quotaHeader, quotaBox);
-
-        const hint = document.createElement('small');
-        hint.classList.add('claude-max-hint');
-        hint.textContent = 'Set SillyTavern\'s native "Reasoning Effort" dropdown to Auto — this panel replaces it for Claude ' +
-            '(the native one downgrades Maximum to "high" and is dropped for Claude models anyway). ' +
-            'Temperature/Top-P are not supported on the subscription path (Agent SDK limitation).';
-        content.append(hint);
+        // Notes
+        const notes = el('details', 'cm-details');
+        notes.append(el('summary', null, '使用说明'));
+        const list = el('ul', 'cm-notes');
+        for (const line of [
+            '代理需要一直运行：在代理目录执行 npm start（原版酒馆装了服务器插件时会自动启动）。',
+            IS_TAURI
+                ? '首次连接时 TauriTavern 会弹出授权框，允许访问代理地址即可。'
+                : '从手机或其他设备打开酒馆时，额度和状态会经由酒馆服务器转发读取。',
+            '请把酒馆自带的「推理强度」保持为自动，由本面板的「思考深度」代替。',
+            '订阅通道不支持温度、Top-P 等采样参数（Agent SDK 限制）。',
+            '「(1M context)」模型提供 100 万上下文；部分套餐需要开通额外用量，失败时会自动退回普通版本一小时。',
+        ]) {
+            list.append(el('li', null, line));
+        }
+        notes.append(list);
+        content.append(notes);
     }
 
     // ── Boot ──
 
     const settings = getSettings();
     addExtensionSettings(settings);
+    refreshProxyStatus();
     eventSource.on(eventTypes.CHAT_COMPLETION_SETTINGS_READY, onSettingsReady);
-    console.log('[claude-max] UI extension loaded');
+    console.log(`[claude-max] UI extension loaded${IS_TAURI ? ' (TauriTavern mode)' : ''}`);
 })();

@@ -145,11 +145,11 @@ test('Package versions match across package.json and manifest.json', () => {
     const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8'));
     const manifest = JSON.parse(readFileSync(join(here, '..', 'manifest.json'), 'utf8'));
 
-    assert.equal(pkg.version, '2.2.0');
-    assert.equal(manifest.version, '2.2.0');
+    assert.equal(pkg.version, '2.3.0');
+    assert.equal(manifest.version, '2.3.0');
 });
 
-test('handleStatus returns current version 2.2.0', async () => {
+test('handleStatus returns current version 2.3.0', async () => {
     const { handleStatus } = await import('../lib/status.js');
     let responseData = null;
     const mockRes = {
@@ -166,6 +166,24 @@ test('handleStatus returns current version 2.2.0', async () => {
     };
     await handleStatus({}, mockRes);
     assert.ok(responseData);
-    assert.equal(responseData.version, '2.2.0');
+    assert.equal(responseData.version, '2.3.0');
     assert.equal(responseData.plugin, 'claude-subscription');
+});
+
+test('Opus 5.5 is catalogued as always-thinking with a 1M variant', () => {
+    const info = parseModelRequest('claude-opus-5-5');
+    assert.equal(info.tier, 'opus');
+    assert.equal(info.adaptiveOnly, true);
+    assert.equal(info.envPins.ANTHROPIC_DEFAULT_OPUS_MODEL, 'claude-opus-5-5');
+    const oneM = parseModelRequest('claude-opus-5-5[1m]');
+    assert.equal(oneM.sdkModel, 'opus[1m]');
+});
+
+test('Sonnet 5 rejects budgets but can turn thinking off (noBudget)', () => {
+    const info = parseModelRequest('claude-sonnet-5');
+    assert.equal(info.tier, 'sonnet');
+    assert.equal(info.adaptiveOnly, false);
+    assert.equal(info.noBudget, true);
+    assert.equal(parseModelRequest('claude-sonnet-4-6').noBudget, false);
+    assert.equal(parseModelRequest('claude-opus-5').noBudget, false);
 });
