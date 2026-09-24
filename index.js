@@ -59,6 +59,7 @@
         showReasoning: true,
         identityMode: false,
         useResume: true,
+        inlineSystem: true,
     };
 
     function getSettings() {
@@ -119,6 +120,7 @@
         lines.push(`  show_reasoning: ${settings.showReasoning}`);
         lines.push(`  identity_mode: ${settings.identityMode}`);
         lines.push(`  use_resume: ${settings.useResume}`);
+        lines.push(`  system_placement: ${settings.inlineSystem ? 'inline' : 'hoist'}`);
         return lines.join('\n');
     }
 
@@ -567,6 +569,13 @@
             desc: '把聊天记录还原成真实多轮对话，角色区分更准，能用上提示缓存（更快、更省额度）。仅排查问题时关闭。',
             checked: settings.useResume,
             onChange: (v) => { settings.useResume = v; save(); },
+        }));
+        adv.append(toggleRow({
+            id: 'claudeMaxInlineSystem',
+            title: '深度注入保持原位',
+            desc: '预设里「深度 N」的条目、世界书深度条目、作者注释留在聊天记录里原来的位置，和酒馆直连 Claude 的做法一致，靠近结尾的提醒才有效。关闭则全部提到开头；那样的话只要其中有一条变化（比如世界书被触发），整个系统提示词的缓存都会失效。',
+            checked: settings.inlineSystem,
+            onChange: (v) => { settings.inlineSystem = v; save(); },
         }));
         adv.append(toggleRow({
             id: 'claudeMaxIdentity',
