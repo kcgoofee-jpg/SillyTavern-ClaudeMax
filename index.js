@@ -100,6 +100,10 @@
                 keyField.val('sk-no-key-needed');
             }
             $('#chat_completion_source').val('custom').trigger('change');
+            // The proxy sorts out roles itself. ST's merge/strict post-processing
+            // turns the whole preset into a user message (after the first
+            // assistant-role preset entry), which kills prompt caching.
+            $('#custom_prompt_post_processing').val('').trigger('change');
             $('#api_button_openai').trigger('click');
             toastr?.success?.('正在连接，模型列表稍后出现在「API 连接」的模型下拉框中。', 'Claude Max');
             if (IS_TAURI) {
@@ -133,6 +137,28 @@
             '建议换用改成原生思考的预设，或改用 Opus 5。',
             'Claude Max',
             { timeOut: 15000 },
+        );
+    }
+
+    // ST's Custom-endpoint "prompt post-processing" (merge / semi / strict)
+    // merges the preset into user messages before the proxy sees it: the
+    // system prompt shrinks to the first entry, the preset loses system
+    // authority, and world info changing every turn breaks the cache for
+    // the whole conversation.
+    const POST_PROCESSING_LABELS = {
+        merge: '合并连续角色', semi: '半严格', strict: '严格', single: '单条用户消息',
+        merge_tools: '合并连续角色（工具）', semi_tools: '半严格（工具）', strict_tools: '严格（工具）',
+    };
+    let warnedPostProcessing = false;
+    function postProcessingCheck(data) {
+        const mode = String(data.custom_prompt_post_processing ?? '');
+        if (!mode || warnedPostProcessing) return;
+        warnedPostProcessing = true;
+        toastr?.warning?.(
+            `酒馆的「提示词后处理」现在是「${POST_PROCESSING_LABELS[mode] ?? mode}」：它会把预设合并成用户消息，预设失去系统权重，而且世界书一变整段缓存就失效。` +
+            '建议改成「无」（API 连接 → 提示词后处理），或重新点一次 Claude Max 面板的「一键连接」自动改好。',
+            'Claude Max',
+            { timeOut: 20000 },
         );
     }
 
@@ -195,6 +221,7 @@
                 .trim();
             data.custom_include_body = (cleaned ? cleaned + '\n' : '') + buildIncludeBodyYaml(settings);
             preflightCheck(data);
+            postProcessingCheck(data);
         } catch (err) {
             console.error('[claude-max] failed to inject settings', err);
         }
