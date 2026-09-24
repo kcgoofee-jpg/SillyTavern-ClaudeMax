@@ -60,7 +60,6 @@
         identityMode: false,
         useResume: true,
         inlineSystem: true,
-        tailSystem: false,
         debugDump: false,
     };
 
@@ -174,7 +173,6 @@
         showReasoning: { label: '显示思考过程', valid: (v) => typeof v === 'boolean' },
         useResume: { label: '会话续接', valid: (v) => typeof v === 'boolean' },
         inlineSystem: { label: '深度注入保持原位', valid: (v) => typeof v === 'boolean' },
-        tailSystem: { label: '深度注入放到结尾', valid: (v) => typeof v === 'boolean' },
         identityMode: { label: '身份模式', valid: (v) => typeof v === 'boolean' },
     };
 
@@ -205,7 +203,7 @@
         lines.push(`  show_reasoning: ${settings.showReasoning}`);
         lines.push(`  identity_mode: ${settings.identityMode}`);
         lines.push(`  use_resume: ${settings.useResume}`);
-        lines.push(`  system_placement: ${!settings.inlineSystem ? 'hoist' : settings.tailSystem ? 'tail' : 'inline'}`);
+        lines.push(`  system_placement: ${settings.inlineSystem ? 'inline' : 'hoist'}`);
         if (settings.debugDump) lines.push('  debug_dump: true');
         return lines.join('\n');
     }
@@ -671,13 +669,6 @@
             desc: '预设里「深度 N」的条目、世界书深度条目、作者注释留在聊天记录里原来的位置，和酒馆直连 Claude 的做法一致，靠近结尾的提醒才有效。关闭则全部提到开头；那样的话只要其中有一条变化（比如世界书被触发），整个系统提示词的缓存都会失效。',
             checked: settings.inlineSystem,
             onChange: (v) => { settings.inlineSystem = v; save(); },
-        }));
-        adv.append(toggleRow({
-            id: 'claudeMaxTailSystem',
-            title: '深度注入放到结尾（省缓存）',
-            desc: '在「保持原位」的基础上，把这些注入统一放到最后一条消息里。深度注入每轮都会往后挪一格，留在原位时，它之后的聊天记录每轮都要重写缓存；放到结尾后，旧楼层每轮完全不变，只写新增的内容。代价是提醒离回复更近，不再是预设作者定的深度。',
-            checked: settings.tailSystem,
-            onChange: (v) => { settings.tailSystem = v; save(); },
         }));
         adv.append(toggleRow({
             id: 'claudeMaxIdentity',

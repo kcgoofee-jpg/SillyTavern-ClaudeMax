@@ -112,3 +112,10 @@ test('two chats with the same card greeting are kept apart', () => {
     assert.equal(other.firstTurn, true);
     assert.notEqual(other.chat, diagnoseCache(sys, [...open, U('问她们有没有系统'), A('a'), U('u2')]).chat);
 });
+
+test('chat key survives an injection dropping off the first user message', () => {
+    __resetCacheDiag();
+    const sys = '规则'.repeat(1000);
+    diagnoseCache(sys, [A('greeting'), U('问她们有没有系统\n\n【文风提醒】')]);
+    assert.equal(diagnoseCache(sys, [A('greeting'), U('问她们有没有系统'), A('a1'), U('u2\n\n【文风提醒】')]).firstTurn, false);
+});
