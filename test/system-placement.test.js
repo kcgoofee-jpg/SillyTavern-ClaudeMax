@@ -66,3 +66,26 @@ test('buildSystemPrompt splits at the boundary only when asked', async () => {
     assert.deepEqual(buildSystemPrompt('abcdef', false, 3, 'B'), { type: 'custom', prompt: ['abc', 'B', 'def'], snapshot: false });
     assert.equal(buildSystemPrompt('abcdef', false, 6, 'B'), 'abcdef');
 });
+
+test('tail mode: depth injections move to the end so older turns stay identical', () => {
+    const turn = (n) => {
+        const msgs = [{ role: 'system', content: 'preset' }, { role: 'assistant', content: 'greeting' }];
+        for (let i = 1; i <= n; i++) msgs.push({ role: 'user', content: `u${i}` }, { role: 'assistant', content: `a${i}` });
+        msgs.push({ role: 'user', content: `u${n + 1}` });
+        msgs.splice(msgs.length - 2, 0, { role: 'system', content: 'STYLE' }); // depth 2
+        return inlineLateSystemMessages(msgs, { tail: true });
+    };
+    const t2 = turn(2), t3 = turn(3);
+    assert.deepEqual(t2.at(-1), { role: 'user', content: 'u3\n\nSTYLE' });
+    assert.equal(t2.filter((m) => m.role !== 'system').slice(0, -1).map((m) => m.content).join('|'), 'greeting|u1|a1|u2|a2');
+    // everything before turn 2's final message is unchanged in turn 3
+    const prefix = (x) => x.slice(0, t2.length - 1).map((m) => `${m.role}:${m.content}`).join('\n');
+    assert.equal(prefix(t3), prefix(t2));
+});
+
+test('tail mode keeps a trailing prefill last', () => {
+    const out = inlineLateSystemMessages([
+        { role: 'system', content: 'p' }, { role: 'user', content: 'u1' }, { role: 'system', content: 'NOTE' }, { role: 'assistant', content: 'prefill' },
+    ], { tail: true });
+    assert.deepEqual(out.slice(-2), [{ role: 'user', content: 'u1\n\nNOTE' }, { role: 'assistant', content: 'prefill' }]);
+});
