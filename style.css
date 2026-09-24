@@ -398,3 +398,18 @@
 .claude-max [hidden] {
     display: none !important;
 }
+
+.claude-max .cm-oneshot-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.claude-max .cm-oneshot-row .cm-field-label {
+    margin-right: 4px;
+}
+
+.claude-max .cm-oneshot .cm-seg {
+    flex: 1 1 auto;
+}

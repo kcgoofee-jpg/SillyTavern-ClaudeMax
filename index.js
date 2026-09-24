@@ -196,9 +196,18 @@
 
     // ── Per-request injection (CHAT_COMPLETION_SETTINGS_READY) ──
 
+    // One-shot effort for the next reply (M2): kept in memory only, used by
+    // every request until a chat message arrives, then cleared.
+    let nextEffort = null;
+
+    function effectiveEffort(settings) {
+        return nextEffort ?? settings.effort;
+    }
+
     function buildIncludeBodyYaml(settings) {
         const lines = ['claude_subscription:'];
-        if (settings.effort !== 'auto') lines.push(`  effort: ${settings.effort}`);
+        const effort = effectiveEffort(settings);
+        if (effort !== 'auto') lines.push(`  effort: ${effort}`);
         lines.push(`  thinking: ${settings.thinking}`);
         lines.push(`  show_reasoning: ${settings.showReasoning}`);
         lines.push(`  identity_mode: ${settings.identityMode}`);
@@ -266,6 +275,42 @@
         btn.tabIndex = 0;
         btn.addEventListener('click', onClick);
         return btn;
+    }
+
+    const EFFORT_LABEL = { auto: '自动', low: '低', medium: '中', high: '高', xhigh: '超高', max: '最大' };
+
+    /** 「下一轮临时加深」：只作用于下一条回复，收到回复后自动恢复。 */
+    function oneShotEffortRow(settings) {
+        const wrap = el('div', 'cm-field cm-oneshot');
+        wrap.id = 'claude_max_oneshot';
+        const row = el('div', 'cm-oneshot-row');
+        row.append(el('span', 'cm-field-label', '下一轮临时'));
+        const status = el('small', 'cm-hint');
+        const group = el('div', 'cm-seg');
+        row.append(group);
+        const render = () => {
+            group.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.effort === (nextEffort ?? '')));
+            status.textContent = nextEffort
+                ? `下一条回复用「${EFFORT_LABEL[nextEffort]}」，收到后自动恢复为「${EFFORT_LABEL[settings.effort]}」。换思考深度会让这一轮和恢复后的一轮各重写一次缓存。`
+                : '关键剧情想让模型多想一会儿时点一下，只影响下一条回复。';
+        };
+        for (const [value, label] of [['high', '高'], ['xhigh', '超高'], ['', '取消']]) {
+            const b = el('button', 'cm-seg-btn', label);
+            b.type = 'button';
+            b.dataset.effort = value;
+            b.addEventListener('click', () => { nextEffort = value || null; render(); });
+            group.append(b);
+        }
+        wrap.append(row, status);
+        wrap.refresh = render;
+        render();
+        return wrap;
+    }
+
+    function clearOneShotEffort() {
+        if (!nextEffort) return;
+        nextEffort = null;
+        document.getElementById('claude_max_oneshot')?.refresh?.();
     }
 
     /** Segmented control: one choice out of a few, hint text follows it. */
@@ -596,6 +641,7 @@
             current: settings.effort,
             onChange: (v) => { settings.effort = VALID_EFFORTS.includes(v) ? v : 'auto'; save(); },
         }));
+        content.append(oneShotEffortRow(settings));
         content.append(segmented({
             label: '思考模式',
             options: THINKING_OPTIONS,
@@ -732,6 +778,7 @@
         const box = document.getElementById('claude_max_stats');
         if (box && box.offsetParent !== null) setTimeout(refreshStats, 500);
     };
+    eventSource.on(eventTypes.MESSAGE_RECEIVED, clearOneShotEffort);
     eventSource.on(eventTypes.MESSAGE_RECEIVED, refreshIfOpen);
     eventSource.on(eventTypes.CHAT_CHANGED, refreshIfOpen);
     eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, applyPresetRecommendation);
