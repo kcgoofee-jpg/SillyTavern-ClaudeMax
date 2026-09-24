@@ -128,8 +128,8 @@
         if (!/<\/?(thinking|cot)>/i.test(text)) return;
         warnedPresets.add(preset);
         toastr?.warning?.(
-            `当前预设「${preset}」要求模型把思考过程（<thinking>/<cot>）写进回复，Opus 5.5 的安全分类器很可能拦截这类请求（reasoning_extraction）。` +
-            '建议换用改成原生思考的预设，或改用 Opus 5 / Fable。',
+            `当前预设「${preset}」要求模型把思考过程（<thinking>/<cot>）写进回复，Opus 5.5 的安全分类器很可能拦截这类请求（reasoning_extraction），而且被拦也照样计费。` +
+            '建议换用改成原生思考的预设，或改用 Opus 5。',
             'Claude Max',
             { timeOut: 15000 },
         );
@@ -652,6 +652,7 @@
                 ? '首次连接时 TauriTavern 会弹出授权框，允许访问代理地址即可。'
                 : '从手机或其他设备打开酒馆时，额度和状态会经由酒馆服务器转发读取。',
             '请把酒馆自带的「推理强度」保持为自动，由本面板的「思考深度」代替。',
+            '修改「思考深度」后的下一轮，提示词缓存会失效一次（官方说明），不要频繁来回切换。',
             '订阅通道不支持温度、Top-P 等采样参数（Agent SDK 限制）。',
             '「(1M context)」模型提供 100 万上下文；部分套餐需要开通额外用量，失败时会自动退回普通版本一小时。',
         ]) {
