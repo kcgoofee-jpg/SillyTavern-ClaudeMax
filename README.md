@@ -1,4 +1,6 @@
-# SillyTavern — Claude (Subscription) Proxy
+# SillyTavern — Claude Max（订阅代理）
+
+> 基于 [LukaTheHero/SillyTavern-ClaudeSubscription](https://github.com/LukaTheHero/SillyTavern-ClaudeSubscription)（AGPL-3.0）独立维护，感谢原作者。
 
 Use your **Anthropic Pro / Max subscription** for SillyTavern chat instead of
 paying for API credits. A SillyTavern **Server Plugin** routes requests
@@ -19,8 +21,8 @@ v2.3 起，代理可以**独立运行**，不再依赖 SillyTavern 的 Node 服�
 
 1. **安装并登录**（只需一次）：
    ```bash
-   git clone https://github.com/kcgoofee-jpg/SillyTavern-ClaudeSubscription
-   cd SillyTavern-ClaudeSubscription
+   git clone https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax
+   cd SillyTavern-ClaudeMax
    npm install        # 不要加 --omit=optional，Claude CLI 就在 optional 依赖里
    npm run login      # 用 SDK 自带的 Claude CLI 登录 Pro/Max 订阅
    npm run auth       # 查看登录状态
@@ -103,8 +105,8 @@ On the same machine SillyTavern runs on:
 From your SillyTavern install directory (the one containing `server.js`):
 
 ```
-node plugins.js install https://github.com/kcgoofee-jpg/SillyTavern-ClaudeSubscription
-cd plugins/SillyTavern-ClaudeSubscription
+node plugins.js install https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax
+cd plugins/SillyTavern-ClaudeMax
 npm install
 ```
 

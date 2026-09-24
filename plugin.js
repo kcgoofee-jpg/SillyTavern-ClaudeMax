@@ -98,11 +98,14 @@ function installUiExtension() {
 
         // Dialog-installed clone present? It's git-managed by ST — let it own
         // the extension and skip the auto-copy.
-        const dialogClones = [
-            join(thirdParty, 'SillyTavern-ClaudeSubscription'),
-            join(stRoot, 'data', 'default-user', 'extensions', 'SillyTavern-ClaudeSubscription'),
-        ];
-        if (dialogClones.some((dir) => existsSync(join(dir, 'manifest.json')))) {
+        // Old repo name first, then the current one. A git clone at the
+        // auto-install target (the repo is now named SillyTavern-ClaudeMax
+        // too) is ST-managed — never copy files over it.
+        const dialogClones = ['SillyTavern-ClaudeSubscription', UI_EXTENSION_DIR_NAME].flatMap((name) => [
+            join(thirdParty, name),
+            join(stRoot, 'data', 'default-user', 'extensions', name),
+        ]);
+        if (dialogClones.some((dir) => existsSync(join(dir, 'manifest.json')) && (existsSync(join(dir, '.git')) || !dir.endsWith(UI_EXTENSION_DIR_NAME)))) {
             console.log(`[${info.id}] UI extension already installed via SillyTavern's extension installer — auto-install skipped`);
             return;
         }
