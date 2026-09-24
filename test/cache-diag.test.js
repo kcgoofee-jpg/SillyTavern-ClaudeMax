@@ -96,7 +96,8 @@ test('explainCache: split-covered change, history rewrite, effort switch', () =>
     const c = explainCache(e({ cacheDiag: { firstTurn: false, systemChanged: true, systemDiffAt: 36000, systemDiffLabel: '<world_info>', splitAt: 35000, historyDiffAt: 5, historyLen: 12 } }), e({}));
     assert.equal(c.hitPct, 75);
     assert.match(c.reasons[0], /前 35,000 字已单独缓存/);
-    assert.match(c.reasons[1], /第 6 \/ 12 条/);
+    assert.match(c.reasons.join('\n'), /第 6 \/ 12 条/);
+    assert.match(c.reasons.join('\n'), /世界书条目改成常驻/);
     const sw = explainCache(e({ cacheReadTokens: 0, cacheDiag: { firstTurn: false, systemChanged: false, historyDiffAt: null } }), e({ effort: 'medium' }));
     assert.match(sw.reasons.join(), /思考深度/);
     assert.match(explainCache(e({ cacheDiag: { firstTurn: true } })).reasons[0], /第一轮/);
