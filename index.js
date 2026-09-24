@@ -445,6 +445,21 @@
             } else {
                 box.append(statsRow('今天', data.today), statsRow('近 7 天', data.week));
             }
+            const diag = data.lastRequest?.cacheDiag;
+            if (diag && !diag.firstTurn && data.lastRequest.ok) {
+                const read = data.lastRequest.cacheReadTokens ?? 0;
+                const wrote = data.lastRequest.cacheCreationTokens ?? 0;
+                if (diag.systemChanged) {
+                    const tip = el('div', 'cm-last-error cm-tip');
+                    tip.append(
+                        el('div', 'cm-last-error-title', `最近一轮缓存失效：系统提示词从第 ${diag.systemDiffAt.toLocaleString()} 字开始变了` + (diag.systemDiffLabel ? `（${diag.systemDiffLabel} 内）` : '')),
+                        el('small', 'cm-hint', `这一轮读取缓存 ${fmtK(read)}、重新写入 ${fmtK(wrote)} token。常见原因：世界书按关键词触发、随机宏（{{random}} 等）、每轮更新的摘要或状态。变化的内容越靠后，缓存能保住的越多。`),
+                    );
+                    box.append(tip);
+                } else if (read > 0) {
+                    box.append(el('small', 'cm-hint', `最近一轮命中缓存 ${fmtK(read)} token，系统提示词与上一轮相同。`));
+                }
+            }
             if (data.lastError) {
                 const err = el('div', 'cm-last-error');
                 err.append(
