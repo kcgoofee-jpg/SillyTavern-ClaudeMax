@@ -413,3 +413,18 @@
 .claude-max .cm-oneshot .cm-seg {
     flex: 1 1 auto;
 }
+
+.claude-max-debug-anchor, .cm-debug-view { text-align: left; }
+
+.cm-debug-view .cm-debug-pre {
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 50vh;
+    overflow: auto;
+    font-size: 0.85em;
+    padding: 8px;
+    border-radius: 6px;
+    background: color-mix(in srgb, currentColor 6%, transparent);
+}
+
+.cm-debug-view .cm-details { margin: 6px 0; }

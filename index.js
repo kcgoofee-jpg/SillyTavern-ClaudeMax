@@ -38,6 +38,14 @@
     }
     window.__claudeMaxUiLoaded = true;
 
+    // Shared reply checks (lib/chat-check.js, also used by the tests). Loaded
+    // lazily so a copy of this file without lib/ still works — the check-up
+    // section then just says it is unavailable.
+    let chatCheck = null;
+    import(new URL('./lib/chat-check.js', import.meta.url).href)
+        .then((m) => { chatCheck = m; runCheckup(); })
+        .catch(() => { /* check-up unavailable */ });
+
     const ctx = SillyTavern.getContext();
     const { eventSource, eventTypes, extensionSettings, saveSettingsDebounced } = ctx;
 
@@ -61,6 +69,8 @@
         useResume: true,
         inlineSystem: true,
         debugDump: false,
+        checkupToast: true,      // 本轮体检发现问题时弹提示
+        leakWords: {},           // 角色卡 → 隐藏设定关键词（逗号分隔）
     };
 
     function getSettings() {
@@ -311,6 +321,82 @@
         if (!nextEffort) return;
         nextEffort = null;
         document.getElementById('claude_max_oneshot')?.refresh?.();
+    }
+
+    // ── 本轮体检（M4）──
+
+    function currentCharKey() {
+        const ctx = SillyTavern.getContext();
+        return ctx.groupId ? `group:${ctx.groupId}` : (ctx.characters?.[ctx.characterId]?.avatar ?? 'default');
+    }
+
+    function runCheckup({ toast = false } = {}) {
+        const box = document.getElementById('claude_max_checkup');
+        if (!chatCheck) {
+            box?.replaceChildren(el('small', 'cm-hint', '体检模块没有加载（扩展文件不完整），重新安装扩展即可。'));
+            return;
+        }
+        const settings = getSettings();
+        const ctx = SillyTavern.getContext();
+        const chat = ctx.chat ?? [];
+        const ai = chat.filter((m) => !m.is_user && !m.is_system);
+        if (chat.length < 2 || !ai.length) {
+            box?.replaceChildren(el('small', 'cm-hint', '还没有 AI 回复。每条回复生成完会自动体检。'));
+            return;
+        }
+        const prompts = ctx.chatCompletionSettings?.prompts ?? [];
+        const leaks = String(settings.leakWords?.[currentCharKey()] ?? '').split(/[,，、\s]+/).filter(Boolean);
+        const last = ai[ai.length - 1];
+        const prev = ai.length > 1 ? ai[ai.length - 2] : null;
+        const r = chatCheck.checkReply({
+            mes: last.mes ?? '', prevMes: prev?.mes ?? null,
+            words: chatCheck.wordRangeFromPrompts(prompts), banned: chatCheck.bannedFromPrompts(prompts), leaks,
+        });
+        if (box) {
+            const card = el('div', r.issues.length ? 'cm-last-error cm-tip' : 'cm-cache');
+            card.append(el('div', 'cm-last-error-title', r.issues.length
+                ? `最新回复 · 正文 ${r.chars} 字 · ${r.issues.length} 个问题`
+                : `最新回复 · 正文 ${r.chars} 字 · 没发现问题`));
+            for (const i of r.issues) card.append(el('small', 'cm-hint', `· ${i.text}`));
+            box.replaceChildren(card);
+        }
+        if (toast && r.issues.length && settings.checkupToast) {
+            toastr?.warning?.(r.issues.map((i) => i.text).join('<br>'), 'Claude Max · 本轮体检', { timeOut: 9000, escapeHtml: false });
+        }
+    }
+
+    async function showDebugRequest() {
+        let data;
+        try {
+            const res = await fetchProxy('/debug', '/v1/debug/last');
+            data = await res.json();
+        } catch (err) {
+            toastr?.error?.(`读取失败：${err instanceof Error ? err.message : err}`, 'Claude Max');
+            return;
+        }
+        if (!data?.ok) {
+            toastr?.info?.(data?.error ?? '还没有保存的请求。', 'Claude Max', { timeOut: 8000 });
+            return;
+        }
+        const wrap = el('div', 'cm-debug-view');
+        const s = data.settings ?? {};
+        wrap.append(el('div', 'cm-last-error-title',
+            `${new Date(data.at).toLocaleString('zh-CN')} · ${data.model} · 思考深度 ${s.effort ?? '默认'} · 深度注入${s.systemPlacement === 'hoist' ? '提到系统提示词' : '保持原位'}`));
+        wrap.append(el('small', 'cm-hint', `系统提示词 ${data.systemMarked.length.toLocaleString()} 字${s.systemSplitAt ? `，缓存分界在第 ${s.systemSplitAt.toLocaleString()} 字（文中有标记）` : ''}；聊天记录 ${data.messages.length} 条。`));
+        const sys = el('details', 'cm-details');
+        sys.append(el('summary', null, '系统提示词'), el('pre', 'cm-debug-pre', data.systemMarked));
+        wrap.append(sys);
+        const hist = el('details', 'cm-details');
+        hist.append(el('summary', null, '聊天记录（代理整理后的顺序）'));
+        data.messages.forEach((m, i) => {
+            const text = typeof m.content === 'string' ? m.content : JSON.stringify(m.content);
+            const item = el('details', 'cm-details');
+            item.append(el('summary', null, `${i + 1}. ${m.role === 'user' ? '用户' : 'AI'} · ${text.length} 字`), el('pre', 'cm-debug-pre', text));
+            hist.append(item);
+        });
+        wrap.append(hist);
+        const ctx = SillyTavern.getContext();
+        await ctx.callGenericPopup(wrap, ctx.POPUP_TYPE.TEXT, '', { wide: true, large: true, allowVerticalScrolling: true });
     }
 
     /** Segmented control: one choice out of a few, hint text follows it. */
@@ -680,6 +766,33 @@
         cotTip.hidden = true;
         content.append(cotTip);
 
+        // Reply check-up
+        const checkTools = el('div', 'cm-section-tools');
+        checkTools.append(iconButton('fa-stethoscope', '重新体检最新回复', () => runCheckup()));
+        content.append(section('本轮体检', checkTools));
+        const checkBox = el('div', 'cm-stats');
+        checkBox.id = 'claude_max_checkup';
+        content.append(checkBox);
+        const leakField = el('div', 'cm-field');
+        leakField.append(el('div', 'cm-field-label', '隐藏设定关键词'));
+        const leakInput = el('input', 'text_pole');
+        leakInput.type = 'text';
+        leakInput.placeholder = '如：植物人, 医学院（只对当前角色卡生效）';
+        leakInput.value = settings.leakWords?.[currentCharKey()] ?? '';
+        leakInput.addEventListener('input', () => {
+            settings.leakWords = { ...(settings.leakWords ?? {}), [currentCharKey()]: leakInput.value };
+            save();
+        });
+        leakField.append(leakInput, el('small', 'cm-hint', '剧情揭示前不该出现的词。正文里出现时体检会提醒。字数范围和禁词表自动从当前预设读取。'));
+        content.append(leakField);
+        content.append(toggleRow({
+            id: 'claudeMaxCheckupToast',
+            title: '发现问题时弹出提示',
+            desc: '每条回复生成完自动体检；关闭后只在这里显示。',
+            checked: settings.checkupToast,
+            onChange: (v) => { settings.checkupToast = v; save(); },
+        }));
+
         // Advanced
         const adv = el('details', 'cm-details');
         adv.append(el('summary', null, '高级设置'));
@@ -730,6 +843,10 @@
             checked: settings.debugDump,
             onChange: (v) => { settings.debugDump = v; save(); },
         }));
+        const debugBtn = el('div', 'menu_button cm-connect');
+        debugBtn.append(el('i', 'fa-solid fa-magnifying-glass'), document.createTextNode(' 查看实际发给模型的内容'));
+        debugBtn.addEventListener('click', showDebugRequest);
+        adv.append(debugBtn);
         content.append(adv);
 
         // Notes
@@ -779,6 +896,8 @@
         if (box && box.offsetParent !== null) setTimeout(refreshStats, 500);
     };
     eventSource.on(eventTypes.MESSAGE_RECEIVED, clearOneShotEffort);
+    eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED ?? eventTypes.MESSAGE_RECEIVED, () => setTimeout(() => runCheckup({ toast: true }), 200));
+    eventSource.on(eventTypes.CHAT_CHANGED, () => setTimeout(() => runCheckup(), 200));
     eventSource.on(eventTypes.MESSAGE_RECEIVED, refreshIfOpen);
     eventSource.on(eventTypes.CHAT_CHANGED, refreshIfOpen);
     eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, applyPresetRecommendation);

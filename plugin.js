@@ -32,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 import { handleStatus } from './lib/status.js';
 import { handleQuota } from './lib/oauth.js';
 import { handleStats } from './lib/usage-stats.js';
+import { handleDebugLast } from './lib/debug-dump.js';
 import { startStandaloneListener, stopStandaloneListener, probeExistingProxy, portInUseMessage } from './lib/listener.js';
 
 const DEFAULT_PORT = 8901;
@@ -63,7 +64,7 @@ function isNewerVersion(a, b) {
 // style.css) so the repo can ALSO be installed directly through
 // SillyTavern's "Install extension" dialog, which requires a root
 // manifest.json. Only these files make up the extension.
-const UI_EXTENSION_FILES = ['manifest.json', 'index.js', 'style.css'];
+const UI_EXTENSION_FILES = ['manifest.json', 'index.js', 'style.css', 'lib/chat-check.js'];
 
 /**
  * Install or update the companion UI extension into SillyTavern's
@@ -123,6 +124,7 @@ function installUiExtension() {
 
         mkdirSync(target, { recursive: true });
         for (const file of UI_EXTENSION_FILES) {
+            mkdirSync(dirname(join(target, file)), { recursive: true });
             cpSync(join(here, file), join(target, file));
         }
         console.log(
@@ -143,6 +145,7 @@ export async function init(router) {
     router.get('/status', handleStatus);
     router.get('/quota', handleQuota);
     router.get('/stats', handleStats);
+    router.get('/debug', handleDebugLast);
 
     installUiExtension();
 
