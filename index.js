@@ -123,7 +123,8 @@
     // prescribe a <thinking>/<cot> block in the output trip it every time.
     const warnedPresets = new Set();
     function preflightCheck(data) {
-        if (!/opus-5-5/i.test(String(data.model ?? ''))) return;
+        // Verified live: Opus 5 refuses these too, not only Opus 5.5 (the docs say 5.5 only).
+        if (!/opus-5/i.test(String(data.model ?? ''))) return;
         const preset = SillyTavern.getContext().chatCompletionSettings?.preset_settings_openai ?? '';
         if (warnedPresets.has(preset)) return;
         const text = (data.messages ?? [])
@@ -133,8 +134,8 @@
         if (!/<\/?(thinking|cot)>/i.test(text)) return;
         warnedPresets.add(preset);
         toastr?.warning?.(
-            `当前预设「${preset}」要求模型把思考过程（<thinking>/<cot>）写进回复，Opus 5.5 的安全分类器很可能拦截这类请求（reasoning_extraction），而且被拦也照样计费。` +
-            '建议换用改成原生思考的预设，或改用 Opus 5。',
+            `当前预设「${preset}」要求模型把思考过程（<thinking>/<cot>）写进回复，Opus 5 / Opus 5.5 的安全分类器会拦截这类请求（reasoning_extraction），而且被拦也照样计费。` +
+            '建议换用改成原生思考的预设（十四行诗3.0-Claude），想看写在正文里的思维链就改用 Opus 4.6 并把思考模式设为关闭。',
             'Claude Max',
             { timeOut: 15000 },
         );
@@ -542,7 +543,7 @@
 
     const EFFORT_OPTIONS = [
         { value: 'auto', label: '自动', hint: '不指定，使用模型默认值（多数模型为「高」，Opus 5.5 为「中」）。' },
-        { value: 'low', label: '低', hint: '最快、最省额度，适合日常闲聊。' },
+        { value: 'low', label: '低', hint: '最快、最省额度。Opus 5.5 的耗时主要花在思考上，嫌慢先试这一档。' },
         { value: 'medium', label: '中', hint: '速度与质量的平衡点。' },
         { value: 'high', label: '高', hint: '复杂剧情更连贯，回复稍慢。' },
         { value: 'xhigh', label: '超高', hint: '更深入的推理，回复更慢、更耗额度。' },
