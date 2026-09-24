@@ -102,3 +102,13 @@ test('explainCache: split-covered change, history rewrite, effort switch', () =>
     assert.match(explainCache(e({ cacheDiag: { firstTurn: true } })).reasons[0], /第一轮/);
     assert.equal(explainCache({ ok: false }), null);
 });
+
+test('two chats with the same card greeting are kept apart', () => {
+    __resetCacheDiag();
+    const sys = '规则'.repeat(1000);
+    const open = [A('三人XX ack'), A('greeting')];
+    diagnoseCache(sys, [...open, U('问她们有没有系统')]);
+    const other = diagnoseCache(sys, [...open, U('先去溪边')]);
+    assert.equal(other.firstTurn, true);
+    assert.notEqual(other.chat, diagnoseCache(sys, [...open, U('问她们有没有系统'), A('a'), U('u2')]).chat);
+});
