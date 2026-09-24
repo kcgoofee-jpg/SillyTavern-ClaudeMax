@@ -92,7 +92,7 @@ On the same machine SillyTavern runs on:
 From your SillyTavern install directory (the one containing `server.js`):
 
 ```
-node plugins.js install https://github.com/LukaTheHero/SillyTavern-ClaudeSubscription
+node plugins.js install https://github.com/kcgoofee-jpg/SillyTavern-ClaudeSubscription
 cd plugins/SillyTavern-ClaudeSubscription
 npm install
 ```
