@@ -655,3 +655,4 @@ body.cm-compact-qr #qr--bar:has(> .qr--buttons[id^="script_container_"]) {
     justify-content: center;
     gap: 5px;
 }
+.claude-max small.cm-warn { color: var(--cm-warn); display: block; }

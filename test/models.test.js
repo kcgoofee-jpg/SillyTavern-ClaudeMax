@@ -145,11 +145,11 @@ test('Package versions match across package.json and manifest.json', () => {
     const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8'));
     const manifest = JSON.parse(readFileSync(join(here, '..', 'manifest.json'), 'utf8'));
 
-    assert.equal(pkg.version, '2.14.0');
-    assert.equal(manifest.version, '2.14.0');
+    assert.equal(pkg.version, '2.14.1');
+    assert.equal(manifest.version, '2.14.1');
 });
 
-test('handleStatus returns current version 2.14.0', async () => {
+test('handleStatus returns current version 2.14.1', async () => {
     const { handleStatus } = await import('../lib/status.js');
     let responseData = null;
     const mockRes = {
@@ -166,7 +166,7 @@ test('handleStatus returns current version 2.14.0', async () => {
     };
     await handleStatus({}, mockRes);
     assert.ok(responseData);
-    assert.equal(responseData.version, '2.14.0');
+    assert.equal(responseData.version, '2.14.1');
     assert.equal(responseData.plugin, 'claude-subscription');
 });
 

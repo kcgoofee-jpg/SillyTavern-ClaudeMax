@@ -820,6 +820,11 @@
             card.append(el('small', 'cm-hint',
                 `${shortModel(last.model)} · 用时 ${fmtSec(last.durationMs)} · 输出 ${fmtK(last.outputTokens)} token${last.reasoningChars ? ` · 思考 ${last.reasoningChars} 字` : ''}`));
         }
+        if (last?.finish === 'content_filter') {
+            card.append(el('small', 'cm-hint cm-warn', '这条回复被 Claude 的安全机制中途截断，结尾缺了内容（例如变量更新的 JSON 不完整、状态栏报错）。可以重新生成，或回退一楼换个说法。'));
+        } else if (last?.finish === 'length') {
+            card.append(el('small', 'cm-hint cm-warn', '这条回复写到了最大长度被截断。调高酒馆的「最大回复长度」。'));
+        }
         // The first reason is the conclusion; everything else is detail.
         const [first, ...rest] = c.reasons;
         if (first) card.append(el('small', 'cm-hint cm-cache-reason', first));

@@ -119,6 +119,7 @@ const STYLE = new Set(['anime coloring', 'flat color', 'cel shading', 'sketch', 
 
 const cats = new Map(); // core → 'artist' | 'quality' | 'content'（手动改过的）
 let lastRead = null; // 最近一次读图的结构信息（给核对码用，不含内容）
+let shownKeys = new Set(); // 页面上显示出来的 Comment 字段
 const SALT = crypto.getRandomValues(new Uint8Array(16));
 
 function splitTop(str) {
@@ -267,8 +268,30 @@ async function buildCheck(lists) {
     // 解析幂等：拼回去再解析结果不变
     reparse: same(parse(items.map((i) => i.text).join(', ')).map((i) => i.text), items.map((i) => i.text)),
   };
+  // 每一类里 tag 的特征（只有计数）：有 artist: 前缀、在质量词表、在画风词表、像人名（带括号或下划线）、手动改过
+  const feat = (list) => ({
+    n: list.length,
+    prefixed: list.filter((i) => /^(artist:|by\s)/.test(i.core)).length,
+    qualityWord: list.filter((i) => QUALITY.has(i.core) || /^year \d{4}$/.test(i.core)).length,
+    styleWord: list.filter((i) => STYLE.has(i.core) || /\((style|medium)\)$/.test(i.core)).length,
+    nameLike: list.filter((i) => !/^(artist:|by\s)/.test(i.core) && (/\([^)]+\)$/.test(i.core) || /_/.test(i.text))).length,
+    weighted: list.filter((i) => /::$/.test(i.text) || /:\s*-?[\d.]+[)\]}]*$/.test(i.text)).length,
+    manual: list.filter((i) => cats.has(i.core)).length,
+  });
+  // 全部提取：把每个 tag 从原文里划掉，剩下的只能是逗号、空白、权重和括号
+  const leftover = (text, list) => {
+    let rest = text.toLowerCase().replace(/_/g, ' ');
+    for (const core of [...list.map((i) => i.core)].sort((a, b) => b.length - a.length)) {
+      const at = rest.indexOf(core);
+      if (at >= 0) rest = rest.slice(0, at) + rest.slice(at + core.length);
+    }
+    return rest.replace(/-?\d+(\.\d+)?::|::|:\s*-?[\d.]+|[{}\[\](),\s]/g, '').length;
+  };
+  checks.allExtracted = leftover(pos, items) === 0 && leftover(neg, parse(neg)) === 0;
   const code = {
-    v: 1,
+    v: 2,
+    features: { artist: feat(lists.artist), quality: feat(lists.quality), content: feat(lists.content) },
+    leftover: { pos: leftover(pos, items), neg: leftover(neg, parse(neg)) },
     read: lastRead,
     pos: await shape(pos),
     neg: await shape(neg),
@@ -280,7 +303,9 @@ async function buildCheck(lists) {
     checks,
   };
   const ok = Object.values(checks).every(Boolean);
-  $('check-summary').textContent = ok ? '自检全部通过 ✓' : `自检有问题 ✗：${Object.entries(checks).filter(([, v]) => !v).map(([k]) => k).join('、')}`;
+  const maybeArtist = code.features.content.nameLike;
+  $('check-summary').textContent = (ok ? '自检全部通过 ✓' : `自检有问题 ✗：${Object.entries(checks).filter(([, v]) => !v).map(([k]) => k).join('、')}`)
+    + (maybeArtist ? `。「不用」里有 ${maybeArtist} 个像画师名的 tag（带括号或下划线、没有 artist: 前缀），看一下要不要点到画师串。` : '');
   $('o-check').value = `BBI-CHECK ${JSON.stringify(code)}`;
 }
 
@@ -394,8 +419,10 @@ function showInspect(file, t) {
     params.className = 'field';
     const head = document.createElement('div'); head.className = 'k'; head.textContent = '参数';
     const list = document.createElement('div'); list.className = 'params';
-    for (const key of PARAM_KEYS) {
-      if (c[key] === undefined) continue;
+    const PROMPT_KEYS = new Set(['prompt', 'uc', 'v4_prompt', 'v4_negative_prompt']);
+    const keys = [...PARAM_KEYS.filter((k) => k in c), ...Object.keys(c).filter((k) => !PARAM_KEYS.includes(k) && !PROMPT_KEYS.has(k))];
+    shownKeys = new Set([...keys, ...Object.keys(c).filter((k) => PROMPT_KEYS.has(k))]);
+    for (const key of keys) {
       const s = document.createElement('span');
       const b = document.createElement('b'); b.textContent = key;
       s.append(b, ' ', typeof c[key] === 'object' ? JSON.stringify(c[key]) : String(c[key]));
@@ -414,10 +441,11 @@ async function loadImage(file) {
   try {
     let t = await pngText(await file.arrayBuffer());
     let via = Object.keys(t).length ? 'png-text' : null;
-    if (!t.Comment) {
-      const st = await stealthText(file).catch(() => null);
-      if (st) { t = { ...t, ...st }; via = via ? `${via}+stealth` : 'stealth'; }
-    }
+    const st = await stealthText(file).catch(() => null);
+    let stealthSame = null;
+    if (st && t.Comment) stealthSame = st.Comment === t.Comment;
+    if (st && !t.Comment) { t = { ...t, ...st }; via = via ? `${via}+stealth` : 'stealth'; }
+    else if (st) via = `${via}+stealth`;
     if (!Object.keys(t).length) {
       $('inspect').style.display = 'none';
       $('status').textContent = '这张图里没有生成信息（不是原图，或被压缩 / 截图 / 转发过）。';
@@ -433,9 +461,12 @@ async function loadImage(file) {
     lastRead = {
       via, type: file.type || '?', size: file.size,
       chunks: Object.keys(t),
-      commentKeys: c ? Object.keys(c) : null,
       v4: !!c?.v4_prompt,
       chars: await Promise.all(chars.map(async (x) => ({ ...(await shape(x.char_caption ?? '')), centers: x.centers?.length ?? 0 }))),
+      stealthSame,
+      commentKeys: c ? Object.keys(c).length : null,
+      commentKeysShown: c ? Object.keys(c).filter((k) => shownKeys.has(k)).length : null,
+      commentKeysHidden: c ? Object.keys(c).filter((k) => !shownKeys.has(k)) : null,
       posHash: pos != null ? await h(pos) : null,
       negHash: neg != null ? await h(neg) : null,
     };
@@ -455,7 +486,7 @@ function clearAll() {
   $('preview').removeAttribute('src');
   $('inspect').style.display = 'none';
   $('status').textContent = '经过截图、压缩或聊天软件转发的图，生成信息通常已经丢失。';
-  cats.clear(); lastRead = null;
+  cats.clear(); lastRead = null; shownKeys = new Set();
   render();
 }
 $('clear').addEventListener('click', clearAll);
