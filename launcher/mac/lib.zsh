@@ -18,6 +18,8 @@ ST_DIR=""
 LOG_DIR="$PROXY_DIR/data/logs"
 ST_PORT=8000
 PROXY_PORT=8901
+COMFY_DIR="${PROXY_DIR:h}/ComfyUI"   # 可选：本地生图（ComfyUI），没装就忽略
+COMFY_PORT=8188
 [[ -f "$PROXY_DIR/launcher/config.local" ]] && source "$PROXY_DIR/launcher/config.local"
 if [[ -z "$ST_DIR" ]]; then
     if [[ ${PROXY_DIR:h:t} == plugins && -f ${PROXY_DIR:h:h}/server.js ]]; then
@@ -27,6 +29,7 @@ if [[ -z "$ST_DIR" ]]; then
     fi
 fi
 ST_LOG="$LOG_DIR/sillytavern.log"
+COMFY_LOG="$LOG_DIR/comfyui.log"
 PROXY_LOG="$LOG_DIR/proxy.log"
 LAUNCHER_LOG="$LOG_DIR/launcher.log"
 LOG_MAX_BYTES=$((5 * 1024 * 1024))
@@ -196,7 +199,7 @@ our_pids() {
     local pid cwd
     for pid in $(port_pids $1); do
         cwd=$(lsof -a -p $pid -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
-        [[ "$cwd" == "$PROXY_DIR"* || ( -n "$ST_DIR" && "$cwd" == "$ST_DIR"* ) ]] && print $pid
+        [[ "$cwd" == "$PROXY_DIR"* || ( -n "$ST_DIR" && "$cwd" == "$ST_DIR"* ) || "$cwd" == "$COMFY_DIR"* ]] && print $pid
     done
 }
 
@@ -526,4 +529,37 @@ autostart_disable() {
     launchctl bootout "gui/$UID/$AUTOSTART_LABEL" >/dev/null 2>&1
     rm -f "$AUTOSTART_PLIST"
     ok "已关闭开机自动启动（现在正在运行的酒馆和代理不受影响）"
+}
+
+# ── 本地生图（ComfyUI，可选）───────────────────────
+
+has_comfy() { [[ -x "$COMFY_DIR/.venv/bin/python" && -f "$COMFY_DIR/main.py" ]]; }
+
+start_comfy() {
+    step "启动本地生图 ComfyUI（端口 $COMFY_PORT）"
+    if ! has_comfy; then
+        warn "没有找到 ComfyUI（$COMFY_DIR）"
+        return 1
+    fi
+    if [[ -n "$(our_pids $COMFY_PORT)" ]]; then
+        ok "ComfyUI 已经在运行，跳过"
+        return 0
+    fi
+    explain "首次启动要加载模型，约 20–60 秒；出图时会占用约 8GB 内存。"
+    rotate_log "$COMFY_LOG"
+    mark_log "$COMFY_LOG"
+    # 只监听本机；柏宝绘在浏览器直连失败时会经由酒馆后端转发，不需要打开跨域
+    (cd "$COMFY_DIR" && PYTORCH_ENABLE_MPS_FALLBACK=1 nohup .venv/bin/python main.py --listen 127.0.0.1 --port $COMFY_PORT >>"$COMFY_LOG" 2>&1 &!)
+    if wait_port $COMFY_PORT 90; then
+        ok "ComfyUI 已启动：http://127.0.0.1:$COMFY_PORT"
+        return 0
+    fi
+    fail "ComfyUI 90 秒内没有启动成功，最后几行日志："
+    tail -n 8 "$COMFY_LOG" | sed "s/^/    ${C_DIM}│${C_RESET} /"
+    return 1
+}
+
+stop_comfy() {
+    step "关闭本地生图 ComfyUI"
+    stop_one $COMFY_PORT "ComfyUI"
 }
