@@ -420,8 +420,44 @@ watchdog_start() {
 }
 
 watchdog_stop() {
-    watchdog_running && kill "$(<"$WATCHDOG_PID_FILE")" 2>/dev/null
+    local pid i
+    if watchdog_running; then
+        pid=$(<"$WATCHDOG_PID_FILE")
+        kill $pid 2>/dev/null
+        for i in {1..10}; do kill -0 $pid 2>/dev/null || break; sleep 0.3; done
+    fi
     rm -f "$WATCHDOG_PID_FILE"
+    lid_cleanup_stale
+}
+
+# ── 合盖不睡（可选，手机模式下由守护开关） ─────────────
+# 合盖睡眠不受 caffeinate 管，只有 pmset 的 disablesleep 能挡。它要 root，
+# 所以「合盖不睡」工具装一条只允许这两条命令免密的 sudoers 规则；没装就不启用。
+# 守护在这些情况下自动放开（合盖就会睡）：用电池且电量低于 LID_BATTERY_FLOOR、
+# 低电量模式、合盖且代理 LID_IDLE_HOURS 小时没有请求、手机模式关闭、守护退出。
+LID_SUDOERS=/etc/sudoers.d/claudemax-lid
+LID_OWNED_FILE="$PROXY_DIR/launcher/lid-awake.local"   # 有 = 这个开关是我们打开的
+: ${LID_BATTERY_FLOOR:=25}
+: ${LID_IDLE_HOURS:=3}
+
+lid_supported() { sudo -n -l /usr/bin/pmset -a disablesleep 1 >/dev/null 2>&1; }
+lid_awake_on()  { [[ "$(pmset -g | awk '/SleepDisabled/ {print $2}')" == 1 ]]; }
+lid_closed()    { ioreg -r -k AppleClamshellState -d 1 | grep -q '"AppleClamshellState" = Yes'; }
+on_battery()    { pmset -g batt | head -1 | grep -q "Battery Power"; }
+battery_pct()   { pmset -g batt | grep -o '[0-9]*%' | head -1 | tr -d %; }
+low_power()     { [[ "$(pmset -g | awk '/lowpowermode/ {print $2}')" == 1 ]]; }
+
+lid_set() {   # lid_set 1|0
+    sudo -n /usr/bin/pmset -a disablesleep $1 >/dev/null 2>&1 || return 1
+    if (( $1 )); then : >"$LID_OWNED_FILE"; else rm -f "$LID_OWNED_FILE"; fi
+}
+
+# 守护被强杀、死机重启后，我们打开的开关可能还开着：没有守护在跑就关掉
+lid_cleanup_stale() {
+    [[ -f "$LID_OWNED_FILE" ]] || return 0
+    watchdog_running && return 0
+    lid_awake_on && lid_set 0 && log_event "[守护] 守护不在运行，已恢复合盖睡眠"
+    rm -f "$LID_OWNED_FILE"
 }
 
 # ── 启动 / 关闭 ───────────────────────────────
@@ -546,6 +582,13 @@ show_running() {
     fi
     if [[ -n "$(our_pids $PROXY_PORT)" ]]; then ok "Claude 代理：运行中 → http://127.0.0.1:$PROXY_PORT/v1"
     else explain "· Claude 代理：未运行（TauriTavern 需要它才能对话）"; fi
+    if [[ -s "$LAN_KEY_FILE" ]]; then
+        if watchdog_running; then ok "手机模式守护：运行中"; else warn "手机模式开着，但守护没在运行：双击「手机模式」修复"; fi
+        if lid_awake_on; then ok "合盖不睡：开着"
+        elif lid_supported; then explain "· 合盖不睡：已安装，暂时放开（电量低 / 低电量模式 / 长时间没请求）"
+        else explain "· 合盖不睡：未安装（合盖会睡，手机连不上）"; fi
+    fi
+    lid_awake_on && [[ ! -s "$LAN_KEY_FILE" ]] && warn "合盖不睡开着，但手机模式是关的：合盖不会睡，注意发热耗电"
 }
 
 summary() {

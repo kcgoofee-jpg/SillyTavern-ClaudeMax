@@ -12,6 +12,7 @@ ITEMS=(
     "日常|检查状态|只检查不改动：运行、登录、日志错误"
     "手机|手机模式|电脑模式 ↔ 手机模式（防睡眠、掉线重启、通知）"
     "手机|手机同步|电脑 ↔ 手机双向同步聊天、角色、世界书、预设"
+    "手机|合盖不睡|装 / 卸：手机模式下合上盖子也不睡（一次性输密码）"
     "生图|启动生图|本地 ComfyUI（用 NovelAI 时不需要）"
     "生图|关闭生图|关闭本地 ComfyUI"
     "生图|提示词拆分|读 NAI 原图，拆成柏宝绘的画师串和质量词"
@@ -46,7 +47,7 @@ status_lines() {
     if [[ -s "$LAN_KEY_FILE" ]]; then
         ip=$(lan_ip)
         mode="${C_GREEN}手机模式${C_RESET}"
-        watchdog_running && mode+="（守护中）" || mode+="${C_YELLOW}（守护没在运行：选 $(item_no 手机模式) 修复）${C_RESET}"
+        watchdog_running && { mode+="（守护中"; lid_awake_on && mode+="，合盖不睡"; mode+="）"; } || mode+="${C_YELLOW}（守护没在运行：选 $(item_no 手机模式) 修复）${C_RESET}"
         mode+="  ·  Mac ${ip:-${C_YELLOW}没连 Wi-Fi${C_RESET}}"
     else
         mode="电脑模式"

@@ -153,7 +153,9 @@ macOS 用户双击 `launcher/mac/酒馆工具.command` 打开菜单：启动 / �
 2. 手机 TauriTavern → Claude Max 面板 → 高级 → 连接：「代理地址」「访问密码」分别填上，点「重新连接」。用「手机同步」同步过的话已经填好。
 3. Mac 首次弹出「允许 node 接受传入连接」时点允许。
 
-手机模式下后台有一个守护进程：Mac 不空闲睡眠（`caffeinate`；合盖仍会睡，除非接着电源和外接显示器），代理退出后 30 秒内自动重启，Mac 断网或局域网地址变了会发通知（Mac 通知中心，以及通过 adb 连着的手机）。手机上的面板每 20 秒探测一次代理，断线时提示、连回来后提示「已恢复」。切回电脑模式时守护一起停止。
+手机模式下后台有一个守护进程：Mac 不空闲睡眠（`caffeinate`），代理退出后 30 秒内自动重启，Mac 断网或局域网地址变了会发通知（Mac 通知中心，以及通过 adb 连着的手机）。手机上的面板每 20 秒探测一次代理，断线时提示、连回来后提示「已恢复」。切回电脑模式时守护一起停止。
+
+**合盖不睡**（菜单「合盖不睡」，可选）：macOS 合盖就睡，`caffeinate` 挡不住，只有 `pmset -a disablesleep 1` 可以。安装时输一次 Mac 密码，写入 `/etc/sudoers.d/claudemax-lid`，只允许免密执行 `pmset -a disablesleep 0/1` 这两条命令；之后守护在手机模式下自动打开，并在这些情况下放开（合盖就睡）并通知：用电池且电量低于 25%、低电量模式、合盖 3 小时没有请求、切回电脑模式或守护退出。守护被强杀或死机时，下次启动时恢复。可在 `launcher/config.local` 设 `LID_BATTERY_FLOOR`、`LID_IDLE_HOURS`、`LID_AWAKE=0`。思路参考 [Sleepless](https://github.com/Aboudjem/Sleepless)、[Awake](https://github.com/Koomook/awake)。合盖运行会发热，开着时别装进包里。
 
 **手机同步**（菜单「手机同步」，需要 adb 和手机 root）：电脑 SillyTavern ↔ 手机 TauriTavern 双向同步聊天、角色卡、世界书、预设、头像、背景、生图图片、主题和快速回复；按上次同步的状态判断哪边改过，两边都改过时用较新的、另一份存进 `backups/`，从不删除文件。第三方扩展只从电脑推到手机（git 版本不同时）。设置和密钥不同步，只把手机上的代理地址改成 Mac 现在的 IP。插线时可以顺手开无线调试，之后同一 Wi-Fi 不插线也能同步。
 

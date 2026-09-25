@@ -13,6 +13,8 @@
 // this listener on the port and reuses it instead of failing.
 
 import { startStandaloneListener, stopStandaloneListener, portInUseMessage } from './lib/listener.js';
+import { networkInterfaces } from 'node:os';
+
 import { credentialSummary } from './lib/oauth.js';
 
 const TAG = '[claude-subscription]';
@@ -32,7 +34,16 @@ if (cred.present) {
 } else {
     console.warn(`${TAG} 未找到订阅凭据 — 请先在扩展目录运行 npm run login 登录订阅账号（或设置 CLAUDE_CODE_OAUTH_TOKEN）`);
 }
-console.log(`${TAG} 在酒馆里把 Custom (OpenAI-compatible) 端点设为 http://${host}:${port}/v1，或使用 Claude Max 面板一键连接。Ctrl+C 退出。`);
+if (host === '0.0.0.0' || host === '::') {
+    // Listening on every interface: 0.0.0.0 is not an address anyone can connect to.
+    // Skip VPN/TUN (198.18/15) and link-local addresses; the phone can't reach those.
+    const lan = Object.values(networkInterfaces()).flat()
+        .filter((i) => i && i.family === 'IPv4' && !i.internal && !/^(198\.1[89]|169\.254)\./.test(i.address))
+        .map((i) => `http://${i.address}:${port}/v1`);
+    console.log(`${TAG} 本机端点 http://127.0.0.1:${port}/v1；局域网设备用 ${lan.join('、') || '（没有局域网地址，检查 Wi-Fi）'}。Ctrl+C 退出。`);
+} else {
+    console.log(`${TAG} 在酒馆里把 Custom (OpenAI-compatible) 端点设为 http://${host}:${port}/v1，或使用 Claude Max 面板一键连接。Ctrl+C 退出。`);
+}
 
 let stopping = false;
 async function shutdown(signal) {

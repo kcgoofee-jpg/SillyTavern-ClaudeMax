@@ -36,6 +36,9 @@ if [[ -s "$LAN_KEY_FILE" ]]; then
         warn "守护没在运行，现在启动"
         watchdog_start && ok "守护已启动"
     }
+    if lid_awake_on; then ok "合盖不睡：开着"
+    elif lid_supported; then explain "合盖不睡：已安装，现在放开着（电量低 / 低电量模式 / 长时间没请求），条件恢复后自动打开"
+    else explain "合盖仍会睡。想合盖也能用：酒馆工具 →「合盖不睡」安装一次。"; fi
     show_phone_setup
     if ask_yes "要切回电脑模式吗？（手机连不上，Mac 恢复正常睡眠）"; then
         mv "$LAN_KEY_FILE" "$LAN_KEY_FILE.off"
@@ -49,7 +52,7 @@ fi
 step "现在是：电脑模式"
 explain "切到手机模式后："
 explain "· 和这台 Mac 连同一个 Wi-Fi 的手机，带上访问密码就能用你的订阅；"
-explain "· Mac 不会空闲睡眠（合盖仍会睡，除非接着电源和外接显示器），代理掉了会自动重启；"
+explain "· Mac 不会空闲睡眠，代理掉了会自动重启；装了「合盖不睡」的话合盖也不睡；"
 explain "· Mac 的地址变了、断网、代理重启时，Mac 和插着线或开了无线调试的手机都会收到通知。"
 explain "不要在公共 Wi-Fi（咖啡店、学校、公司）开启；密码别发给别人。"
 if ! ask_yes "切到手机模式吗？"; then

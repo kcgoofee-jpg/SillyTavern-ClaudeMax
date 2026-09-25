@@ -7,7 +7,7 @@
 规则（按上次同步时记下的状态判断哪边改过）：
   只有一边改过 → 用改过的那边；两边都改过（冲突）→ 用较新的，另一份存进备份。
   只有一边有的文件 → 复制到另一边。从不删除文件。
-  被覆盖的文件先备份到 <酒馆目录>/backups/<时间>-手机同步前/{电脑,手机}/。
+  被覆盖的文件先备份到 <酒馆目录>/backups/<日期>/<时间>-手机同步前/{电脑,手机}/。
 手机上的 TauriTavern 数据在 Android/data 里：需要 root（su），或 Android 10 及以下。
 
 用法：phone_sync.py --st <SillyTavern/data/default-user> --adb <adb> [--serial S] [--dry-run]
@@ -279,8 +279,7 @@ def main():
     if a.dry_run:
         return 0
 
-    stamp = time.strftime('%Y%m%d-%H%M%S')
-    bk = os.path.join(a.backups, f'{stamp}-手机同步前')
+    bk = os.path.join(a.backups, time.strftime('%Y-%m-%d'), f"{time.strftime('%H%M%S')}-手机同步前")
     # 备份即将被覆盖的文件
     over_local = [r for r in pull if r in loc]
     over_remote = [r for r in push if r in rem]
