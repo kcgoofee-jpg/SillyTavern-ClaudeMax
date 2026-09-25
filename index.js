@@ -641,6 +641,11 @@
                 const card = el('div', c.hitPct >= 50 ? 'cm-cache' : 'cm-cache cm-last-error cm-tip');
                 card.append(el('div', 'cm-last-error-title', `最近一轮缓存 · ${c.headline}`));
                 for (const r of c.reasons) card.append(el('small', 'cm-hint cm-cache-reason', r));
+                const ph = data.lastRequest?.phases;
+                if (ph?.init && ph.firstDelta) {
+                    const sec = (v) => (v / 1000).toFixed(1);
+                    card.append(el('small', 'cm-hint', `首字 ${sec(ph.firstDelta)} 秒：代理和 CLI 启动 ${sec(ph.init)}，模型读完提示词开始回复 ${sec((ph.apiStart ?? ph.firstDelta) - ph.init)}，开始写 ${sec(ph.firstDelta - (ph.apiStart ?? ph.firstDelta))}。前一段在本机，后两段在 Anthropic 那边。`));
+                }
                 box.append(card);
             }
             if (data.lastError) {
