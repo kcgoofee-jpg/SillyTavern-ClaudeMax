@@ -109,6 +109,7 @@
         presetRecoRecord: null,  // 上一个预设的推荐改了什么（切走时恢复）
         tailBlockFront: false,   // 实验：预设后置条目提前（省缓存）
         loreTail: true,          // 每轮变化的世界书移到本轮消息开头（省缓存）
+        foldTail: true,          // 发言后面的深度 0 注入并进发言（省缓存）
         quietEffort: 'low',      // 后台请求（其他插件的生图 tag、总结等）的思考深度；'follow' = 跟随面板
         panelTab: 'reason',      // 面板上次打开的分页
         compactScriptButtons: true, // 输入栏上方的脚本按钮并排显示
@@ -226,6 +227,7 @@
         inlineSystem: { label: '深度注入保持原位', valid: (v) => typeof v === 'boolean' },
         tailBlockFront: { label: '预设后置条目提前', valid: (v) => typeof v === 'boolean' },
         loreTail: { label: '世界书变化部分移到末尾', valid: (v) => typeof v === 'boolean' },
+        foldTail: { label: '发言后的注入并进发言', valid: (v) => typeof v === 'boolean' },
         identityMode: { label: '身份模式', valid: (v) => typeof v === 'boolean' },
     };
 
@@ -271,6 +273,7 @@
         lines.push(`  system_placement: ${settings.inlineSystem ? 'inline' : 'hoist'}`);
         if (settings.tailBlockFront) lines.push('  tail_block: front');
         lines.push(`  lore_tail: ${settings.loreTail}`);
+        lines.push(`  fold_tail: ${settings.foldTail}`);
         if (settings.debugDump) lines.push('  debug_dump: true');
         return lines.join('\n');
     }
@@ -1185,6 +1188,14 @@
             more: '代理会记住每个聊天里哪一块（如 <world_info>）每轮都在变，把它从系统提示词挪到本轮消息开头，原位留一句固定说明。系统提示词和之前的聊天记录每轮一字不差，能读缓存，只重写最近一轮。设定资料离本轮更近，但不再在系统提示词里。不想挪动就关掉，或用「统计」页把世界书设为常驻。',
             checked: settings.loreTail,
             onChange: (v) => { settings.loreTail = v; save(); },
+        }));
+        pane.append(toggleRow({
+            id: 'claudeMaxFoldTail',
+            title: '发言后的注入并进发言',
+            desc: '角色卡排在你发言后面的条目不再让整段聊天记录重写缓存。',
+            more: '有些卡（如 MVU 变量卡）把变量状态、更新规则以「深度 0」放在你的发言后面，成为请求的最后一条；下一轮它就不在那里了，缓存永远对不上，每轮整段聊天记录都要重写。打开后，代理把这些条目接在你的发言末尾一起发，下一轮原样重放，只写最近一轮；和之前某轮一字不差的大段（固定规则）换成一句「同前」说明，变化的部分（变量状态）照发。内容和先后顺序不变。',
+            checked: settings.foldTail,
+            onChange: (v) => { settings.foldTail = v; save(); },
         }));
         pane.append(toggleRow({
             id: 'claudeMaxTailBlock',
