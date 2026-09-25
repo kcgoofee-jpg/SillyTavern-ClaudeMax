@@ -20,3 +20,12 @@ test('buildSubprocessEnv still scrubs stray API credentials for subscription aut
         else process.env.ANTHROPIC_API_KEY = saved;
     }
 });
+
+test('refusal fallback to another model is off unless asked for (a streamed partial cannot be retracted)', () => {
+    const saved = process.env.CLAUDE_SUBSCRIPTION_REFUSAL_FALLBACK;
+    delete process.env.CLAUDE_SUBSCRIPTION_REFUSAL_FALLBACK;
+    assert.equal(buildSubprocessEnv({ envPins: {}, maxTokens: undefined, apiKey: null }).CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK, '1');
+    process.env.CLAUDE_SUBSCRIPTION_REFUSAL_FALLBACK = 'on';
+    assert.equal(buildSubprocessEnv({ envPins: {}, maxTokens: undefined, apiKey: null }).CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK, undefined);
+    if (saved === undefined) delete process.env.CLAUDE_SUBSCRIPTION_REFUSAL_FALLBACK; else process.env.CLAUDE_SUBSCRIPTION_REFUSAL_FALLBACK = saved;
+});
