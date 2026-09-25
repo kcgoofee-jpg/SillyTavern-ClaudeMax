@@ -61,9 +61,22 @@ button.small { padding: 2px 10px; font-size: 12px; border-radius: 6px; }
   <p class="sub">读取 NovelAI 图片里记录的生成信息（同官方 novelai.net/inspect），再把提示词拆成柏宝绘的画师串、正面质量词、负面提示词。全部在本机处理，不联网。</p>
 
   <div class="card">
-    <h2>图片信息</h2>
     <div class="drop" id="drop">把 NovelAI 原图拖到这里、粘贴，或 <input type="file" id="file" accept="image/*" autocomplete="off"> <button class="small" id="clear" type="button">清空</button></div>
     <p class="hint" id="status">经过截图、压缩或聊天软件转发的图，生成信息通常已经丢失。</p>
+  </div>
+
+  <div class="card">
+    <h2>复制到柏宝绘</h2>
+    <div class="group"><h3>画师串 → 柏宝绘「画师串」</h3>
+      <div class="out"><textarea id="o-artist" readonly></textarea><button class="copy" data-for="o-artist">复制</button></div></div>
+    <div class="group"><h3>正面质量词 → 柏宝绘「质量词」</h3>
+      <div class="out"><textarea id="o-quality" readonly></textarea><button class="copy" data-for="o-quality">复制</button></div></div>
+    <div class="group"><h3>负面提示词 → 柏宝绘「负面提示词」</h3>
+      <div class="out"><textarea id="o-neg" readonly></textarea><button class="copy" data-for="o-neg">复制</button></div></div>
+  </div>
+
+  <div class="card" id="inspect-card" hidden>
+    <h2>图片信息 <small class="hint">每一项都能单独复制</small></h2>
     <div class="inspect" id="inspect">
       <img id="preview" alt="">
       <div class="fields" id="fields"></div>
@@ -71,7 +84,7 @@ button.small { padding: 2px 10px; font-size: 12px; border-radius: 6px; }
   </div>
 
   <div class="card">
-    <h2>转成柏宝绘</h2>
+    <h2>分类 <small class="hint">点 tag 改分类，上面的复制框会跟着变</small></h2>
     <div class="row">
       <div>
         <label for="pos">正面提示词</label>
@@ -88,14 +101,6 @@ button.small { padding: 2px 10px; font-size: 12px; border-radius: 6px; }
     <div class="group"><h3>不用 <small>画面内容，柏宝绘里由写 tag 的 AI 按剧情写</small></h3><div class="chips" id="c-content"></div></div>
   </div>
 
-  <div class="card">
-    <div class="group"><h3>画师串 → 柏宝绘「画师串」</h3>
-      <div class="out"><textarea id="o-artist" readonly></textarea><button class="copy" data-for="o-artist">复制</button></div></div>
-    <div class="group"><h3>正面质量词 → 柏宝绘「质量词」</h3>
-      <div class="out"><textarea id="o-quality" readonly></textarea><button class="copy" data-for="o-quality">复制</button></div></div>
-    <div class="group"><h3>负面提示词 → 柏宝绘「负面提示词」</h3>
-      <div class="out"><textarea id="o-neg" readonly></textarea><button class="copy" data-for="o-neg">复制</button></div></div>
-  </div>
 
   <div class="card">
     <h2>核对码 <small class="hint">发给 Claude 核对用，不含任何提示词内容</small></h2>
@@ -372,9 +377,27 @@ async function stealthText(file) {
   } catch { return { Description: text }; }
 }
 
-function copyText(text, btn) {
-  navigator.clipboard.writeText(text).catch(() => {});
-  const old = btn.textContent; btn.textContent = '已复制'; setTimeout(() => { btn.textContent = old; }, 1200);
+// 本地文件打开时，有的浏览器不给 navigator.clipboard，退回到选中文字再复制
+function legacyCopy(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.append(ta); ta.select();
+  let ok = false;
+  try { ok = document.execCommand('copy'); } catch { ok = false; }
+  ta.remove();
+  return ok;
+}
+
+async function copyText(text, btn) {
+  let ok = false;
+  if (navigator.clipboard?.writeText) {
+    try { await navigator.clipboard.writeText(text); ok = true; } catch { ok = false; }
+  }
+  if (!ok) ok = legacyCopy(text);
+  const old = btn.dataset.label ?? btn.textContent;
+  btn.dataset.label = old;
+  btn.textContent = ok ? '已复制' : '复制失败，请手动选中';
+  setTimeout(() => { btn.textContent = old; }, 1400);
 }
 
 function field(key, value) {
@@ -432,7 +455,7 @@ function showInspect(file, t) {
     fields.append(params);
     fields.append(field('完整 Comment（JSON）', JSON.stringify(c, null, 2)));
   }
-  $('inspect').style.display = 'grid';
+  $('inspect').style.display = 'grid'; $('inspect-card').hidden = false;
   return c;
 }
 
@@ -447,7 +470,7 @@ async function loadImage(file) {
     if (st && !t.Comment) { t = { ...t, ...st }; via = via ? `${via}+stealth` : 'stealth'; }
     else if (st) via = `${via}+stealth`;
     if (!Object.keys(t).length) {
-      $('inspect').style.display = 'none';
+      $('inspect').style.display = 'none'; $('inspect-card').hidden = true;
       $('status').textContent = '这张图里没有生成信息（不是原图，或被压缩 / 截图 / 转发过）。';
       lastRead = { via: 'none', type: file.type || '?', size: file.size };
       render();
@@ -484,7 +507,7 @@ function clearAll() {
   $('pos').value = ''; $('neg').value = '';
   $('fields').replaceChildren();
   $('preview').removeAttribute('src');
-  $('inspect').style.display = 'none';
+  $('inspect').style.display = 'none'; $('inspect-card').hidden = true;
   $('status').textContent = '经过截图、压缩或聊天软件转发的图，生成信息通常已经丢失。';
   cats.clear(); lastRead = null; shownKeys = new Set();
   render();
