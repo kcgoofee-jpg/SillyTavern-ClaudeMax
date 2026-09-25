@@ -38,3 +38,17 @@ test('a clean reply has no issues', () => {
     const r = checkReply({ mes: reply(body, status(96, 79, 50) + opts(true)), prevMes: reply('昨天的事。', status(98, 80, 50)), words: [1200, 1600], banned: ['似笑非笑'] });
     assert.deepEqual(r.issues, []);
 });
+
+test('second-person presets do not trigger the person check', async () => {
+    const { secondPersonFromPreset } = await import('../lib/chat-check.js');
+    const preset = {
+        prompts: [{ identifier: 'a', name: '👤第二人称user视角' }, { identifier: 'b', name: '👤第三人称' }],
+        prompt_order: [{ order: [{ identifier: 'a', enabled: true }, { identifier: 'b', enabled: false }] }],
+    };
+    assert.equal(secondPersonFromPreset(preset), true);
+    preset.prompt_order[0].order[0].enabled = false;
+    assert.equal(secondPersonFromPreset(preset), false);
+    const body = '<content>' + '你推开门，你看见她，你愣住，你后退，你笑了。'.repeat(2) + '</content>';
+    assert.ok(checkReply({ mes: body }).issues.some((i) => i.code === 'person'));
+    assert.ok(!checkReply({ mes: body, secondPerson: true }).issues.some((i) => i.code === 'person'));
+});

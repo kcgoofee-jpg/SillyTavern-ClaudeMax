@@ -45,6 +45,33 @@
     import(new URL('./lib/chat-check.js', import.meta.url).href)
         .then((m) => { chatCheck = m; runCheckup(); })
         .catch(() => { /* check-up unavailable */ });
+    let presetReco = null;
+    import(new URL('./lib/preset-reco.js', import.meta.url).href)
+        .then((m) => { presetReco = m; adoptUnrecordedReco(); })
+        .catch(() => { /* preset recommendations unavailable */ });
+
+    // Recommendations applied by v2.5.0 left no record, so switching away
+    // couldn't undo them. If the active preset's recommendation is in effect
+    // and differs from the defaults, record it once (restore target: default).
+    function adoptUnrecordedReco() {
+        try {
+            const settings = getSettings();
+            if (settings.presetRecoRecord) return;
+            const rec = SillyTavern.getContext().chatCompletionSettings?.extensions?.claude_max;
+            if (!rec || typeof rec !== 'object') return;
+            const record = { before: {}, applied: {} };
+            for (const key of Object.keys(PRESET_FIELDS)) {
+                if (rec[key] !== undefined && settings[key] === rec[key] && rec[key] !== defaultSettings[key]) {
+                    record.before[key] = defaultSettings[key];
+                    record.applied[key] = rec[key];
+                }
+            }
+            if (Object.keys(record.applied).length) {
+                settings.presetRecoRecord = record;
+                saveSettingsDebounced();
+            }
+        } catch { /* best-effort */ }
+    }
 
     const ctx = SillyTavern.getContext();
     const { eventSource, eventTypes, extensionSettings, saveSettingsDebounced } = ctx;
@@ -71,6 +98,7 @@
         debugDump: false,
         checkupToast: true,      // 本轮体检发现问题时弹提示
         leakWords: {},           // 角色卡 → 隐藏设定关键词（逗号分隔）
+        presetRecoRecord: null,  // 上一个预设的推荐改了什么（切走时恢复）
     };
 
     function getSettings() {
@@ -187,22 +215,23 @@
     };
 
     function applyPresetRecommendation() {
+        if (!presetReco) return;
         const ctx = SillyTavern.getContext();
         const rec = ctx.chatCompletionSettings?.extensions?.claude_max;
-        if (!rec || typeof rec !== 'object') return;
         const settings = getSettings();
-        const changed = [];
-        for (const [key, field] of Object.entries(PRESET_FIELDS)) {
-            if (rec[key] === undefined || !field.valid(rec[key]) || settings[key] === rec[key]) continue;
-            settings[key] = rec[key];
-            changed.push(field.label);
-        }
-        if (!changed.length) return;
+        const { next, restored, applied, record } = presetReco.planPresetReco(settings, rec, settings.presetRecoRecord ?? null, PRESET_FIELDS);
+        settings.presetRecoRecord = record;
+        if (!restored.length && !applied.length) return;
+        Object.assign(settings, next, { presetRecoRecord: record });
         saveSettingsDebounced();
         rebuildPanel();
         const preset = ctx.chatCompletionSettings?.preset_settings_openai ?? '当前预设';
-        toastr?.info?.(`已按预设「${preset}」的推荐调整：${changed.join('、')}。`, 'Claude Max', { timeOut: 8000 });
+        const parts = [];
+        if (applied.length) parts.push(`按预设「${preset}」的推荐调整：${applied.map((k) => PRESET_FIELDS[k].label).join('、')}`);
+        if (restored.length) parts.push(`恢复上一个预设改动过的：${restored.map((k) => PRESET_FIELDS[k].label).join('、')}`);
+        toastr?.info?.(`${parts.join('；')}。`, 'Claude Max', { timeOut: 8000 });
     }
+
 
     // ── Per-request injection (CHAT_COMPLETION_SETTINGS_READY) ──
 
@@ -351,6 +380,7 @@
         const r = chatCheck.checkReply({
             mes: last.mes ?? '', prevMes: prev?.mes ?? null,
             words: chatCheck.wordRangeFromPrompts(prompts), banned: chatCheck.bannedFromPrompts(prompts), leaks,
+            secondPerson: chatCheck.secondPersonFromPreset(ctx.chatCompletionSettings),
         });
         if (box) {
             const card = el('div', r.issues.length ? 'cm-last-error cm-tip' : 'cm-cache');
@@ -901,5 +931,6 @@
     eventSource.on(eventTypes.MESSAGE_RECEIVED, refreshIfOpen);
     eventSource.on(eventTypes.CHAT_CHANGED, refreshIfOpen);
     eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, applyPresetRecommendation);
+    if (eventTypes.APP_READY) eventSource.on(eventTypes.APP_READY, adoptUnrecordedReco);
     console.log(`[claude-max] UI extension loaded${IS_TAURI ? ' (TauriTavern mode)' : ''}`);
 })();
