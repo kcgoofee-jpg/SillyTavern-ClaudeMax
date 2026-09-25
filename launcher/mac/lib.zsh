@@ -369,6 +369,54 @@ proxy_busy() {
     return 1
 }
 
+# ── 通知 / 手机（adb） ─────────────────────────
+
+# adb：PATH 里的、Android Studio 的、或放在酒馆目录 tools/platform-tools 下的
+find_adb() {
+    local p
+    for p in "$(command -v adb 2>/dev/null)" "$HOME/Library/Android/sdk/platform-tools/adb" "${PROXY_DIR:h}/tools/platform-tools/adb"; do
+        [[ -n "$p" && -x "$p" ]] && { print -r -- "$p"; return 0; }
+    done
+    return 1
+}
+
+# 已连接（USB 或无线调试）且已授权的手机序列号，没有就空
+phone_serial() {
+    local adb; adb=$(find_adb) || return 1
+    "$adb" devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1; exit}'
+}
+
+# Mac 通知中心 + 已连接手机的通知栏
+notify() {
+    local title=$1 msg=$2 adb serial
+    osascript -e "display notification \"${msg//\"/\\\"}\" with title \"${title//\"/\\\"}\"" >/dev/null 2>&1
+    log_event "[通知] $title：$msg"
+    serial=$(phone_serial) || return 0
+    [[ -z "$serial" ]] && return 0
+    adb=$(find_adb)
+    "$adb" -s "$serial" shell "cmd notification post -S bigtext -t '${title//\'/}' claudemax '${msg//\'/}'" >/dev/null 2>&1
+}
+
+# ── 手机模式：防睡眠 + 掉线自动重启 + 地址变化通知 ─────
+
+WATCHDOG_PID_FILE="$PROXY_DIR/launcher/watchdog.pid.local"
+
+watchdog_running() {
+    [[ -s "$WATCHDOG_PID_FILE" ]] && kill -0 "$(<"$WATCHDOG_PID_FILE")" 2>/dev/null
+}
+
+watchdog_start() {
+    watchdog_running && return 0
+    nohup /bin/zsh "$LAUNCHER_DIR/watchdog.zsh" >>"$LOG_DIR/watchdog.log" 2>&1 &!
+    sleep 1
+    watchdog_running
+}
+
+watchdog_stop() {
+    watchdog_running && kill "$(<"$WATCHDOG_PID_FILE")" 2>/dev/null
+    rm -f "$WATCHDOG_PID_FILE"
+}
+
 # ── 启动 / 关闭 ───────────────────────────────
 
 start_proxy() {
@@ -388,6 +436,7 @@ start_proxy() {
     fi
     if wait_port $PROXY_PORT 20; then
         ok "代理已启动：http://127.0.0.1:$PROXY_PORT/v1"
+        [[ -s "$LAN_KEY_FILE" ]] && watchdog_start && ok "手机模式守护在运行：防睡眠、掉线自动重启"
         return 0
     fi
     fail "代理 20 秒内没有启动成功"
@@ -444,6 +493,7 @@ stop_one() {
 stop_all() {
     step "关闭酒馆和 Claude 代理"
     explain "关闭后 TauriTavern 也会连不上代理，直到下次启动。"
+    watchdog_running && { watchdog_stop; ok "手机模式守护已停止（下次启动时自动恢复）"; }
     has_st && stop_one $ST_PORT "酒馆"
     stop_one $PROXY_PORT "Claude 代理"
 }

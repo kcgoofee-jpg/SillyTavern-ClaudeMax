@@ -7,6 +7,5 @@ package-lock.json
 .scratch-cwd/
 .claude/
 data/
-launcher/config.local
-launcher/lan-key.local
-launcher/lan-key.local.off
+launcher/*.local
+launcher/*.local.*

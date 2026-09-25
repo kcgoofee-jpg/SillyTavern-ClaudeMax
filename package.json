@@ -1,6 +1,6 @@
 {
   "name": "sillytavern-claude-max",
-  "version": "2.16.2",
+  "version": "2.17.0",
   "description": "OpenAI-compatible proxy backed by the Claude Agent SDK so chat bills against your Anthropic Pro/Max subscription. Runs standalone (TauriTavern / any frontend) or as a SillyTavern server plugin.",
   "main": "plugin.js",
   "type": "module",

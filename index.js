@@ -732,6 +732,31 @@
         renderConnect();
     }
 
+    // ── Heartbeat: notice a dropped proxy (Mac asleep, Wi-Fi switched) and its return ──
+
+    const HEARTBEAT_MS = 20000;
+    let heartbeatDown = false;
+    let downToast = null;
+    async function heartbeat() {
+        if (!getSettings().enabled || document.hidden) return;
+        let up = false;
+        try {
+            const res = await fetchProxy('/status', '/status');
+            up = res.ok;
+        } catch { /* down */ }
+        if (!up && !heartbeatDown) {
+            heartbeatDown = true;
+            downToast = toastr?.warning?.('连不上 Claude 代理，正在每 20 秒自动重试。手机连 Mac 时：确认 Mac 没睡眠、两边在同一个 Wi-Fi。', 'Claude Max · 断线', { timeOut: 0, extendedTimeOut: 0, preventDuplicates: true });
+            refreshProxyStatus();
+        } else if (up && heartbeatDown) {
+            heartbeatDown = false;
+            if (downToast) toastr?.clear?.(downToast);
+            downToast = null;
+            toastr?.success?.('已重新连上 Claude 代理，可以继续发消息了。', 'Claude Max · 已恢复');
+            refreshProxyStatus();
+        }
+    }
+
     // ── Quota meter ──
 
     const WINDOW_LABELS = {
@@ -1415,6 +1440,9 @@
     applyCompactButtons();
     addExtensionSettings(settings);
     refreshProxyStatus();
+    setInterval(heartbeat, HEARTBEAT_MS);
+    // Phone app back from the background: check right away, not up to 20 s later.
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) heartbeat(); });
     eventSource.on(eventTypes.CHAT_COMPLETION_SETTINGS_READY, onSettingsReady);
     // Keep stats fresh while the panel is open.
     const refreshIfOpen = () => {

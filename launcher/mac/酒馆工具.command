@@ -12,7 +12,8 @@ ITEMS=(
     "修复依赖|启动报「缺少依赖」时重装程序库"
     "打开日志|打开日志文件夹"
     "开机自动启动|开 / 关：登录 Mac 时自动在后台启动"
-    "手机连接|开 / 关：同一 Wi-Fi 的手机 TauriTavern 用这台 Mac 的代理"
+    "手机模式|电脑模式 ↔ 手机模式：手机 TT 走 Wi-Fi 用这台 Mac（防睡眠、掉线自动重启、通知）"
+    "手机同步|电脑酒馆 ↔ 手机 TT 双向同步聊天、角色、世界书、预设（USB 或无线）"
     "启动生图|启动本地 ComfyUI（用 NovelAI 时不需要）"
     "关闭生图|关闭本地 ComfyUI"
     "提示词拆分|读 NAI 原图 / 拆提示词给柏宝绘"
@@ -23,7 +24,7 @@ running() { [[ -n "$(our_pids $1)" ]] && print -n "${C_GREEN}运行中${C_RESET}
 
 while true; do
     clear
-    print -r -- "${C_BOLD}酒馆工具${C_RESET}   代理 $(running $PROXY_PORT)$( [[ -n "$ST_DIR" ]] && print -n "  ·  酒馆 $(running $ST_PORT)")$( [[ -s "$LAN_KEY_FILE" ]] && print -n "  ·  手机连接 ${C_GREEN}开${C_RESET}")"
+    print -r -- "${C_BOLD}酒馆工具${C_RESET}   代理 $(running $PROXY_PORT)$( [[ -n "$ST_DIR" ]] && print -n "  ·  酒馆 $(running $ST_PORT)")  ·  $( [[ -s "$LAN_KEY_FILE" ]] && print -n "${C_GREEN}手机模式${C_RESET}$(watchdog_running && print -n "（守护中）")" || print -n "电脑模式")"
     print
     for i in {1..${#ITEMS}}; do
         print -r -- "  $(printf '%2d' $i)  ${ITEMS[$i]%%|*}${C_DIM}  —  ${ITEMS[$i]#*|}${C_RESET}"
