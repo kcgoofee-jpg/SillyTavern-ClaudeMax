@@ -137,7 +137,9 @@ def push_tar(ph, data):
     ph.run('push', f.name, '/data/local/tmp/cm_push.tar')
     os.unlink(f.name)
     b = shlex.quote(ph.base)
-    ph.rsh(f'cd {b} && tar -xf /data/local/tmp/cm_push.tar && chown -R $(stat -c %u:%g {b}) {b}; rm -f /data/local/tmp/cm_push.tar')
+    out = ph.rsh(f'cd {b} && tar -xf /data/local/tmp/cm_push.tar && chown -R $(stat -c %u:%g {b}) {b} && echo CM_OK; rm -f /data/local/tmp/cm_push.tar')
+    if 'CM_OK' not in out:
+        raise RuntimeError('手机上解包失败（存储空间满了、或连接中断）')
 
 
 def extract(data, dest):
@@ -293,16 +295,25 @@ def main():
     if over_local or over_remote:
         print(f'  被覆盖的旧文件备份在 {bk}')
 
-    for i in range(0, len(push), 400):
-        push_tar(ph, tar_bytes(a.st, push[i:i + 400]))
-    for i in range(0, len(pull), 400):
-        extract(pull_tar(ph, pull[i:i + 400]), a.st)
+    try:
+        for i in range(0, len(push), 400):
+            push_tar(ph, tar_bytes(a.st, push[i:i + 400]))
+        for i in range(0, len(pull), 400):
+            data = pull_tar(ph, pull[i:i + 400])
+            if not data:
+                raise RuntimeError('从手机取文件失败（连接中断或手机锁屏断开了调试）')
+            extract(data, a.st)
+    except RuntimeError as e:
+        print(f'  ✗ {e}。已同步的部分保留，重新运行会接着同步剩下的。')
 
-    # 记下这次同步后的状态
+    # 核对：同步过的文件两边必须大小一致、时间对得上；对不上的不记进状态，下次重新同步
     loc, rem = local_files(a.st), remote_files(ph)
-    new_state = {rel: {'l': loc[rel], 'r': rem[rel]} for rel in loc if rel in rem}
+    new_state = {rel: {'l': loc[rel], 'r': rem[rel]} for rel in loc if rel in rem and same(loc[rel], rem[rel])}
+    for rel, s0 in state.items():   # 两边本来就不同、这次也没动的，保留旧记录
+        if rel not in new_state and rel in loc and rel in rem and rel not in push and rel not in pull:
+            new_state[rel] = s0
     json.dump(new_state, open(a.state, 'w', encoding='utf-8'))
-    missing = [r for r in set(push) | set(pull) if r not in new_state]
+    missing = sorted(r for r in set(push) | set(pull) if r not in new_state)
     print(f'  ✓ 同步完成：→ 手机 {len(push)} 个，← 电脑 {len(pull)} 个' + (f'；{len(missing)} 个没同步成功' if missing else ''))
     for rel in missing[:10]:
         print(f'  ! 没同步成功：{rel}')

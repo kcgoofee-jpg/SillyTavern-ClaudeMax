@@ -383,7 +383,14 @@ find_adb() {
 # 已连接（USB 或无线调试）且已授权的手机序列号，没有就空
 phone_serial() {
     local adb; adb=$(find_adb) || return 1
-    "$adb" devices 2>/dev/null | awk 'NR>1 && $2=="device" {print $1; exit}'
+    # USB 优先（同一台手机开了无线调试会出现两次）
+    "$adb" devices 2>/dev/null | awk 'NR>1 && $2=="device" { if ($1 ~ /:/) w = w ? w : $1; else { print $1; found = 1; exit } } END { if (!found && w) print w }'
+}
+
+# 连着但没授权 / 离线的手机（给出具体提示用）
+phone_problem() {
+    local adb; adb=$(find_adb) || return 1
+    "$adb" devices 2>/dev/null | awk 'NR>1 && ($2=="unauthorized" || $2=="offline") {print $2; exit}'
 }
 
 # Mac 通知中心 + 已连接手机的通知栏

@@ -20,6 +20,14 @@ if [[ -z "$serial" && -s "$PHONE_FILE" ]]; then
     serial=$(phone_serial)
 fi
 if [[ -z "$serial" ]]; then
+    case "$(phone_problem)" in
+        unauthorized) fail "手机连上了，但还没允许这台 Mac 调试"
+                      fix "看手机屏幕：弹出「允许 USB 调试吗」时点允许（勾选始终允许），然后再选一次「手机同步」。"
+                      summary; pause_end 1 ;;
+        offline)      fail "手机处于离线状态（常见于锁屏或刚插线）"
+                      fix "解锁手机，拔插一次 USB 线，再选一次「手机同步」。"
+                      summary; pause_end 1 ;;
+    esac
     fail "没连上手机"
     fix "用 USB 线连上手机，手机上打开「开发者选项 → USB 调试」，弹出「允许 USB 调试吗」时点允许（勾选始终允许）。"
     fix "手机重启过的话无线调试会失效，要插线再开一次。"
