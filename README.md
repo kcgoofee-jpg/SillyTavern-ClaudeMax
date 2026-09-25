@@ -159,6 +159,8 @@ macOS 用户双击 `launcher/mac/酒馆工具.command` 打开菜单：启动 / �
 
 **手机同步**（菜单「手机同步」，需要 adb 和手机 root）：电脑 SillyTavern ↔ 手机 TauriTavern 双向同步聊天、角色卡、世界书、预设、头像、背景、生图图片、主题和快速回复；按上次同步的状态判断哪边改过，两边都改过时用较新的、另一份存进 `backups/`，从不删除文件。第三方扩展只从电脑推到手机（git 版本不同时）。设置和密钥不同步，只把手机上的代理地址改成 Mac 现在的 IP。插线时可以顺手开无线调试，之后同一 Wi-Fi 不插线也能同步。
 
+**本机 TT 导入**（菜单「本机TT导入」）：电脑 SillyTavern → 同一台 Mac 上的 TauriTavern，一键导入聊天、角色卡、世界书、预设、图片和第三方扩展，可选连扩展设置（柏宝绘、MVU、小白X、正则、Claude Max）和当前预设一起导入。单向：TT 独有的文件保留，TT 上更新过的不覆盖，被覆盖的先备份。
+
 其他设备的请求必须带访问密码（`Authorization: Bearer <密码>` 或 `X-Claude-Max-Key`），本机不需要。没开手机模式时，就算代理绑到 `0.0.0.0` 也会拒绝所有局域网请求。不要在公共 Wi-Fi 开启，密码不要外传：拿到密码的人用的是你的订阅。手动启动时对应的环境变量是 `CLAUDE_SUBSCRIPTION_HOST=0.0.0.0`、`CLAUDE_SUBSCRIPTION_LAN_KEY=<密码>`。
 
 </details>

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""电脑酒馆（SillyTavern）↔ 手机 TauriTavern 双向同步（adb，USB 或无线调试）。
+"""电脑酒馆（SillyTavern）↔ 手机 TauriTavern 双向同步（adb，USB 或无线调试）；
+也能同步这台 Mac 上的 TauriTavern（--local-tt，规则相同，不用 adb）。
 
 同步：聊天、角色卡、世界书、预设、头像、背景、生图图片、主题、快速回复；扩展只从电脑推到手机（git 版本较新时）。
 不同步：设置（两边的代理地址不同）和密钥。另外把手机上的代理地址对准这台 Mac 现在的 IP。
@@ -10,8 +11,9 @@
   被覆盖的文件先备份到 <酒馆目录>/backups/<日期>/<时间>-手机同步前/{电脑,手机}/。
 手机上的 TauriTavern 数据在 Android/data 里：需要 root（su），或 Android 10 及以下。
 
-用法：phone_sync.py --st <SillyTavern/data/default-user> --adb <adb> [--serial S] [--dry-run]
+用法：phone_sync.py --st <SillyTavern/data/default-user> --adb <adb> --serial S [--dry-run]
       [--mac-ip IP --port 8901 --lan-key-file F]
+      phone_sync.py --st <…> --local-tt <TT 的 data/default-user> [--dry-run] [--port 8901]
 """
 import argparse, io, json, os, re, shlex, subprocess, sys, tarfile, tempfile, time
 
@@ -49,6 +51,15 @@ class Phone:
         return self.sh(cmd, su=self.root)
 
 
+class LocalTT:
+    """这台 Mac 上的 TauriTavern：直接读写文件。"""
+    label = 'Mac TT'
+
+    def __init__(self, base):
+        self.base = base if os.path.isdir(base) else None
+        self.root = False
+
+
 def local_files(st):
     out = {}
     for d in DIRS:
@@ -65,6 +76,8 @@ def local_files(st):
 
 
 def remote_files(ph):
+    if isinstance(ph, LocalTT):
+        return local_files(ph.base)
     dirs = ' '.join(shlex.quote(d) for d in DIRS)
     txt = ph.rsh(f'cd {shlex.quote(ph.base)} && for d in {dirs}; do [ -d "$d" ] && find "$d" -type f -exec stat -c "%Y %s %n" {{}} +; done')
     out = {}
@@ -117,6 +130,8 @@ def tar_bytes(st, rels):
 
 def pull_tar(ph, rels):
     """Remote files → tar bytes."""
+    if isinstance(ph, LocalTT):
+        return tar_bytes(ph.base, rels)
     lst = '\n'.join(rels).encode('utf-8') + b'\n'
     with tempfile.NamedTemporaryFile(delete=False) as f:
         f.write(lst)
@@ -132,6 +147,9 @@ def pull_tar(ph, rels):
 
 
 def push_tar(ph, data):
+    if isinstance(ph, LocalTT):
+        extract(data, ph.base)
+        return
     with tempfile.NamedTemporaryFile(delete=False, suffix='.tar') as f:
         f.write(data)
     ph.run('push', f.name, '/data/local/tmp/cm_push.tar')
@@ -147,6 +165,9 @@ def extract(data, dest):
         for m in t.getmembers():
             if not m.isfile() or m.name.startswith('/') or '..' in m.name.split('/'):
                 continue
+            target = os.path.join(dest, m.name)
+            if os.path.exists(target) and not os.access(target, os.W_OK):
+                os.chmod(target, 0o644)   # git 的对象文件是只读的，覆盖前放开
             t.extract(m, dest, set_attrs=False)
             os.utime(os.path.join(dest, m.name), (m.mtime, m.mtime))
 
@@ -160,6 +181,8 @@ def local_rev(d):
 
 
 def remote_rev(ph, d):
+    if isinstance(ph, LocalTT):
+        return local_rev(d) if os.path.isdir(os.path.join(d, '.git')) else None
     q = shlex.quote(d)
     head = ph.rsh(f'cat {q}/.git/HEAD 2>/dev/null').strip()
     if not head.startswith('ref: '):
@@ -184,7 +207,7 @@ def sync_extensions(ph, ext_dir, dry):
         if rev and rev != remote_rev(ph, f'{remote_ext}/{name}'):
             todo.append((name, src, rev))
     for name, _, rev in todo:
-        print(f'  扩展 → 手机：{name}（{rev[:7]}）')
+        print(f'  扩展 → {getattr(ph, "label", "手机")}：{name}（{rev[:7]}）')
     if dry or not todo:
         return len(todo)
     for name, src, _ in todo:
@@ -198,6 +221,13 @@ def sync_extensions(ph, ext_dir, dry):
                 ti.uname = ti.gname = ''
                 return ti
             t.add(src, arcname=name, filter=filt)
+        if isinstance(ph, LocalTT):
+            dst = os.path.join(remote_ext, name)
+            if os.path.islink(dst):
+                os.unlink(dst)   # 旧的符号链接：换成实体副本
+            os.makedirs(remote_ext, exist_ok=True)
+            extract(buf.getvalue(), remote_ext)
+            continue
         with tempfile.NamedTemporaryFile(delete=False, suffix='.tar') as f:
             f.write(buf.getvalue())
         ph.run('push', f.name, '/data/local/tmp/cm_ext.tar')
@@ -207,6 +237,35 @@ def sync_extensions(ph, ext_dir, dry):
     return len(todo)
 
 
+# 复制到本机 TT 的扩展设置（TT 自己的连接管理、界面、禁用列表等不动）
+EXT_SETTING_KEYS = ['LittleWhiteBox', 'baibai_api_channels', 'baibai_exclude_settings', 'baibai_image',
+                    'baibai_image_char_global', 'mvu_settings', 'tavern_helper', 'EjsTemplate', 'claude_max',
+                    'regex', 'regex_presets', 'preset_allowed_regex', 'character_allowed_regex']
+
+
+def copy_settings(ph, st, bk):
+    """电脑酒馆的扩展设置和对话补全设置（当前预设、模型、开关）→ 本机 TT。先备份 TT 的两份设置。"""
+    src = json.load(open(os.path.join(st, 'settings.json'), encoding='utf-8'))
+    changed = []
+    for rel, apply in (('settings.json', lambda d: d.setdefault('extension_settings', {}).update(
+                           {k: src['extension_settings'][k] for k in EXT_SETTING_KEYS if k in src.get('extension_settings', {})})),
+                       ('settings/presets.json', lambda d: d.update({'oai_settings': src['oai_settings']}) if 'oai_settings' in src else None)):
+        path = os.path.join(ph.base, rel)
+        if not os.path.exists(path):
+            continue
+        raw = open(path, encoding='utf-8').read()
+        d = json.loads(raw)
+        before = json.loads(raw)
+        apply(d)
+        if d == before:
+            continue
+        os.makedirs(os.path.join(bk, os.path.dirname(rel)), exist_ok=True)
+        open(os.path.join(bk, rel), 'w', encoding='utf-8').write(raw)
+        open(path, 'w', encoding='utf-8').write(json.dumps(d, ensure_ascii=False, indent=4 if rel == 'settings.json' else None))
+        changed.append(rel)
+    return changed
+
+
 def fix_endpoint(ph, ip, port, key):
     """手机设置里指向 :port 的代理地址 → 这台 Mac 现在的 IP；访问密码对上 Mac 的。"""
     new = f'http://{ip}:{port}'
@@ -214,7 +273,10 @@ def fix_endpoint(ph, ip, port, key):
     changed = []
     for rel in ('settings.json', 'settings/presets.json'):
         path = f'{ph.base}/{rel}'
-        raw = ph.rsh(f'cat {shlex.quote(path)} 2>/dev/null')
+        if isinstance(ph, LocalTT):
+            raw = open(path, encoding='utf-8').read() if os.path.exists(path) else ''
+        else:
+            raw = ph.rsh(f'cat {shlex.quote(path)} 2>/dev/null')
         if not raw.strip().startswith('{'):
             continue
         d = json.loads(raw)
@@ -227,6 +289,10 @@ def fix_endpoint(ph, ip, port, key):
         if d == json.loads(raw):   # 比较内容，不比较排版
             continue
         out = json.dumps(d, ensure_ascii=False, indent=4 if rel == 'settings.json' else None)
+        if isinstance(ph, LocalTT):
+            open(path, 'w', encoding='utf-8').write(out)
+            changed.append(rel)
+            continue
         with tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8') as f:
             f.write(out)
         ph.run('push', f.name, '/data/local/tmp/cm_cfg.json')
@@ -240,8 +306,13 @@ def fix_endpoint(ph, ip, port, key):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--st', required=True)
-    ap.add_argument('--adb', required=True)
-    ap.add_argument('--serial', required=True)
+    ap.add_argument('--adb')
+    ap.add_argument('--serial')
+    ap.add_argument('--push-only', action='store_true',
+                    help='只从电脑推过去：对方独有的文件不拉回来，对方更新的文件不覆盖（导入 / 安装用）')
+    ap.add_argument('--settings', action='store_true',
+                    help='（仅 --local-tt）把电脑酒馆的扩展设置和对话补全设置复制过去')
+    ap.add_argument('--local-tt', help='这台 Mac 上 TauriTavern 的 data/default-user（代替 --adb/--serial）')
     ap.add_argument('--state', required=True)
     ap.add_argument('--backups', required=True)
     ap.add_argument('--dry-run', action='store_true')
@@ -251,17 +322,36 @@ def main():
     ap.add_argument('--ext-dir', help='电脑上的第三方扩展目录（SillyTavern/public/scripts/extensions/third-party）')
     a = ap.parse_args()
 
-    ph = Phone(a.adb, a.serial)
+    if a.local_tt:
+        ph = LocalTT(a.local_tt)
+        if not ph.base:
+            print(f'✗ 找不到 {a.local_tt}：这台 Mac 没装 TauriTavern，或还没打开过一次。')
+            return 2
+        a.mac_ip = a.mac_ip or '127.0.0.1'   # 本机 TT 直接连本机代理，不用访问密码
+    elif not (a.adb and a.serial):
+        ap.error('需要 --adb 和 --serial，或者 --local-tt')
+    else:
+        ph = Phone(a.adb, a.serial)
+    side = getattr(ph, 'label', '手机')
     if not ph.base:
         print('✗ 手机上找不到 TauriTavern 的数据（没装，或没有 root 读不到 Android/data）。')
         print('  没有 root 时：用 TauriTavern 自带的「数据迁移」扩展导出 / 导入。')
         return 2
-    print(f'  手机：{a.serial}{"（root）" if ph.root else ""}')
+    print(f'  {side}：{a.local_tt or a.serial}{"（root）" if ph.root else ""}')
     state = json.load(open(a.state, encoding='utf-8')) if os.path.exists(a.state) else {}
     loc, rem = local_files(a.st), remote_files(ph)
     push, pull, conflicts = plan(loc, rem, state)
-    print(f'  电脑 {len(loc)} 个文件，手机 {len(rem)} 个文件')
-    print(f'  → 手机：{len(push)} 个    ← 电脑：{len(pull)} 个    两边都改过：{len(conflicts)} 个')
+    kept = []
+    if a.push_only:
+        kept = [r for r in pull if r in loc]   # 对方的更新：不覆盖
+        only_there = [r for r in pull if r not in loc]
+        pull, conflicts = [], []
+        if only_there:
+            print(f'  {side}独有、电脑上没有的 {len(only_there)} 个文件：保留在{side}，不拉回电脑')
+        for rel in kept:
+            print(f'  ! {side}上的比电脑新，没有覆盖：{rel}')
+    print(f'  电脑 {len(loc)} 个文件，{side} {len(rem)} 个文件')
+    print(f'  → {side}：{len(push)} 个    ← 电脑：{len(pull)} 个    两边都改过：{len(conflicts)} 个')
     for rel in (push[:8]):
         print(f'     → {rel}')
     if len(push) > 8:
@@ -275,11 +365,11 @@ def main():
     if a.ext_dir:
         n = sync_extensions(ph, a.ext_dir, a.dry_run)
         if not n:
-            print('  扩展：手机上已是最新')
+            print(f'  扩展：{side}上已是最新')
     if a.dry_run:
         return 0
 
-    bk = os.path.join(a.backups, time.strftime('%Y-%m-%d'), f"{time.strftime('%H%M%S')}-手机同步前")
+    bk = os.path.join(a.backups, time.strftime('%Y-%m-%d'), f"{time.strftime('%H%M%S')}-{side}同步前")
     # 备份即将被覆盖的文件
     over_local = [r for r in pull if r in loc]
     over_remote = [r for r in push if r in rem]
@@ -290,7 +380,7 @@ def main():
             with open(os.path.join(a.st, rel), 'rb') as s, open(dst, 'wb') as d:
                 d.write(s.read())
     if over_remote:
-        extract(pull_tar(ph, over_remote), os.path.join(bk, '手机'))
+        extract(pull_tar(ph, over_remote), os.path.join(bk, side))
     if over_local or over_remote:
         print(f'  被覆盖的旧文件备份在 {bk}')
 
@@ -313,14 +403,17 @@ def main():
             new_state[rel] = s0
     json.dump(new_state, open(a.state, 'w', encoding='utf-8'))
     missing = sorted(r for r in set(push) | set(pull) if r not in new_state)
-    print(f'  ✓ 同步完成：→ 手机 {len(push)} 个，← 电脑 {len(pull)} 个' + (f'；{len(missing)} 个没同步成功' if missing else ''))
+    print(f'  ✓ 同步完成：→ {side} {len(push)} 个，← 电脑 {len(pull)} 个' + (f'；{len(missing)} 个没同步成功' if missing else ''))
     for rel in missing[:10]:
         print(f'  ! 没同步成功：{rel}')
 
+    if a.settings and isinstance(ph, LocalTT):
+        ch = copy_settings(ph, a.st, bk)
+        print(f'  ✓ 扩展设置和对话补全设置已复制到{side}（旧的备份在 {bk}）' if ch else f'  扩展设置：{side}上已是最新')
     if a.mac_ip:
-        key = open(a.lan_key_file).read().strip() if a.lan_key_file and os.path.exists(a.lan_key_file) else None
+        key = open(a.lan_key_file).read().strip() if a.lan_key_file and os.path.exists(a.lan_key_file) and not a.local_tt else None
         ch = fix_endpoint(ph, a.mac_ip, a.port, key)
-        print(f'  ✓ 手机的代理地址已对准 http://{a.mac_ip}:{a.port}/v1' + ('' if ch else '（本来就是）'))
+        print(f'  ✓ {side}的代理地址已对准 http://{a.mac_ip}:{a.port}/v1' + ('' if ch else '（本来就是）'))
     return 1 if missing else 0
 
 

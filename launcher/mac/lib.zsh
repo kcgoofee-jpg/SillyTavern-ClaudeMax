@@ -157,8 +157,9 @@ mark_log() {
 diagnose_log() {
     local file=$1 label=$2 tail_text found=0
     [[ -f "$file" ]] || { explain "（还没有 $label 日志）"; return; }
-    # 额度查询接口偶尔返回 429，只影响面板上的额度显示，不算对话出错
-    tail_text=$(tail -n 300 "$file" | grep -v "quota endpoint")
+    # 只看这次启动以来的日志，并且只看最后一次成功回复之后的：之前的错误已经过去了
+    # （额度查询接口偶尔返回 429，只影响面板上的额度显示，不算对话出错）
+    tail_text=$(tail -n 2000 "$file" | awk '/由酒馆工具箱启动/ {buf = ""; next} /\] ✓ / {buf = ""; next} {buf = buf $0 "\n"} END {printf "%s", buf}' | tail -n 300 | grep -v "quota endpoint")
 
     _diag() {
         local pattern=$1 reason=$2 remedy=$3
@@ -566,6 +567,10 @@ health_check() {
     fi
 
     has_st || return 0
+    if [[ -z "$(our_pids $ST_PORT)" ]]; then
+        explain "· 酒馆没在运行，不检查网页（只用 TauriTavern 的话不需要它）"
+        return 0
+    fi
     code=$(curl -s -o /dev/null --max-time 5 -w '%{http_code}' "http://127.0.0.1:$ST_PORT/")
     case $code in
         200|302|401) ok "酒馆网页可以打开（HTTP $code）" ;;
