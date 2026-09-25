@@ -143,3 +143,29 @@ test('a reroll (same conversation sent again) is marked', () => {
     assert.equal(diagnoseCache(sys, h).reroll, true);
     assert.equal(diagnoseCache(sys, [...h, { role: 'assistant', content: '门开了' }, { role: 'user', content: '进去' }]).reroll, undefined);
 });
+
+test('what was learned about a chat survives a restart (tags and split only)', async () => {
+    const { mkdtempSync, readFileSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const file = join(mkdtempSync(join(tmpdir(), 'cm-')), 'mem.json');
+    process.env.CLAUDE_SUBSCRIPTION_CACHE_MEMORY_FILE = file;
+    try {
+        __resetCacheDiag();
+        const rules = '规则'.repeat(2000);
+        const sys = (wi) => `<rules>${rules}</rules>\n<world_info>${wi}</world_info>`;
+        const h = (n) => [{ role: 'user', content: '开始' }, ...Array.from({ length: n }, (_, i) => ({ role: i % 2 ? 'user' : 'assistant', content: `第${i}句` }))];
+        diagnoseCache(sys('甲'), h(1));
+        assert.deepEqual(diagnoseCache(sys('乙'), h(3)).volatileTags, ['world_info']);
+        const saved = readFileSync(file, 'utf8');
+        assert.ok(!saved.includes('第') && !saved.includes('规则'), 'no chat or prompt text on disk');
+        __resetCacheDiag(); // "restart"
+        const first = diagnoseCache(sys('丙'), h(5));
+        assert.equal(first.firstTurn, true);
+        assert.equal(first.remembered, true);
+        assert.deepEqual(first.volatileTags, ['world_info']);
+    } finally {
+        delete process.env.CLAUDE_SUBSCRIPTION_CACHE_MEMORY_FILE;
+        __resetCacheDiag();
+    }
+});
