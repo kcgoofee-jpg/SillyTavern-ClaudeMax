@@ -95,6 +95,13 @@ pause_end() {
         exit $code
     fi
     print
+    if [[ -n "$CM_MENU" ]]; then
+        # 从「酒馆工具」菜单进来的：回到菜单，不关窗口
+        print -n -- "${C_BOLD}按任意键回到菜单…${C_RESET}"
+        read -k 1 -s
+        print
+        exit $code
+    fi
     print -n -- "${C_BOLD}按任意键关闭窗口…${C_RESET}"
     read -k 1 -s
     print
@@ -105,6 +112,7 @@ pause_end() {
 close_terminal_window() {
     # 脚本退出后，由后台的 AppleScript 关掉当前这个 Terminal 窗口。
     # 等脚本先退出再关，Terminal 就不会弹出「是否终止进程」的确认框。
+    [[ -n "$CM_MENU" ]] && return   # 菜单里运行时窗口留给菜单
     local my_tty=$(tty 2>/dev/null)
     [[ "$TERM_PROGRAM" == "Apple_Terminal" && "$my_tty" == /dev/* ]] || return
     (
