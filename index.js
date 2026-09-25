@@ -842,6 +842,32 @@
         return card;
     }
 
+    // After a reply: tell the user when the proxy served something other
+    // than what was asked for (base model instead of 1M, a reply cut off by a
+    // safety stop, or redone by another model). Once per request.
+    let lastNoticeAt = 0;
+    async function noticeLastTurn() {
+        try {
+            const res = await fetchProxy('/stats', '/v1/usage/stats');
+            if (!res.ok) return;
+            const last = (await res.json()).lastRequest;
+            if (!last || last.auxiliary || last.at <= lastNoticeAt || Date.now() - last.at > 5 * 60 * 1000) return;
+            lastNoticeAt = last.at;
+            const notices = last.notices ?? [];
+            const fallback = notices.find((n) => n.startsWith('fallback:'))?.slice(9);
+            if (fallback) {
+                toastr?.warning?.(`这条回复被 Claude 的安全机制中途截断，随后由 ${shortModel(fallback)} 重写，不是 ${shortModel(last.model)} 写的。文风可能不同，前半截没能撤回，格式可能错乱。`, 'Claude Max · 换了模型', { timeOut: 15000 });
+            } else if (notices.includes('refusal') || last.finish === 'content_filter') {
+                toastr?.warning?.('这条回复被 Claude 的安全机制中途截断，结尾缺了内容（变量更新、状态栏可能报错）。可以重新生成，或回退一楼换个说法。', 'Claude Max · 回复被截断', { timeOut: 15000 });
+            } else if (last.finish === 'length') {
+                toastr?.warning?.('这条回复写到了最大长度被截断。调高酒馆的「最大回复长度」。', 'Claude Max · 回复被截断', { timeOut: 12000 });
+            }
+            if (notices.includes('no-1m')) {
+                toastr?.info?.(`选的是 1M 上下文版，这一轮用的是普通版 ${shortModel(last.model).replace(/\s*1M$/, '')}（1M 额度不可用，一小时后再试）。`, 'Claude Max · 降为普通上下文', { timeOut: 12000 });
+            }
+        } catch { /* proxy unreachable: the status block already says so */ }
+    }
+
     async function refreshStats() {
         const box = document.getElementById('claude_max_stats');
         const lastBox = document.getElementById('claude_max_lastturn');
@@ -1371,6 +1397,7 @@
         if (ev) eventSource.on(ev, () => setTimeout(() => { renderConnect(); renderGlance(); }, 100));
     }
     eventSource.on(eventTypes.MESSAGE_RECEIVED, refreshIfOpen);
+    eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED ?? eventTypes.MESSAGE_RECEIVED, () => setTimeout(noticeLastTurn, 400));
     eventSource.on(eventTypes.CHAT_CHANGED, refreshIfOpen);
     eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, applyPresetRecommendation);
     if (eventTypes.APP_READY) eventSource.on(eventTypes.APP_READY, adoptUnrecordedReco);

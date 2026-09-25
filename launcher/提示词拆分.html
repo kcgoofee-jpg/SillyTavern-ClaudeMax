@@ -133,27 +133,38 @@ let shownKeys = new Set(); // 页面上显示出来的 Comment 字段
 let lastParams = null; // 读图得到的生成参数（导出配方用）
 const SALT = crypto.getRandomValues(new Uint8Array(16));
 
-function splitTop(str) {
-  const out = []; let depth = 0; let cur = '';
-  for (const ch of str) {
-    if ('{[('.includes(ch)) depth++;
-    if ('}])'.includes(ch)) depth = Math.max(0, depth - 1);
-    if (ch === ',' && depth === 0) { out.push(cur); cur = ''; } else cur += ch;
-  }
-  out.push(cur);
-  return out.map((s) => s.trim()).filter(Boolean);
-}
-
-/** 一段提示词 → [{ text: 带权重的原样 tag, core: 规范化后的 tag }] */
+/**
+ * 一段提示词 → [{ text: 带权重的原样 tag, core: 规范化后的 tag }]
+ *
+ * 逐字扫描，按 NAI 的写法：
+ *   1.2::a, b::   权重组，组里每个 tag 各自带上 1.2（结尾的 :: 结束这一组）
+ *   1.2::a, b     没写结尾 :: 时一直作用到下一个权重组或结尾
+ *   .8::a::  -1::a::  1.2::a::0.8::b::（组与组之间没逗号）都认
+ *   {a, b} [[c]] (d:1.2)  括号内的逗号不拆开，外层括号分给里面每个 tag
+ */
 function parse(str) {
-  // NAI 数字权重组 1.2::a, b:: → 每个 tag 各自带上同样的权重
-  const expanded = str.replace(/\n+/g, ',').replace(/(-?\d+(?:\.\d+)?)::([\s\S]*?)::/g, (m, w, inner) =>
-    inner.split(',').map((t) => t.trim()).filter(Boolean).map((t) => `\u0001${w}\u0002${t}`).join(','));
+  const WEIGHT = /^-?(?:\d+(?:\.\d*)?|\.\d+)::/;
+  const raw = []; // { w: 权重或 null, t: 一段文字 }
+  const stack = []; let buf = ''; let depth = 0; // 权重可以嵌套：1.2::a, 0.9::b::, c:: 里 c 仍是 1.2
+  const flush = () => { const t = buf.trim(); if (t) raw.push({ w: stack.at(-1) ?? null, t }); buf = ''; };
+  for (let i = 0; i < str.length;) {
+    const ch = str[i];
+    if (depth === 0) {
+      if (!buf.trim()) {
+        const m = str.slice(i).match(WEIGHT);
+        if (m) { flush(); stack.push(m[0].slice(0, -2)); i += m[0].length; continue; }
+      }
+      if (str.startsWith('::', i)) { flush(); stack.pop(); i += 2; continue; }
+      if (ch === ',' || ch === '\n' || ch === '，') { flush(); i++; continue; }
+    }
+    if ('{[('.includes(ch)) depth++;
+    else if ('}])'.includes(ch)) depth = Math.max(0, depth - 1);
+    buf += ch; i++;
+  }
+  flush();
   const items = [];
-  for (let tok of splitTop(expanded)) {
-    let pre = ''; let post = '';
-    const w = tok.match(/^\u0001(-?[\d.]+)\u0002([\s\S]*)$/);
-    if (w) { pre = `${w[1]}::`; post = '::'; tok = w[2]; }
+  for (const { w: weight, t: tok } of raw) {
+    const pre = weight != null ? `${weight}::` : ''; const post = weight != null ? '::' : '';
     // 外层强调括号 {{…}} / [[…]] / (…)：两头各剥同样层数，名字里自带的括号保留
     let parts = [tok]; let bl = ''; let bRight = '';
     const lead = tok.match(/^[{[(]+/)?.[0] ?? '';
@@ -161,7 +172,7 @@ function parse(str) {
       const tail = tok.slice(-lead.length);
       if (/^[}\])]+$/.test(tail)) {
         bl = lead; bRight = tail;
-        parts = tok.slice(lead.length, -lead.length).split(',').map((t) => t.trim()).filter(Boolean);
+        parts = tok.slice(lead.length, -lead.length).split(/[,，]/).map((x) => x.trim()).filter(Boolean);
       }
     }
     for (const p of parts) {
@@ -296,7 +307,7 @@ async function buildCheck(lists) {
       const at = rest.indexOf(core);
       if (at >= 0) rest = rest.slice(0, at) + rest.slice(at + core.length);
     }
-    return rest.replace(/-?\d+(\.\d+)?::|::|:\s*-?[\d.]+|[{}\[\](),\s]/g, '').length;
+    return rest.replace(/-?(?:\d+(?:\.\d*)?|\.\d+)::|::|:\s*-?[\d.]+|[{}\[\](),，\s]/g, '').length;
   };
   checks.allExtracted = leftover(pos, items) === 0 && leftover(neg, parse(neg)) === 0;
   const code = {
