@@ -643,3 +643,15 @@
     flex-direction: column;
     gap: 6px;
 }
+
+/* 酒馆助手 gives every script its own full-width button row inside a wrapping
+   #qr--bar; let the rows sit side by side and only wrap when they run out of room. */
+body.cm-compact-qr #qr--bar > .qr--buttons[id^="script_container_"] {
+    width: auto;
+    flex: 0 1 auto;
+}
+
+body.cm-compact-qr #qr--bar:has(> .qr--buttons[id^="script_container_"]) {
+    justify-content: center;
+    gap: 5px;
+}

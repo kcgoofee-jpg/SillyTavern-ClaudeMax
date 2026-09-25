@@ -105,6 +105,7 @@
         presetRecoRecord: null,  // 上一个预设的推荐改了什么（切走时恢复）
         tailBlockFront: false,   // 实验：预设后置条目提前（省缓存）
         panelTab: 'reason',      // 面板上次打开的分页
+        compactScriptButtons: true, // 输入栏上方的脚本按钮并排显示
     };
 
     function getSettings() {
@@ -332,21 +333,21 @@
         const wrap = el('div', 'cm-field cm-oneshot');
         wrap.id = 'claude_max_oneshot';
         const row = el('div', 'cm-oneshot-row');
-        row.append(el('span', 'cm-field-label', '下一轮临时'));
+        row.append(el('span', 'cm-field-label', '仅下一轮'));
         const status = el('small', 'cm-hint');
         const group = el('div', 'cm-seg');
         row.append(group);
         const render = () => {
             group.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.effort === (nextEffort ?? '')));
             status.textContent = nextEffort
-                ? `下一条回复用「${EFFORT_LABEL[nextEffort]}」，收到后自动恢复为「${EFFORT_LABEL[settings.effort]}」。实测：高约慢 1/3，超高约慢 3 倍、输出额度约 3.5 倍。换深度时系统提示词的缓存保留，聊天记录部分会在这一轮和恢复后的一轮各重写一次。`
-                : '关键剧情想让模型多想一会儿时点一下，只影响下一条回复。实测：高约慢 1/3，超高约慢 3 倍。';
+                ? `下一条回复用「${EFFORT_LABEL[nextEffort]}」，收到后恢复「${EFFORT_LABEL[settings.effort]}」。再点一次取消。`
+                : '关键剧情点一下，只影响下一条回复。实测高约慢 1/3，超高约慢 3 倍。';
         };
-        for (const [value, label] of [['high', '高'], ['xhigh', '超高'], ['', '取消']]) {
+        for (const [value, label] of [['high', '高'], ['xhigh', '超高']]) {
             const b = el('button', 'cm-seg-btn', label);
             b.type = 'button';
             b.dataset.effort = value;
-            b.addEventListener('click', () => { nextEffort = value || null; render(); renderGlance(); });
+            b.addEventListener('click', () => { nextEffort = nextEffort === value ? null : value; render(); renderGlance(); });
             group.append(b);
         }
         wrap.append(row, status);
@@ -446,6 +447,8 @@
         return ctx.groupId ? `group:${ctx.groupId}` : (ctx.characters?.[ctx.characterId]?.avatar ?? 'default');
     }
 
+    let lastToastKey = '';
+
     function runCheckup({ toast = false } = {}) {
         const box = document.getElementById('claude_max_checkup');
         if (!chatCheck) {
@@ -479,7 +482,12 @@
             for (const i of r.issues) card.append(el('small', 'cm-hint', `· ${i.text}`));
             box.replaceChildren(card);
         }
-        if (toast && r.issues.length && settings.checkupToast) {
+        // Toast only when the problems change: the same issue every reply is noise.
+        const toastKey = `${currentCharKey()}|${r.issues.map((i) => i.code).sort().join(',')}`;
+        if (!r.issues.length) lastToastKey = '';
+        const always = r.issues.some((i) => i.code === 'flashback');
+        if (toast && r.issues.length && settings.checkupToast && (always || toastKey !== lastToastKey)) {
+            lastToastKey = toastKey;
             toastr?.warning?.(r.issues.map((i) => i.text).join('<br>'), 'Claude Max · 本轮体检', { timeOut: 9000, escapeHtml: false });
         }
     }
@@ -752,15 +760,18 @@
             card.append(el('small', 'cm-hint',
                 `${shortModel(last.model)} · 用时 ${fmtSec(last.durationMs)} · 输出 ${fmtK(last.outputTokens)} token${last.reasoningChars ? ` · 思考 ${last.reasoningChars} 字` : ''}`));
         }
-        for (const r of c.reasons) card.append(el('small', 'cm-hint cm-cache-reason', r));
+        // The first reason is the conclusion; everything else is detail.
+        const [first, ...rest] = c.reasons;
+        if (first) card.append(el('small', 'cm-hint cm-cache-reason', first));
         const ph = last?.phases;
-        if (ph?.init && ph.firstDelta) {
-            const sec = (v) => (v / 1000).toFixed(1);
+        const sec = (v) => (v / 1000).toFixed(1);
+        if (rest.length || (ph?.init && ph.firstDelta)) {
             const more = el('details', 'cm-mini');
-            more.append(
-                el('summary', null, `首字 ${sec(ph.firstDelta)} 秒，由哪几段组成`),
-                el('small', 'cm-hint', `代理和 CLI 启动 ${sec(ph.init)} 秒（本机）；模型读完提示词开始回复 ${sec((ph.apiStart ?? ph.firstDelta) - ph.init)} 秒，开始写 ${sec(ph.firstDelta - (ph.apiStart ?? ph.firstDelta))} 秒（Anthropic 那边）。`),
-            );
+            more.append(el('summary', null, '详情'));
+            for (const r of rest) more.append(el('small', 'cm-hint cm-cache-reason', r));
+            if (ph?.init && ph.firstDelta) {
+                more.append(el('small', 'cm-hint', `首字 ${sec(ph.firstDelta)} 秒：代理和 CLI 启动 ${sec(ph.init)} 秒（本机）；模型读完提示词开始回复 ${sec((ph.apiStart ?? ph.firstDelta) - ph.init)} 秒，开始写 ${sec(ph.firstDelta - (ph.apiStart ?? ph.firstDelta))} 秒（Anthropic 那边）。`));
+            }
             card.append(more);
         }
         return card;
@@ -1131,12 +1142,13 @@
         reconnect.append(el('i', 'fa-solid fa-plug'), document.createTextNode(' 重新连接'));
         reconnect.addEventListener('click', () => connect(getSettings()));
         pane.append(reconnect);
+        pane.append(section('其他'));
         pane.append(toggleRow({
-            id: 'claudeMaxEnabled',
-            title: '把面板设置附加到请求',
-            desc: '只对指向本代理的连接生效。',
-            checked: settings.enabled,
-            onChange: (v) => { settings.enabled = v; save(); },
+            id: 'claudeMaxCompactButtons',
+            title: '输入栏脚本按钮并排',
+            desc: '酒馆助手的脚本按钮（如「角色图鉴」）排成一行，不再各占一行。',
+            checked: settings.compactScriptButtons,
+            onChange: (v) => { settings.compactScriptButtons = v; save(); applyCompactButtons(); },
         }));
         pane.append(toggleRow({
             id: 'claudeMaxIdentity',
@@ -1224,9 +1236,16 @@
         refreshProxyStatus();
     }
 
+    function applyCompactButtons() {
+        document.body.classList.toggle('cm-compact-qr', !!getSettings().compactScriptButtons);
+    }
+
     // ── Boot ──
 
     const settings = getSettings();
+    // v2.10 dropped the「附加到请求」switch; nobody should be stuck with it off.
+    settings.enabled = true;
+    applyCompactButtons();
     addExtensionSettings(settings);
     refreshProxyStatus();
     eventSource.on(eventTypes.CHAT_COMPLETION_SETTINGS_READY, onSettingsReady);
