@@ -476,3 +476,81 @@
 .claude-max .cm-pane[hidden] {
     display: none;
 }
+
+/* ── at-a-glance: header summary + chips ── */
+.claude-max .cm-heading {
+    min-width: 0;
+}
+
+.claude-max .cm-head-sum {
+    font-weight: 400;
+    opacity: 0.6;
+    font-size: 0.8em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.claude-max .cm-glance {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(84px, 1fr));
+    gap: 4px;
+}
+
+.claude-max .cm-chip {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    min-width: 0;
+    padding: 4px 6px;
+    border: 1px solid var(--cm-border);
+    border-radius: 7px;
+    background: var(--cm-soft);
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+}
+
+.claude-max .cm-chip small {
+    font-size: 0.72em;
+    opacity: 0.65;
+    white-space: nowrap;
+}
+
+.claude-max .cm-chip b {
+    font-size: 0.85em;
+    font-variant-numeric: tabular-nums;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.claude-max .cm-chip.warn { border-color: color-mix(in srgb, var(--cm-warn) 60%, transparent); }
+.claude-max .cm-chip.bad { border-color: color-mix(in srgb, var(--cm-bad) 60%, transparent); }
+.claude-max .cm-chip:hover { background: color-mix(in srgb, currentColor 10%, transparent); }
+
+/* quiet button once connected */
+.claude-max .cm-connect-quiet {
+    font-weight: 400;
+    padding: 5px;
+    opacity: 0.85;
+}
+
+/* toggle + expandable explanation */
+.claude-max .cm-more {
+    color: var(--cm-accent);
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.claude-max .cm-more-text {
+    padding: 4px 8px 6px;
+    border-left: 2px solid var(--cm-border);
+    margin: -2px 0 4px;
+}
+
+.claude-max .cm-heading-name {
+    white-space: nowrap;
+}

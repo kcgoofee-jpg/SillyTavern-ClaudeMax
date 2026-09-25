@@ -1,274 +1,167 @@
-# SillyTavern — Claude Max（订阅代理）
+# Claude Max for SillyTavern
+
+用自己的 **Claude Pro / Max 订阅** 在 SillyTavern（酒馆）或 TauriTavern 里聊天，不用另买 API 额度。
+
+它由两部分组成：
+
+- **本地代理**：通过官方 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) 调用你登录的订阅，对外提供 OpenAI 兼容接口（`http://127.0.0.1:8901/v1`）。
+- **Claude Max 面板**：酒馆扩展，负责一键连接，并提供思考深度、额度、缓存、回复体检等设置。
 
 > 基于 [LukaTheHero/SillyTavern-ClaudeSubscription](https://github.com/LukaTheHero/SillyTavern-ClaudeSubscription)（AGPL-3.0）独立维护，感谢原作者。
 
-Use your **Anthropic Pro / Max subscription** for SillyTavern chat instead of
-paying for API credits. A SillyTavern **Server Plugin** routes requests
-through the locally-installed [Claude Agent SDK][sdk] — the same subscription
-mechanism VS Code, Cursor, and Zed use — and ships with a companion
-**"Claude Max" UI extension** for one-click connection and Claude-native
-settings.
+> [!WARNING]
+> **使用前请先读完下面的[风险提示](#风险提示)。** 这不是 Anthropic 官方支持的用法，账号有被限制或封禁的可能。
 
-<img width="954" height="1736" alt="Screenshot 2026-07-01 195136" src="https://github.com/user-attachments/assets/34199be7-9d69-402e-ac98-8589ab40c955" />
+## 需要什么
 
+- Claude **Pro 或 Max** 订阅
+- Node.js 18 或更高版本
+- SillyTavern（原版）或 TauriTavern，运行在同一台电脑上
 
-[sdk]: https://docs.anthropic.com/en/docs/claude-code/sdk
+## 安装
 
-## 中文快速上手（独立代理 / TauriTavern）
+### 原版 SillyTavern（推荐）
 
-v2.3 起，代理可以**独立运行**，不再依赖 SillyTavern 的 Node 服务器插件。所以它也能配合
-[TauriTavern](https://github.com/Darkatse/TauriTavern) 使用。TauriTavern 的后端是 Rust，不支持服务器插件。
-
-1. **安装并登录**（只需一次）：
+1. 在酒馆的 `config.yaml` 里设置 `enableServerPlugins: true`。
+2. 在酒馆目录（有 `server.js` 的那一层）运行：
    ```bash
-   git clone https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax
-   cd SillyTavern-ClaudeMax
-   npm install        # 不要加 --omit=optional，Claude CLI 就在 optional 依赖里
-   npm run login      # 用 SDK 自带的 Claude CLI 登录 Pro/Max 订阅
-   npm run auth       # 查看登录状态
+   node plugins.js install https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax
+   cd plugins/SillyTavern-ClaudeMax
+   npm install
+   npm run login
    ```
-   在 macOS 上，凭据保存在钥匙串（Keychain）里，代理会自动读取。
-2. **启动代理**：运行 `npm start`，监听 `http://127.0.0.1:8901/v1`。
-3. **TauriTavern**：
-   - 打开「扩展 → 安装扩展」，填入本仓库的 git 地址，安装前端面板。
-   - 打开扩展抽屉里的 **Claude Max** 面板，点击 Connect。
-   - 第一次连接时，TauriTavern 会弹出原生授权框，允许访问 `127.0.0.1:8901` 即可。
-   - 面板顶部的状态点显示代理是否在线、是否已登录。
-4. **原版 SillyTavern**：照常作为服务器插件安装（见下文英文说明）。
-   - 如果已经用 `npm start` 启动了独立代理，插件会自动复用它，不会重复监听端口。
+   - 安装依赖时**不要**加 `--omit=optional`，Claude CLI 就在可选依赖里。
+   - `npm run login` 会打开浏览器，登录你的订阅账号。只需要登录一次。
+3. 重启酒馆，并强制刷新浏览器（Ctrl+F5）。面板会自动安装。
 
-新增模型：Claude Opus 5.5、Claude Sonnet 5（都有 1M 变体）。
-Sonnet 5 不支持 thinking 预算，所以「Always on」会按 adaptive 发送。
+### TauriTavern，或者想单独运行代理
 
-v2.4：
-- **使用统计**：代理每次对话记录一行元数据到 `data/usage.jsonl`（模型、耗时、token、缓存命中；不含聊天内容），
-  面板显示今天 / 近 7 天汇总和最近一次失败原因；`GET /v1/usage/stats` 返回同样数据。
-- **中文错误提示**：常见失败（未登录、额度限制、服务繁忙、上下文过长、1M 不可用……）带中文原因和解决办法。
-- **预设思维链提示**：回复正文里有 `<thinking>` 块而原生思考为空时，面板提示如何让酒馆把它收进折叠框。
-- 修复：Fable 请求出错时被误报为「模型被替换」（CLI 的 `<synthetic>` 错误消息）。
-- Claude Agent SDK 升级到 0.3.x。
-- **预设配合**：第一条用户消息之前的 system 条目全部进入系统提示词（夹在中间的伪造 assistant 回信留在历史里），整个预设可被缓存；之后的深度注入留在原位。
-- **预设推荐设置**：预设文件可带 `extensions.claude_max`（effort / thinking / showReasoning / useResume / inlineSystem），切换到该预设时面板自动应用。
-- **Opus 5.5 预检**：选了 Opus 5.5 而预设仍要求把 `<thinking>`/`<cot>` 写进回复时，发送前提示会被 reasoning_extraction 拦截。
+TauriTavern 不支持服务器插件，所以要单独启动代理：
 
-## What v2 gives you
-
-- **Current models** — Claude Fable 5.1/5, Opus 5/4.8/4.7/4.6/4.5, Sonnet 4.6/4.5,
-  Haiku 4.5, plus explicit **"(1M context)"** variants for the tiers that
-  support extended context.
-- **One-click connect** — the Claude Max panel (Extensions drawer) configures
-  SillyTavern's Custom endpoint for you. No URLs to paste.
-- **Claude-native reasoning effort** — `low / medium / high / xhigh / max`,
-  set in the Claude Max panel. SillyTavern's built-in Reasoning Effort
-  dropdown does **not** work for Claude models on Custom endpoints (its
-  "Maximum" is downgraded to `high` client-side, and the field is dropped
-  server-side for non-OpenAI model IDs) — this panel bypasses all of that.
-- **Thinking display** — Claude's reasoning streams into SillyTavern's native
-  collapsible "thoughts" block (`reasoning_content`). Toggle in the panel;
-  also enable "Show model thoughts" in ST's settings.
-- **Real multi-turn context** — chat history is replayed as a genuine Claude
-  session (synthetic session resume), not folded into one giant string:
-  proper role separation, working prompt caching, better long-RP quality.
-- **Roleplay isolation** — no coding system prompt, no host CLAUDE.md /
-  settings / MCP connectors leaking into your scenes, no agent tools. Your
-  character card and world info are the entire system prompt.
-- **Stop sequences enforced** — the Agent SDK has none, so the plugin scans
-  the stream server-side (`\n{{user}}:` guards work as expected).
-- **Resilience** — automatic OAuth token refresh, rate-limit retries,
-  1M-context → base-model fallback with a one-hour probe cooldown.
-- **Served-model guard** — an explicit Fable request is NEVER silently
-  substituted: if the upstream resolves your `claude-fable-5-1` or `claude-fable-5` pick to
-  anything else (e.g. Fable temporarily disabled on your plan), the request
-  errors out with a clear message instead of quietly switching to Opus
-  mid-roleplay.
-- **Quota meter** — live 5-hour / 7-day subscription window utilization in
-  the panel, so a long session never hits a surprise lockout.
-- **Privacy sweep** — the transcript the Claude CLI writes for each live turn
-  is deleted after the request; your roleplay does not persist in plaintext
-  under `~/.claude/projects`.
-
-## Prerequisites
-
-On the same machine SillyTavern runs on:
-
-1. **Sign in once** with your Pro / Max account (installs nothing into ST):
-   ```
-   npm i -g @anthropic-ai/claude-code
-   claude login
-   ```
-   (Headless / Docker: generate a token with `claude setup-token` and set
-   `CLAUDE_CODE_OAUTH_TOKEN` instead.)
-2. SillyTavern `config.yaml`: `enableServerPlugins: true`.
-
-## Install
-
-From your SillyTavern install directory (the one containing `server.js`):
-
-```
-node plugins.js install https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax
-cd plugins/SillyTavern-ClaudeMax
+```bash
+git clone https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax
+cd SillyTavern-ClaudeMax
 npm install
+npm run login
+npm start
 ```
 
-Restart SillyTavern. The server log should show:
+- 代理启动后要一直开着。
+- 面板从「扩展 → 安装扩展」安装，地址填本仓库的 git 地址。
+- 第一次连接时 TauriTavern 会弹出授权框，允许访问 `127.0.0.1:8901` 即可。
 
-```
-[claude-subscription] installed UI extension v2.0.1 at public/scripts/extensions/third-party/SillyTavern-ClaudeMax
-[claude-subscription] standalone listener: http://127.0.0.1:8901/v1
-[claude-subscription] initialised — endpoint http://127.0.0.1:8901/v1
-```
+## 使用
 
-> The companion **Claude Max** UI extension is installed/updated
-> automatically on startup. Hard-refresh the browser (Ctrl+F5) after the
-> first install so SillyTavern loads it. Opt out with
-> `CLAUDE_SUBSCRIPTION_NO_UI_INSTALL=1`.
+1. 打开「扩展」抽屉里的 **Claude Max** 面板，点 **一键连接**。
+2. 在「API 连接」的模型下拉框里选一个 Claude 模型，比如 Opus 5.5、Sonnet 5 或 Fable 5.1。
+3. 开始聊天。
 
-### Alternative: install the panel via the extension dialog
+面板分五页：
 
-The repo doubles as a regular UI extension (`manifest.json` at the root), so
-the **Claude Max panel** can also be installed from **Extensions → Install
-extension** by pasting the same GitHub URL. The auto-installer detects a
-dialog-installed copy and stands down (and a runtime guard dedupes if both
-ever load).
+| 页 | 内容 |
+| --- | --- |
+| 连接 | 代理状态、一键连接、使用说明 |
+| 推理 | 思考深度（低 → 最大）、「下一轮临时加深」、思考模式、是否显示思考过程 |
+| 统计 | 5 小时和 7 天额度、用量、上一轮缓存命中情况和原因、一键把世界书设为常驻 |
+| 体检 | 每条回复自动检查：字数、禁词、破折号、人称、选项格式、重复段落、数值突变 |
+| 高级 | 缓存相关开关、调试（查看实际发给模型的内容）、代理地址 |
 
-> ⚠️ The dialog installs **only the panel**. The **server plugin** (the
-> actual proxy) must still be installed into `plugins/` as above — without
-> it, Connect has nothing to connect to.
+面板顶部的四个小卡片显示模型、额度、缓存和体检结果，点一下可以跳到对应的页。
 
-## Connect
+**注意事项**
 
-1. Open the **Extensions** drawer → **Claude Max**.
-2. Click **Connect to Claude Max**.
-3. Pick a model from the normal model dropdown (e.g. *Claude Fable 5.1* or
-   *Claude Opus 5 (1M context)*).
-4. Chat.
+- 酒馆自带的「推理强度」请保持「自动」，思考深度在面板里设置。
+- 「提示词后处理」请设为「无」。点一键连接时会自动改好。
 
-Set effort/thinking in the same panel — changes apply from the next message,
-no reconnect needed.
+## 省额度：让缓存生效
 
-v2.5（这一版的实测数据见仓库外的 `tavern/ab-tests/结果-M1缓存.md`）：
-- **聊天记录终于能读缓存**：Claude Code CLI 会把环境、模型、日期等提醒追加在「本轮输入」上；下一轮这条消息变成历史时没有这些提醒，
-  缓存对不上，以前无论预设怎么写，聊天记录每轮都整段重写。现在代理在内存里记住每轮 CLI 实际发出的样子，下一轮原样还原（不落盘）。
-- **缓存要整段命中，还需要预设配合**（CLI 只在最后一条消息上留一个缓存点，聊天记录里任何一处每轮变化都会让后面整段重写）：
-  1. 不要用按楼层改写旧消息的正则（如「5 楼外只发摘要」「仅发送 1 轮」）；
-  2. 关闭「深度注入保持原位」，把深度注入提到系统提示词（预设可用 `extensions.claude_max.inlineSystem: false` 自动设置）；
-  3. 世界书条目改成常驻，不按关键词触发。
-  三条都满足时实测每轮缓存写入约 2.8 万 → 3 千 token，命中 46% → 95%；耗时不变（时间主要花在思考上），按官方计价估算每轮额度约省 43%。
-- **缓存卡片**：面板「使用统计」下显示最近一轮读 / 写 / 命中率，以及变化原因和对应的解决办法。
-- **下一轮临时加深**：「高 / 超高」只作用于下一条回复，收到后自动恢复。实测高约慢 1/3，超高约慢 3 倍、输出约 3.5 倍。
-- **本轮体检**：每条回复生成完自动检查字数（按预设的字数设定）、禁词（读预设禁词表）、破折号、「不是A，是B」、第二人称、
-  A–J 选项和路线标签、隐藏设定关键词、重复段落、生命等「当前/上限」数值的突变；有问题弹提示。
-- **查看实际发给模型的内容**：打开「调试：保存最近一次完整请求」后，高级设置里可以直接看系统提示词（标出缓存分界）和整理后的聊天记录。
-- **隐私**：CLI 子进程的工作目录移出了 git 仓库，并关闭自动记忆（`CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`）——以前会把这台电脑上
-  Claude Code 的项目记忆和 git 状态带进角色扮演上下文。聊天文字按原样发送（`verbatimPrompts`），不会把 `@文件名` 当成读取本地文件。
+长对话里，大部分额度花在每轮重新读取整段聊天记录上。缓存命中时，这部分只按约十分之一计费。要让聊天记录整段命中缓存，需要同时满足三个条件：
 
-v2.6：
-- **一键把当前角色卡的世界书设为常驻**（面板「缓存优化 · 世界书」）：先把原世界书备份为「原名（常驻前备份）」，可一键恢复。
-  按关键词触发的条目每轮变化，会让整段聊天记录重写缓存；这是最常见、也最容易解决的缓存问题。
-- **辅助请求默认不思考**：没带面板设置的请求（如嘤嘤札记的 API 模式、其他扩展的调用）默认关闭思考，实测同样的札记请求从 7.3 秒降到 4.3 秒。
-  只能开着思考的模型（Opus 4.7+、Fable）不受影响；`CLAUDE_SUBSCRIPTION_AUX_THINKING=adaptive` 可恢复旧行为。
-- **首字等待拆开看**：缓存卡片显示首字由哪几段组成。实测 Opus 5.5：代理 + CLI 启动 0.2 秒，模型读完提示词开始回复约 2.7 秒，开始写约 2.2 秒——
-  本机开销不到 0.2 秒，其余在 Anthropic 那边，所以不做 CLI 预热。
-- **预设推荐设置只对自己生效**：切到别的预设时，上一个预设推荐改动过的设置自动恢复（你之后手动改过的不动）。
-- **体检认得第二人称预设**：预设里开着「第二人称」视角时，不再报「旁白里出现『你』」。
+1. **不要用按楼层改写旧消息的正则**，比如「5 楼外只发摘要」。
+2. **世界书改成常驻**，不按关键词触发。面板「统计」页可以一键转换，转换前会自动备份。
+3. **深度注入提到系统提示词里**。预设可以在 `extensions.claude_max` 里写 `inlineSystem: false`，切换到该预设时面板会自动应用。
 
-v2.7：
-- **面板分页**：连接 / 推理 / 统计 / 体检 / 高级，记住上次打开的页。
-- **缓存卡片更完整**：每轮约合多少「等效输入 token」（按官方价格比例，读缓存 0.1、写缓存 1.25、输出 5）以及不用缓存时的对比；
-  「逐轮还原」失效自检（同一聊天什么都没变、却读不到聊天记录的缓存时提醒）。
-- **体检认得更多预设**：字数范围也能从启用的「字数｜1400–1600字」这类条目读取；Ny 预设的四个选项会检查是否齐全。
-- **实验开关「预设后置条目提前」**（默认关）：把 Ny、图灵这类预设放在聊天记录后面的固定条目挪到前面。实测图灵上没省下来——
-  它还有按楼层改写旧消息的正则——所以保持默认关闭。
-- 面板优先直接读代理的状态和统计（酒馆插件路由在酒馆重启前可能还是旧版本）。
+实测三条都满足时，缓存命中率从 46% 提高到 95%，按官方计价折算，每轮约省 43%。
 
-**CLI 固定注入、目前关不掉的内容**：Claude Code CLI 每轮会附带四段提醒——账号邮箱、系统环境（工作目录、是否 git 仓库、系统和 shell）、
-模型名称与知识截止日期、今天的日期。按官方文档，Agent SDK 只提供 `settingSources`（不读设置 / CLAUDE.md）、`excludeDynamicSections`
-（只对 Claude Code 内置系统提示词有效，自定义系统提示词下无效）和 `verbatimPrompts`，都关不掉这四段；官方没有公开的开关。
-它们很短、每天只变一次日期，对剧情没有影响；代理已确保它们不破坏缓存。
+面板「统计」页会显示上一轮哪里没命中，以及怎么改。
 
-### Settings reference (Claude Max panel)
+## 利弊
 
-| Setting | Default | What it does |
+**好处**
+
+- 按订阅的包月额度计算，不另外按 token 付费。重度使用时比 API 便宜很多。
+- 聊天记录按真实的多轮对话发送，而不是压成一大段文字。角色区分更准，也能用上提示缓存。
+- 可以直接设置原生思考深度。酒馆自带的「推理强度」对 Custom 端点上的 Claude 不起作用。
+- 不会带入编程助手的系统提示词，也不会带入本机的 CLAUDE.md 或工具。
+- 聊天内容不落盘：CLI 生成的对话记录会在请求结束后删除；用量日志只记录耗时和 token 数。
+
+**限制**
+
+- **不支持温度、Top-P、Top-K**，因为 Agent SDK 没有提供采样参数。
+- **预填是模拟的**：末尾的 assistant 消息会被改写成「从这里接着写」的指令，偶尔不会逐字接续。
+- **额度和 Claude 网页版、Claude Code 共用**，受 5 小时和 7 天窗口限制，用完要等窗口重置。
+- **首字等待约 5 秒**，其中绝大部分是 Anthropic 那边的处理时间，比直接调用 API 稍慢。
+- CLI 每轮会附带几段固定提醒（账号邮箱、系统环境、模型名、日期），目前关不掉。它们很短，不影响剧情，也不会破坏缓存。
+- 不支持向量嵌入（embeddings），需要另配一个来源。
+
+## 风险提示
+
+请在了解以下几点后自行决定是否使用：
+
+- **这不是官方认可的用法。** Agent SDK 的官方文档写明：除非事先获得批准，Anthropic 不允许第三方产品提供 claude.ai 登录或使用订阅额度，要求改用 API 密钥认证。本项目正是用订阅额度驱动第三方前端，Anthropic 随时可能限制这种用法，或者对账号采取措施。
+- **内容受 Anthropic 使用政策约束。** [使用政策](https://www.anthropic.com/legal/aup)禁止生成露骨的色情内容，包括色情聊天。任何涉及未成年人的性内容都绝对禁止，包括虚构和角色扮演，Anthropic 会向有关机构报告。通过订阅发出的请求和官方客户端一样受审核，违规可能导致账号被警告、限制或封禁。
+- **异常用量更容易被注意到。** 长时间高频请求、大上下文、多个设备共用一个账号都会增加风险。建议不要把代理开放给别人使用，也不要共享账号。
+- **被安全分类器拦截的请求照样计入额度。** 例如，Opus 5 / 5.5 会拦截要求把思维链写进正文的预设，面板会在发送前提醒。
+
+作者不对账号被限制、封禁或其他损失负责。介意这些风险的话，请改用 [Anthropic API](https://platform.claude.com/)：在酒馆「API 连接」的 Custom API 密钥栏填入 `sk-ant-` 开头的密钥，代理就会改用这个密钥按量计费。
+
+## 常见问题
+
+**面板显示「连接不到代理」**
+原版酒馆：确认 `enableServerPlugins: true`，并已重启酒馆。TauriTavern：确认已在代理目录运行 `npm start`。
+
+**提示「未登录」或聊天中途认证失败**
+在代理目录运行 `npm run login`，要用运行酒馆的同一个系统用户。运行 `npm run auth` 可以查看登录状态。
+
+**提示「Failed to load @anthropic-ai/claude-agent-sdk」**
+在插件目录重新运行 `npm install`，不要加 `--omit=optional`，然后重启。
+
+**1M 模型实际只有 200k 上下文**
+部分套餐需要开通额外用量才能用 1M 上下文。1M 请求失败后，代理会改用普通版一小时，之后再重试。
+
+**模型列表是空的**
+再点一次一键连接，或者在浏览器里打开 `http://127.0.0.1:8901/status` 查看代理状态。
+
+<details>
+<summary>高级：环境变量与接口</summary>
+
+| 环境变量 | 默认值 | 作用 |
 | --- | --- | --- |
-| Reasoning effort | Auto | How hard Claude reasons before replying, `low → max`. Auto sends nothing (model default, ≈high). Higher = better consistency on complex scenes, slower replies, more quota. |
-| Thinking mode | Adaptive | Whether extended thinking happens at all. **Adaptive**: model thinks only when the message warrants it. **Always on**: every reply. **Off**: none — except Fable 5/5.1 and Opus 4.7+ / Opus 5 *always* think (can't be disabled), and thinking is auto-disabled on other models when Max response length < 2048 tokens. |
-| Show reasoning | On | **Display only** — doesn't change whether thinking happens. On: the thinking summary streams into ST's collapsible "thoughts" box (enable "Show model thoughts" in ST too). Never added to chat history or re-sent as context. |
-| Identity mode | Off | Off: your character card is the *entire* system prompt. On: prepends Anthropic's Claude Code preamble (the framing the `claude` CLI uses) — fixes model self-identification ("are you Opus or Sonnet?") at the cost of extra tokens and a coding-assistant flavor. Leave off for RP. |
-| Session resume | On | How history reaches Claude. On: replayed as a real multi-turn session — better turn awareness, working prompt caching (faster + less quota burned re-reading context); swipes/edits handled naturally. Off: history flattened to one `User:/Assistant:` text block (troubleshooting only). |
+| `CLAUDE_SUBSCRIPTION_PORT` | `8901` | 监听端口（改了之后同步修改面板「高级」里的代理地址） |
+| `CLAUDE_SUBSCRIPTION_HOST` | `127.0.0.1` | 监听地址 |
+| `CLAUDE_SUBSCRIPTION_USE_RESUME` | `1` | `0` 表示把聊天记录压成一段文字发送 |
+| `CLAUDE_SUBSCRIPTION_TURN_REPLAY` | `1` | `0` 表示关闭逐轮还原（聊天记录将无法命中缓存） |
+| `CLAUDE_SUBSCRIPTION_VERBATIM` | `1` | `0` 表示允许 CLI 展开聊天文字里的 `@路径` 和斜杠命令 |
+| `CLAUDE_SUBSCRIPTION_SCRATCH_CWD` | `$TMPDIR/claude-max-rp` | CLI 子进程的工作目录（应放在任何 git 仓库之外） |
+| `CLAUDE_SUBSCRIPTION_AUX_THINKING` | `off` | 没带面板设置的辅助请求是否思考 |
+| `CLAUDE_SUBSCRIPTION_CLAUDE_PATH` | – | 指定 `claude` 可执行文件的路径 |
+| `CLAUDE_SUBSCRIPTION_NO_UI_INSTALL` | – | `1` 表示不自动安装面板 |
 
-### Known limitations (Agent SDK)
-
-- **Temperature / Top-P / Top-K are not supported** on the subscription path
-  — the Agent SDK exposes no sampling controls. (Adaptive-thinking models
-  reject them anyway.)
-- **Assistant prefill is emulated**: a trailing assistant message ("Start
-  Reply With", continue) becomes a continuation instruction rather than true
-  Messages-API prefill. Works well in practice; the model occasionally
-  paraphrases instead of continuing verbatim.
-- Embeddings return `501` — use a separate embedding source.
-
-## Environment overrides
-
-| Variable | Default | Purpose |
+| 方法 | 地址 | 用途 |
 | --- | --- | --- |
-| `CLAUDE_SUBSCRIPTION_PORT` | `8901` | Listener port |
-| `CLAUDE_SUBSCRIPTION_HOST` | `127.0.0.1` | Listener host |
-| `CLAUDE_SUBSCRIPTION_USE_RESUME` | `1` | `0` forces the fold path |
-| `CLAUDE_SUBSCRIPTION_MAX_TURNS` | `1` | SDK maxTurns |
-| `CLAUDE_SUBSCRIPTION_CLAUDE_PATH` | – | Explicit `claude` executable path |
-| `CLAUDE_SUBSCRIPTION_NO_UI_INSTALL` | – | `1` skips UI-extension auto-install |
-| `CLAUDE_SUBSCRIPTION_TURN_REPLAY` | `1` | `0` disables replaying past turns with the CLI's per-turn attachments (history then never caches) |
-| `CLAUDE_SUBSCRIPTION_VERBATIM` | `1` | `0` lets the CLI expand `@path` mentions / slash commands in chat text |
-| `CLAUDE_SUBSCRIPTION_SCRATCH_CWD` | `$TMPDIR/claude-max-rp` | Subprocess working directory (keep it outside any git repo) |
+| GET | `/status` | SDK 和登录状态 |
+| GET | `/v1/models` | 模型列表 |
+| GET | `/v1/usage/quota` | 订阅额度 |
+| GET | `/v1/usage/stats` | 用量统计和上一轮缓存分析 |
+| GET | `/v1/debug/last` | 最近一次完整请求（需打开调试开关） |
+| POST | `/v1/chat/completions` | 聊天（SSE 和 JSON） |
 
-> Changing the port or host? Update **Endpoint (advanced)** in the Claude Max
-> panel to the new `http://<host>:<port>/v1` before clicking **Connect** —
-> the panel's Connect button, per-request settings injection, and quota meter
-> all use that stored endpoint.
+直接调用接口时，可以在请求体里加 `claude_subscription: { effort, thinking, show_reasoning, use_resume, system_placement, debug_dump }` 字段来控制这些设置。
 
-## Endpoints
+预设文件可以带 `extensions.claude_max` 字段（`effort`、`thinking`、`showReasoning`、`useResume`、`inlineSystem`、`tailBlockFront`），切换到该预设时面板会自动应用，切走时恢复。
 
-| Method | URL | Purpose |
-| --- | --- | --- |
-| GET | `http://127.0.0.1:8901/status` | SDK + credential health |
-| GET | `http://127.0.0.1:8901/v1/models` | Model list (incl. 1M variants) |
-| GET | `http://127.0.0.1:8901/v1/usage/quota` | Subscription window utilization |
-| GET | `http://127.0.0.1:8901/v1/usage/stats` | Usage summary + last-turn cache explanation |
-| GET | `http://127.0.0.1:8901/v1/debug/last` | Last saved request (only when the debug switch is on) |
-| POST | `http://127.0.0.1:8901/v1/chat/completions` | Chat (SSE + JSON) |
-| POST | `http://127.0.0.1:8901/v1/embeddings` | Always `501` |
-| GET | `http://<sillytavern>/api/plugins/claude-subscription/status` | Browser health check |
+</details>
 
-Direct API users: the plugin accepts the standard `reasoning_effort` body
-field, or a `claude_subscription: { effort, thinking, thinking_budget,
-show_reasoning, identity_mode, use_resume, system_placement, debug_dump }` object for full control.
-`thinking_budget` (tokens) only applies when `thinking: "on"` and the model
-is not adaptive-only (Opus 4.7+/Opus 5/Fable ignore it); it is clamped to ≥ 1024
-and ≤ `max_tokens − 512`.
+## 许可证
 
-## API-billing fallback (optional)
-
-Enter a real `sk-ant-*` key as the Custom API key and the plugin forwards it
-as `ANTHROPIC_API_KEY` — billing that key instead of the subscription.
-Anything else in the key field is ignored (subscription auth).
-
-## Troubleshooting
-
-**"Failed to load @anthropic-ai/claude-agent-sdk"** — run `npm install`
-inside the plugin directory (without `--omit=optional`; the Claude CLI ships
-inside the SDK as a platform package) and restart SillyTavern.
-
-**Auth errors mid-chat** — the plugin auto-refreshes the OAuth token once per
-request; if it still fails, run `claude login` on the SillyTavern host **as
-the same OS user** that runs `server.js`.
-
-**Model list didn't populate** — click Connect again; check
-`http://127.0.0.1:8901/status` in a browser.
-
-**1M variant quietly serving 200k** — extended context needs Extra Usage on
-some plans; after one failure the plugin serves the base model for an hour,
-then probes again. Watch the server log for the cooldown message.
-
-## License
-
-[GNU AGPL v3.0 or later](LICENSE).
+[GNU AGPL v3.0 或更高版本](LICENSE)

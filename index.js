@@ -346,7 +346,7 @@
             const b = el('button', 'cm-seg-btn', label);
             b.type = 'button';
             b.dataset.effort = value;
-            b.addEventListener('click', () => { nextEffort = value || null; render(); });
+            b.addEventListener('click', () => { nextEffort = value || null; render(); renderGlance(); });
             group.append(b);
         }
         wrap.append(row, status);
@@ -359,6 +359,7 @@
         if (!nextEffort) return;
         nextEffort = null;
         document.getElementById('claude_max_oneshot')?.refresh?.();
+        renderGlance();
     }
 
     // ── 缓存优化：当前角色卡的世界书设为常驻 ──
@@ -462,6 +463,8 @@
             words: chatCheck.wordRangeFromPreset(ctx.chatCompletionSettings), banned: chatCheck.bannedFromPrompts(prompts), leaks,
             secondPerson: chatCheck.secondPersonFromPreset(ctx.chatCompletionSettings),
         });
+        glance.issues = r.issues.length;
+        renderGlance();
         if (box) {
             const card = el('div', r.issues.length ? 'cm-last-error cm-tip' : 'cm-cache');
             card.append(el('div', 'cm-last-error-title', r.issues.length
@@ -539,12 +542,14 @@
         return wrap;
     }
 
-    /** Toggle row: title + one-line description, switch on the right. */
-    function toggleRow({ id, title, desc, checked, onChange }) {
+    /** Toggle row: title + one-line description, switch on the right.
+     *  `more` (optional) is the long explanation, behind a「说明」link. */
+    function toggleRow({ id, title, desc, more, checked, onChange }) {
         const row = el('label', 'cm-toggle');
         row.htmlFor = id;
         const text = el('div', 'cm-toggle-text');
-        text.append(el('div', 'cm-toggle-title', title), el('small', 'cm-hint', desc));
+        const hint = el('small', 'cm-hint', desc);
+        text.append(el('div', 'cm-toggle-title', title), hint);
         const input = el('input');
         input.type = 'checkbox';
         input.id = id;
@@ -552,7 +557,21 @@
         input.addEventListener('change', () => onChange(input.checked));
         const sw = el('span', 'cm-switch');
         row.append(text, input, sw);
-        return row;
+        if (!more) return row;
+        const moreText = el('small', 'cm-hint cm-more-text', more);
+        moreText.hidden = true;
+        const link = el('a', 'cm-more', '说明');
+        link.href = '#';
+        link.addEventListener('click', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            moreText.hidden = !moreText.hidden;
+            link.textContent = moreText.hidden ? '说明' : '收起';
+        });
+        hint.append(' ', link);
+        const wrap = el('div', 'cm-toggle-wrap');
+        wrap.append(row, moreText);
+        return wrap;
     }
 
     function section(title, extra) {
@@ -637,6 +656,9 @@
                 box.append(el('small', 'cm-hint', '暂无额度数据'));
                 return;
             }
+            const five = data.windows.find((w) => w.type === 'five_hour');
+            glance.quota = five?.utilization != null ? Math.round(five.utilization * 100) : null;
+            renderGlance();
             for (const w of data.windows) {
                 const pct = w.utilization !== null ? Math.round(w.utilization * 100) : null;
                 const row = el('div', 'cm-quota-row');
@@ -716,6 +738,8 @@
             } else {
                 box.append(statsRow('今天', data.today), statsRow('近 7 天', data.week));
             }
+            glance.cache = data.lastCache?.hitPct ?? null;
+            renderGlance();
             if (data.lastCache) {
                 const c = data.lastCache;
                 const card = el('div', c.hitPct >= 50 ? 'cm-cache' : 'cm-cache cm-last-error cm-tip');
@@ -772,6 +796,8 @@
     }
 
     function refreshAll() {
+        renderConnect();
+        renderGlance();
         refreshProxyStatus();
         refreshQuota();
         refreshStats();
@@ -796,6 +822,276 @@
         { value: 'off', label: '关闭', hint: '不思考。Fable、Opus 4.7 及以上（含 Opus 5 / 5.5）总会思考，此项对它们无效。' },
     ];
 
+    // ── At-a-glance summary (drawer header + chips above the tabs) ──
+
+    // Filled in by refreshQuota / refreshStats / runCheckup; rendered by
+    // renderGlance so the header shows the essentials even when collapsed.
+    const glance = { quota: null, cache: null, issues: null };
+
+    const MODEL_SHORT = [
+        [/fable-5-1/, 'Fable 5.1'], [/fable-5/, 'Fable 5'], [/opus-5-5/, 'Opus 5.5'], [/opus-5/, 'Opus 5'],
+        [/sonnet-5/, 'Sonnet 5'], [/opus-4-(\d)/, 'Opus 4.$1'], [/sonnet-4-(\d)/, 'Sonnet 4.$1'], [/haiku-4-5/, 'Haiku 4.5'],
+    ];
+
+    function shortModel(id) {
+        const s = String(id ?? '');
+        for (const [re, label] of MODEL_SHORT) {
+            const m = s.match(re);
+            if (m) return label.replace('$1', m[1] ?? '') + (/\[1m\]|-1m/i.test(s) ? ' 1M' : '');
+        }
+        return s;
+    }
+
+    /** Is SillyTavern currently pointed at this proxy? */
+    function connectionInfo() {
+        const ctx = SillyTavern.getContext();
+        const oai = ctx.chatCompletionSettings ?? {};
+        const connected = ctx.mainApi === 'openai' && oai.chat_completion_source === 'custom' && isOurEndpoint(oai.custom_url, getSettings());
+        return { connected, model: connected ? oai.custom_model : null };
+    }
+
+    function renderGlance() {
+        const settings = getSettings();
+        const { connected, model } = connectionInfo();
+        const effort = effectiveEffort(settings);
+        const parts = [];
+        if (connected && model) parts.push(shortModel(model));
+        if (effort !== 'auto') parts.push(nextEffort ? `下一轮${EFFORT_LABEL[effort]}` : EFFORT_LABEL[effort]);
+        if (glance.quota != null) parts.push(`5h ${glance.quota}%`);
+        const head = document.getElementById('claude_max_head_sum');
+        if (head) head.textContent = parts.join(' · ');
+
+        const chips = document.getElementById('claude_max_glance');
+        if (!chips) return;
+        const chip = (label, value, tab, tone) => {
+            const b = el('button', `cm-chip${tone ? ` ${tone}` : ''}`);
+            b.type = 'button';
+            b.append(el('small', null, label), el('b', null, value));
+            b.addEventListener('click', () => chips.showTab?.(tab));
+            return b;
+        };
+        const q = glance.quota;
+        const c = glance.cache;
+        const n = glance.issues;
+        chips.replaceChildren(
+            chip('模型', connected ? (model ? shortModel(model) : '未选') : '未连接', connected ? 'reason' : 'main', connected ? '' : 'bad'),
+            chip('5 小时额度', q == null ? '–' : `${q}%`, 'stats', q >= 90 ? 'bad' : q >= 70 ? 'warn' : ''),
+            chip('上轮缓存', c == null ? '–' : `${c}%`, 'stats', c != null && c < 50 ? 'warn' : ''),
+            chip('体检', n == null ? '–' : n ? `${n} 项` : '正常', 'check', n ? 'warn' : ''),
+        );
+    }
+
+    /** Tab 连接: status, one-click connect, what to do next. */
+    function buildMainTab(pane, settings) {
+        const card = el('div', 'cm-card cm-status');
+        const statusText = el('div', 'cm-status-text');
+        const statusTitle = el('div', 'cm-status-title');
+        statusTitle.id = 'claude_max_status_title';
+        const statusSub = el('small', 'cm-hint');
+        statusSub.id = 'claude_max_status_sub';
+        statusText.append(statusTitle, statusSub);
+        card.append(el('span', 'cm-dot cm-dot-lg'), statusText, iconButton('fa-rotate', '重新检测', refreshAll));
+        pane.append(card);
+
+        const connectBtn = el('div', 'menu_button cm-connect');
+        connectBtn.id = 'claude_max_connect';
+        connectBtn.addEventListener('click', () => connect(getSettings()));
+        const connectHint = el('small', 'cm-hint cm-center');
+        connectHint.id = 'claude_max_connect_hint';
+        pane.append(connectBtn, connectHint);
+        renderConnect();
+
+        const steps = el('details', 'cm-details');
+        steps.append(el('summary', null, '使用说明'));
+        const list = el('ol', 'cm-notes');
+        for (const line of [
+            '代理要一直开着：在代理目录运行 npm start（原版酒馆装了服务器插件时会自动启动）。',
+            '点「一键连接」，然后在「API 连接」的模型下拉框里选 Claude 模型。',
+            '酒馆自带的「推理强度」保持「自动」，思考深度在本面板「推理」页设置。',
+            IS_TAURI
+                ? '首次连接时 TauriTavern 会弹出授权框，允许访问代理地址即可。'
+                : '从手机等其他设备打开酒馆时，额度和状态经由酒馆服务器转发读取。',
+            '订阅通道不支持温度、Top-P 等采样参数（Agent SDK 限制）。',
+            '「(1M context)」模型提供 100 万上下文；部分套餐需要开通额外用量，失败时自动退回普通版一小时。',
+        ]) list.append(el('li', null, line));
+        steps.append(list);
+        pane.append(steps);
+    }
+
+    /** Connect button: primary when not connected, quiet once it is. */
+    function renderConnect() {
+        const btn = document.getElementById('claude_max_connect');
+        const hint = document.getElementById('claude_max_connect_hint');
+        if (!btn || !hint) return;
+        const { connected, model } = connectionInfo();
+        btn.classList.toggle('cm-connect-quiet', connected);
+        btn.replaceChildren(el('i', `fa-solid ${connected ? 'fa-rotate' : 'fa-plug'}`), document.createTextNode(connected ? ' 重新连接' : ' 一键连接'));
+        hint.textContent = connected
+            ? `已连接本代理${model ? `，当前模型 ${shortModel(model)}` : '，请在模型下拉框里选择 Claude 模型'}。`
+            : '自动切到 Chat Completion → Custom 并填好地址，连接后在模型下拉框里选择 Claude 模型。';
+    }
+
+    /** Tab 推理: effort, one-shot effort, thinking mode, reasoning display. */
+    function buildReasonTab(pane, settings, save) {
+        pane.append(segmented({
+            label: '思考深度',
+            options: EFFORT_OPTIONS,
+            current: settings.effort,
+            onChange: (v) => { settings.effort = VALID_EFFORTS.includes(v) ? v : 'auto'; save(); renderGlance(); },
+        }));
+        pane.append(oneShotEffortRow(settings));
+        pane.append(segmented({
+            label: '思考模式',
+            options: THINKING_OPTIONS,
+            current: settings.thinking,
+            onChange: (v) => { settings.thinking = VALID_THINKING.includes(v) ? v : 'adaptive'; save(); },
+        }));
+        pane.append(toggleRow({
+            id: 'claudeMaxShowReasoning',
+            title: '显示思考过程',
+            desc: '在回复上方的折叠框里显示思考摘要。',
+            more: '需要同时开启酒馆的「显示模型思维」。只影响显示，思考内容不会进入聊天记录，也不会再发给模型。',
+            checked: settings.showReasoning,
+            onChange: (v) => { settings.showReasoning = v; save(); },
+        }));
+        const cotTip = el('div', 'cm-last-error cm-tip');
+        cotTip.id = 'claude_max_cot_tip';
+        cotTip.hidden = true;
+        pane.append(cotTip);
+    }
+
+    /** Tab 统计: quota, usage, last-turn cache, world-info cache tool. */
+    function buildStatsTab(pane) {
+        const quotaStamp = el('small', 'cm-hint');
+        quotaStamp.id = 'claude_max_quota_time';
+        const quotaTools = el('div', 'cm-section-tools');
+        quotaTools.append(quotaStamp, iconButton('fa-rotate', '刷新额度', refreshQuota));
+        pane.append(section('订阅额度', quotaTools));
+        const quotaBox = el('div', 'cm-quota');
+        quotaBox.id = 'claude_max_quota';
+        quotaBox.append(el('small', 'cm-hint', '展开面板时自动加载。'));
+        pane.append(quotaBox);
+
+        const statsTools = el('div', 'cm-section-tools');
+        statsTools.append(iconButton('fa-rotate', '刷新统计', refreshStats));
+        pane.append(section('使用统计', statsTools));
+        const statsBox = el('div', 'cm-stats');
+        statsBox.id = 'claude_max_stats';
+        statsBox.append(el('small', 'cm-hint', '展开面板时自动加载。'));
+        pane.append(statsBox);
+
+        pane.append(section('缓存优化 · 世界书'));
+        const loreBox = el('div', 'cm-field');
+        loreBox.id = 'claude_max_lore';
+        pane.append(loreBox);
+    }
+
+    /** Tab 体检: latest reply check-up and its per-card settings. */
+    function buildCheckTab(pane, settings, save) {
+        const checkTools = el('div', 'cm-section-tools');
+        checkTools.append(iconButton('fa-stethoscope', '重新体检最新回复', () => runCheckup()));
+        pane.append(section('最新回复', checkTools));
+        const checkBox = el('div', 'cm-stats');
+        checkBox.id = 'claude_max_checkup';
+        pane.append(checkBox);
+        pane.append(el('small', 'cm-hint', '检查字数、禁词、破折号、「不是A，是B」、人称、选项格式、重复段落、数值突变等。字数范围和禁词表自动从当前预设读取。'));
+
+        const leakField = el('div', 'cm-field');
+        leakField.append(el('div', 'cm-field-label', '隐藏设定关键词'));
+        const leakInput = el('input', 'text_pole');
+        leakInput.type = 'text';
+        leakInput.id = 'claude_max_leak';
+        leakInput.placeholder = '如：植物人, 医学院（只对当前角色卡生效）';
+        leakInput.value = settings.leakWords?.[currentCharKey()] ?? '';
+        leakInput.addEventListener('input', () => {
+            settings.leakWords = { ...(settings.leakWords ?? {}), [currentCharKey()]: leakInput.value };
+            save();
+        });
+        leakField.append(leakInput, el('small', 'cm-hint', '剧情揭示前不该出现的词，正文里出现时提醒。'));
+        pane.append(leakField);
+        pane.append(toggleRow({
+            id: 'claudeMaxCheckupToast',
+            title: '发现问题时弹出提示',
+            desc: '关闭后只在这里显示结果。',
+            checked: settings.checkupToast,
+            onChange: (v) => { settings.checkupToast = v; save(); },
+        }));
+    }
+
+    /** Tab 高级: grouped by what the switches affect. */
+    function buildAdvTab(pane, settings, save) {
+        pane.append(section('缓存与上下文'));
+        pane.append(toggleRow({
+            id: 'claudeMaxResume',
+            title: '会话续接',
+            desc: '聊天记录按真实多轮对话发送，能用上缓存。',
+            more: '角色区分更准，能用上提示缓存（更快、更省额度）。关闭后聊天记录会被压成一整段文字，只在排查问题时关闭。',
+            checked: settings.useResume,
+            onChange: (v) => { settings.useResume = v; save(); },
+        }));
+        pane.append(toggleRow({
+            id: 'claudeMaxInlineSystem',
+            title: '深度注入保持原位',
+            desc: '深度条目留在聊天记录里原来的位置。',
+            more: '预设里「深度 N」的条目、世界书深度条目、作者注释留在原位，和酒馆直连 Claude 的做法一致，靠近结尾的提醒才有效。关闭则全部提到系统提示词；那样只要其中一条变化（比如世界书被触发），整个系统提示词的缓存都会失效。',
+            checked: settings.inlineSystem,
+            onChange: (v) => { settings.inlineSystem = v; save(); },
+        }));
+        pane.append(toggleRow({
+            id: 'claudeMaxTailBlock',
+            title: '实验：预设后置条目提前',
+            desc: '只对 Ny、图灵这类预设有用，默认关闭。',
+            more: '这类预设把大量规则放在聊天记录后面，每轮整段聊天记录都要重写缓存。打开后，代理把每轮一字不差的后置条目挪到对话最前面（内容和顺序不变，末尾的 AI 预填留在原位），旧楼层就能命中缓存。代价是规则离回复更远，效果可能不同。',
+            checked: settings.tailBlockFront,
+            onChange: (v) => { settings.tailBlockFront = v; save(); },
+        }));
+
+        pane.append(section('调试'));
+        pane.append(toggleRow({
+            id: 'claudeMaxDebugDump',
+            title: '保存最近一次完整请求',
+            desc: '排查预设、世界书、缓存问题时打开，平时关闭。',
+            more: '把最近一次发给 Claude 的系统提示词和聊天记录存到代理目录 data/debug/（只存本机，每次覆盖，上一份另存为 previous）。',
+            checked: settings.debugDump,
+            onChange: (v) => { settings.debugDump = v; save(); },
+        }));
+        const debugBtn = el('div', 'menu_button cm-connect cm-connect-quiet');
+        debugBtn.append(el('i', 'fa-solid fa-magnifying-glass'), document.createTextNode(' 查看实际发给模型的内容'));
+        debugBtn.addEventListener('click', showDebugRequest);
+        pane.append(debugBtn);
+
+        pane.append(section('连接'));
+        const endpointField = el('div', 'cm-field');
+        endpointField.append(el('div', 'cm-field-label', '代理地址'));
+        const endpointInput = el('input', 'text_pole');
+        endpointInput.type = 'text';
+        endpointInput.value = settings.endpoint;
+        endpointInput.placeholder = DEFAULT_ENDPOINT;
+        endpointInput.addEventListener('input', () => {
+            settings.endpoint = endpointInput.value || DEFAULT_ENDPOINT;
+            save();
+        });
+        endpointField.append(endpointInput, el('small', 'cm-hint', `默认 ${DEFAULT_ENDPOINT}。改了代理端口时同步改这里，再点一键连接。`));
+        pane.append(endpointField);
+        pane.append(toggleRow({
+            id: 'claudeMaxEnabled',
+            title: '把面板设置附加到请求',
+            desc: '只对指向本代理的连接生效。',
+            checked: settings.enabled,
+            onChange: (v) => { settings.enabled = v; save(); },
+        }));
+        pane.append(toggleRow({
+            id: 'claudeMaxIdentity',
+            title: '身份模式',
+            desc: '角色扮演建议关闭。',
+            more: '在角色卡前加上 Claude Code 官方前言，模型能正确说出自己是哪个型号，但会多耗 token，并带点编程助手的味道。',
+            checked: settings.identityMode,
+            onChange: (v) => { settings.identityMode = v; save(); },
+        }));
+    }
+
+    const TABS = [['main', '连接'], ['reason', '推理'], ['stats', '统计'], ['check', '体检'], ['adv', '高级']];
+
     function addExtensionSettings(settings) {
         const container = document.getElementById('extensions_settings') ?? document.body;
         const save = () => saveSettingsDebounced();
@@ -803,7 +1099,9 @@
         const drawer = el('div', 'inline-drawer claude-max');
         const toggle = el('div', 'inline-drawer-toggle inline-drawer-header');
         const heading = el('b', 'cm-heading');
-        heading.append(el('span', 'cm-dot'), document.createTextNode('Claude Max 订阅'));
+        const headSum = el('small', 'cm-head-sum');
+        headSum.id = 'claude_max_head_sum';
+        heading.append(el('span', 'cm-dot'), el('span', 'cm-heading-name', 'Claude Max'), headSum);
         toggle.append(heading, el('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down'));
         const drawerContent = el('div', 'inline-drawer-content');
         // ST slide-toggles the drawer content's display — keep our flex
@@ -818,200 +1116,13 @@
             if (drawerContent.offsetParent !== null) refreshAll();
         }, 50));
 
-        // Status card + connect
-        const card = el('div', 'cm-card cm-status');
-        const statusText = el('div', 'cm-status-text');
-        const statusTitle = el('div', 'cm-status-title');
-        statusTitle.id = 'claude_max_status_title';
-        const statusSub = el('small', 'cm-hint');
-        statusSub.id = 'claude_max_status_sub';
-        statusText.append(statusTitle, statusSub);
-        card.append(el('span', 'cm-dot cm-dot-lg'), statusText, iconButton('fa-rotate', '重新检测', refreshProxyStatus));
-        content.append(card);
-
-        const connectBtn = el('div', 'menu_button cm-connect');
-        connectBtn.append(el('i', 'fa-solid fa-plug'), document.createTextNode(' 一键连接'));
-        connectBtn.addEventListener('click', () => connect(getSettings()));
-        content.append(connectBtn);
-        content.append(el('small', 'cm-hint cm-center',
-            '自动切到 Chat Completion → Custom 并填好地址，连接后在模型下拉框里选择 Claude 模型。'));
-
-        // Reasoning
-        content.append(section('推理'));
-        content.append(segmented({
-            label: '思考深度',
-            options: EFFORT_OPTIONS,
-            current: settings.effort,
-            onChange: (v) => { settings.effort = VALID_EFFORTS.includes(v) ? v : 'auto'; save(); },
-        }));
-        content.append(oneShotEffortRow(settings));
-        content.append(segmented({
-            label: '思考模式',
-            options: THINKING_OPTIONS,
-            current: settings.thinking,
-            onChange: (v) => { settings.thinking = VALID_THINKING.includes(v) ? v : 'adaptive'; save(); },
-        }));
-        content.append(toggleRow({
-            id: 'claudeMaxShowReasoning',
-            title: '显示思考过程',
-            desc: '在回复上方的折叠框里显示思考摘要（需同时开启酒馆的「显示模型思维」）。只影响显示，不会进入聊天记录。',
-            checked: settings.showReasoning,
-            onChange: (v) => { settings.showReasoning = v; save(); },
-        }));
-
-        // Quota
-        const quotaStamp = el('small', 'cm-hint');
-        quotaStamp.id = 'claude_max_quota_time';
-        const quotaTools = el('div', 'cm-section-tools');
-        quotaTools.append(quotaStamp, iconButton('fa-rotate', '刷新额度', refreshQuota));
-        content.append(section('订阅额度', quotaTools));
-        const quotaBox = el('div', 'cm-quota');
-        quotaBox.id = 'claude_max_quota';
-        quotaBox.append(el('small', 'cm-hint', '展开面板时自动加载。'));
-        content.append(quotaBox);
-
-        // Usage stats
-        const statsTools = el('div', 'cm-section-tools');
-        statsTools.append(iconButton('fa-rotate', '刷新统计', refreshStats));
-        content.append(section('使用统计', statsTools));
-        const statsBox = el('div', 'cm-stats');
-        statsBox.id = 'claude_max_stats';
-        statsBox.append(el('small', 'cm-hint', '展开面板时自动加载。'));
-        content.append(statsBox);
-        const cotTip = el('div', 'cm-last-error cm-tip');
-        cotTip.id = 'claude_max_cot_tip';
-        cotTip.hidden = true;
-        content.append(cotTip);
-
-        // Cache optimisation: world info
-        content.append(section('缓存优化 · 世界书'));
-        const loreBox = el('div', 'cm-field');
-        loreBox.id = 'claude_max_lore';
-        content.append(loreBox);
-
-        // Reply check-up
-        const checkTools = el('div', 'cm-section-tools');
-        checkTools.append(iconButton('fa-stethoscope', '重新体检最新回复', () => runCheckup()));
-        content.append(section('本轮体检', checkTools));
-        const checkBox = el('div', 'cm-stats');
-        checkBox.id = 'claude_max_checkup';
-        content.append(checkBox);
-        const leakField = el('div', 'cm-field');
-        leakField.append(el('div', 'cm-field-label', '隐藏设定关键词'));
-        const leakInput = el('input', 'text_pole');
-        leakInput.type = 'text';
-        leakInput.placeholder = '如：植物人, 医学院（只对当前角色卡生效）';
-        leakInput.value = settings.leakWords?.[currentCharKey()] ?? '';
-        leakInput.addEventListener('input', () => {
-            settings.leakWords = { ...(settings.leakWords ?? {}), [currentCharKey()]: leakInput.value };
-            save();
-        });
-        leakField.append(leakInput, el('small', 'cm-hint', '剧情揭示前不该出现的词。正文里出现时体检会提醒。字数范围和禁词表自动从当前预设读取。'));
-        content.append(leakField);
-        content.append(toggleRow({
-            id: 'claudeMaxCheckupToast',
-            title: '发现问题时弹出提示',
-            desc: '每条回复生成完自动体检；关闭后只在这里显示。',
-            checked: settings.checkupToast,
-            onChange: (v) => { settings.checkupToast = v; save(); },
-        }));
-
-        // Advanced
-        const adv = el('details', 'cm-details');
-        adv.append(el('summary', null, '高级设置'));
-        const endpointField = el('div', 'cm-field');
-        endpointField.append(el('div', 'cm-field-label', '代理地址'));
-        const endpointInput = el('input', 'text_pole');
-        endpointInput.type = 'text';
-        endpointInput.value = settings.endpoint;
-        endpointInput.placeholder = DEFAULT_ENDPOINT;
-        endpointInput.addEventListener('input', () => {
-            settings.endpoint = endpointInput.value || DEFAULT_ENDPOINT;
-            save();
-        });
-        endpointField.append(endpointInput, el('small', 'cm-hint', `默认 ${DEFAULT_ENDPOINT}。修改了代理端口时同步改这里，再点一键连接。`));
-        adv.append(endpointField);
-        adv.append(toggleRow({
-            id: 'claudeMaxEnabled',
-            title: '把以上设置附加到请求',
-            desc: '只对指向本代理的连接生效，其他 Custom 端点不受影响。',
-            checked: settings.enabled,
-            onChange: (v) => { settings.enabled = v; save(); },
-        }));
-        adv.append(toggleRow({
-            id: 'claudeMaxResume',
-            title: '会话续接',
-            desc: '把聊天记录还原成真实多轮对话，角色区分更准，能用上提示缓存（更快、更省额度）。仅排查问题时关闭。',
-            checked: settings.useResume,
-            onChange: (v) => { settings.useResume = v; save(); },
-        }));
-        adv.append(toggleRow({
-            id: 'claudeMaxInlineSystem',
-            title: '深度注入保持原位',
-            desc: '预设里「深度 N」的条目、世界书深度条目、作者注释留在聊天记录里原来的位置，和酒馆直连 Claude 的做法一致，靠近结尾的提醒才有效。关闭则全部提到开头；那样的话只要其中有一条变化（比如世界书被触发），整个系统提示词的缓存都会失效。',
-            checked: settings.inlineSystem,
-            onChange: (v) => { settings.inlineSystem = v; save(); },
-        }));
-        adv.append(toggleRow({
-            id: 'claudeMaxTailBlock',
-            title: '实验：预设后置条目提前（省缓存）',
-            desc: 'Ny、图灵这类预设把大量规则放在聊天记录后面，每轮整段聊天记录都要重写缓存。打开后，代理把每轮一字不差的后置条目挪到对话最前面（内容和顺序不变，末尾的 AI 预填留在原位），旧楼层就能命中缓存。代价：这些规则离回复更远，效果可能不同；只对这类预设有用。',
-            checked: settings.tailBlockFront,
-            onChange: (v) => { settings.tailBlockFront = v; save(); },
-        }));
-        adv.append(toggleRow({
-            id: 'claudeMaxIdentity',
-            title: '身份模式',
-            desc: '在角色卡前加上 Claude Code 官方前言，模型能正确说出自己是哪个型号，但会多耗 token 并带点编程助手味。角色扮演建议关闭。',
-            checked: settings.identityMode,
-            onChange: (v) => { settings.identityMode = v; save(); },
-        }));
-        adv.append(toggleRow({
-            id: 'claudeMaxDebugDump',
-            title: '调试：保存最近一次完整请求',
-            desc: '把最近一次发给 Claude 的系统提示词和聊天记录存到代理目录 data/debug/（只存本机，每次覆盖，上一份另存为 previous）。排查预设、世界书、缓存问题时打开，平时关闭。',
-            checked: settings.debugDump,
-            onChange: (v) => { settings.debugDump = v; save(); },
-        }));
-        const debugBtn = el('div', 'menu_button cm-connect');
-        debugBtn.append(el('i', 'fa-solid fa-magnifying-glass'), document.createTextNode(' 查看实际发给模型的内容'));
-        debugBtn.addEventListener('click', showDebugRequest);
-        adv.append(debugBtn);
-        content.append(adv);
-
-        // Notes
-        const notes = el('details', 'cm-details');
-        notes.append(el('summary', null, '使用说明'));
-        const list = el('ul', 'cm-notes');
-        for (const line of [
-            '代理需要一直运行：在代理目录执行 npm start（原版酒馆装了服务器插件时会自动启动）。',
-            IS_TAURI
-                ? '首次连接时 TauriTavern 会弹出授权框，允许访问代理地址即可。'
-                : '从手机或其他设备打开酒馆时，额度和状态会经由酒馆服务器转发读取。',
-            '请把酒馆自带的「推理强度」保持为自动，由本面板的「思考深度」代替。',
-            '修改「思考深度」后的下一轮，聊天记录部分的缓存会重写一次（系统提示词的缓存保留），不要频繁来回切换。',
-            '订阅通道不支持温度、Top-P 等采样参数（Agent SDK 限制）。',
-            '「(1M context)」模型提供 100 万上下文；部分套餐需要开通额外用量，失败时会自动退回普通版本一小时。',
-        ]) {
-            list.append(el('li', null, line));
-        }
-        notes.append(list);
-        content.append(notes);
-
-        // Tabs: the panel grew long — group the sections, remember the last tab.
-        const TAB_OF = { '推理': 'reason', '订阅额度': 'stats', '使用统计': 'stats', '缓存优化 · 世界书': 'stats', '本轮体检': 'check' };
-        const TABS = [['main', '连接'], ['reason', '推理'], ['stats', '统计'], ['check', '体检'], ['adv', '高级']];
         const panes = Object.fromEntries(TABS.map(([k]) => [k, el('div', 'cm-pane')]));
-        let cur = 'main';
-        for (const child of [...content.children]) {
-            if (child === adv || child === notes) { panes.adv.append(child); continue; }
-            if (child.classList.contains('cm-section-head')) {
-                const t = child.querySelector('.cm-section-title')?.textContent;
-                if (TAB_OF[t]) cur = TAB_OF[t];
-            }
-            panes[cur].append(child);
-        }
-        adv.open = true;
+        buildMainTab(panes.main, settings);
+        buildReasonTab(panes.reason, settings, save);
+        buildStatsTab(panes.stats);
+        buildCheckTab(panes.check, settings, save);
+        buildAdvTab(panes.adv, settings, save);
+
         const bar = el('div', 'cm-tabs');
         bar.setAttribute('role', 'tablist');
         const show = (key) => {
@@ -1030,8 +1141,13 @@
             b.addEventListener('click', () => show(k));
             bar.append(b);
         }
-        content.replaceChildren(bar, ...TABS.map(([k]) => panes[k]));
+
+        const chips = el('div', 'cm-glance');
+        chips.id = 'claude_max_glance';
+        chips.showTab = show;
+        content.append(chips, bar, ...TABS.map(([k]) => panes[k]));
         show(TABS.some(([k]) => k === settings.panelTab) ? settings.panelTab : 'main');
+        renderGlance();
     }
 
     function rebuildPanel() {
@@ -1062,7 +1178,16 @@
     };
     eventSource.on(eventTypes.MESSAGE_RECEIVED, clearOneShotEffort);
     eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED ?? eventTypes.MESSAGE_RECEIVED, () => setTimeout(() => runCheckup({ toast: true }), 200));
-    eventSource.on(eventTypes.CHAT_CHANGED, () => setTimeout(() => { runCheckup(); refreshLoreBox(); }, 200));
+    eventSource.on(eventTypes.CHAT_CHANGED, () => setTimeout(() => {
+        const leak = document.getElementById('claude_max_leak');
+        if (leak) leak.value = getSettings().leakWords?.[currentCharKey()] ?? '';
+        runCheckup();
+        refreshLoreBox();
+    }, 200));
+    // Model / API switches: keep the header summary and connect button current.
+    for (const ev of [eventTypes.CHATCOMPLETION_MODEL_CHANGED, eventTypes.CHATCOMPLETION_SOURCE_CHANGED, eventTypes.MAIN_API_CHANGED, eventTypes.SETTINGS_UPDATED]) {
+        if (ev) eventSource.on(ev, () => setTimeout(() => { renderConnect(); renderGlance(); }, 100));
+    }
     eventSource.on(eventTypes.MESSAGE_RECEIVED, refreshIfOpen);
     eventSource.on(eventTypes.CHAT_CHANGED, refreshIfOpen);
     eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, applyPresetRecommendation);
