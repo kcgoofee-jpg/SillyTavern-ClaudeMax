@@ -134,3 +134,12 @@ test('equivalentTokens uses list-price ratios', async () => {
     const { equivalentTokens } = await import('../lib/cache-diag.js');
     assert.equal(equivalentTokens({ inputTokens: 2, cacheReadTokens: 50000, cacheCreationTokens: 2800, outputTokens: 5000 }), 2 + 5000 + 3500 + 25000);
 });
+
+test('a reroll (same conversation sent again) is marked', () => {
+    __resetCacheDiag();
+    const sys = '规则'.repeat(3000);
+    const h = [{ role: 'user', content: '开始' }, { role: 'assistant', content: '好' }, { role: 'user', content: '推门' }];
+    diagnoseCache(sys, h);
+    assert.equal(diagnoseCache(sys, h).reroll, true);
+    assert.equal(diagnoseCache(sys, [...h, { role: 'assistant', content: '门开了' }, { role: 'user', content: '进去' }]).reroll, undefined);
+});

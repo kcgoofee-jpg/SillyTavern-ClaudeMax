@@ -800,7 +800,7 @@
             ['输出', (a) => `${fmtK(a.outputTokens)} token`],
             ['平均耗时', (a) => fmtSec(a.avgDurationMs)],
             ['首字等待', (a) => fmtSec(a.avgTtftMs)],
-            ['缓存命中', (a) => fmtPct(a.cacheHitRate)],
+            ['缓存命中', (a) => fmtPct(a.cacheHitRate) + (a.rerolls ? `（不含重roll ${a.rerolls} 次）` : '')],
         ];
         for (const [label, fn] of rows) {
             const tr = el('tr');
