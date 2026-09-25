@@ -110,6 +110,7 @@
         tailBlockFront: false,   // 实验：预设后置条目提前（省缓存）
         loreTail: true,          // 每轮变化的世界书移到本轮消息开头（省缓存）
         foldTail: true,          // 发言后面的深度 0 注入并进发言（省缓存）
+        accessKey: '',           // 局域网访问密码（手机连 Mac 上的代理时用）
         quietEffort: 'low',      // 后台请求（其他插件的生图 tag、总结等）的思考深度；'follow' = 跟随面板
         panelTab: 'reason',      // 面板上次打开的分页
         compactScriptButtons: true, // 输入栏上方的脚本按钮并排显示
@@ -148,7 +149,10 @@
             // wrong endpoint.
             $('#custom_api_url_text').val(settings.endpoint).trigger('input');
             const keyField = $('#api_key_custom');
-            if (keyField.length && !String(keyField.val() ?? '').trim()) {
+            if (keyField.length && settings.accessKey) {
+                // LAN: the proxy checks this as the access key
+                keyField.val(settings.accessKey).trigger('input');
+            } else if (keyField.length && !String(keyField.val() ?? '').trim()) {
                 keyField.val('sk-no-key-needed');
             }
             $('#chat_completion_source').val('custom').trigger('change');
@@ -313,7 +317,8 @@
         // device 127.0.0.1 is unreachable, so that fails fast and the
         // same-origin plugin route takes over.
         try {
-            const direct = await fetch(`${proxyBase(getSettings())}${directPath}`, { signal: AbortSignal.timeout(IS_TAURI ? 12000 : 1500) });
+            const key = getSettings().accessKey;
+            const direct = await fetch(`${proxyBase(getSettings())}${directPath}`, { signal: AbortSignal.timeout(IS_TAURI ? 12000 : 1500), headers: key ? { 'X-Claude-Max-Key': key } : {} });
             if (direct.ok || IS_TAURI) return direct;
         } catch (err) {
             if (IS_TAURI) throw err;
@@ -1267,6 +1272,19 @@
         });
         endpointField.append(endpointInput, el('small', 'cm-hint', `默认 ${DEFAULT_ENDPOINT}。改了代理端口时同步改这里，再点下面的重新连接。`));
         pane.append(endpointField);
+        const keyFieldBox = el('div', 'cm-field');
+        keyFieldBox.append(el('div', 'cm-field-label', '访问密码（手机连 Mac 时填）'));
+        const keyInput = el('input', 'text_pole');
+        keyInput.type = 'password';
+        keyInput.autocomplete = 'off';
+        keyInput.value = settings.accessKey ?? '';
+        keyInput.placeholder = '在本机用时留空';
+        keyInput.addEventListener('input', () => {
+            settings.accessKey = keyInput.value.trim();
+            save();
+        });
+        keyFieldBox.append(keyInput, el('small', 'cm-hint', '手机上的 TauriTavern 连 Mac 上的代理时：代理地址填 Mac「手机连接」窗口显示的地址，这里填它显示的密码，再点重新连接。'));
+        pane.append(keyFieldBox);
         const reconnect = el('div', 'menu_button cm-connect cm-connect-quiet');
         reconnect.append(el('i', 'fa-solid fa-plug'), document.createTextNode(' 重新连接'));
         reconnect.addEventListener('click', () => connect(getSettings()));

@@ -36,3 +36,17 @@ test('host guard: LAN binding accepts IP literals; extra names are opt-in', () =
     assert.equal(isAllowedHost('mac.local:8901', '0.0.0.0', 'mac.local, other'), true);
     assert.equal(isAllowedHost('myhost:8901', 'myhost', ''), true);
 });
+
+import { isLoopbackAddress, keyMatches } from '../lib/listener.js';
+
+test('LAN access: loopback needs no key, others must match it exactly', () => {
+    assert.equal(isLoopbackAddress('127.0.0.1'), true);
+    assert.equal(isLoopbackAddress('::1'), true);
+    assert.equal(isLoopbackAddress('::ffff:127.0.0.1'), true);
+    assert.equal(isLoopbackAddress('192.168.31.20'), false);
+    assert.equal(isLoopbackAddress('::ffff:192.168.31.20'), false);
+    assert.equal(keyMatches('abc', 'abc'), true);
+    assert.equal(keyMatches('abd', 'abc'), false);
+    assert.equal(keyMatches('abc', ''), false);
+    assert.equal(keyMatches(null, 'abc'), false);
+});

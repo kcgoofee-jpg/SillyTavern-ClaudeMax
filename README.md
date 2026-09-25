@@ -145,6 +145,17 @@ macOS 用户也可以用 `launcher/mac/` 里的脚本：双击「启动酒馆」
 </details>
 
 <details>
+<summary>手机上的 TauriTavern 连 Mac 的代理（同一 Wi-Fi）</summary>
+
+1. Mac 上双击 `launcher/mac/手机连接.command`（开 / 关切换）。它会生成一个访问密码，让代理接受局域网请求，并显示代理地址（`http://<Mac 的局域网 IP>:8901/v1`）和密码。
+2. 手机 TauriTavern → Claude Max 面板 → 高级 → 连接：「代理地址」「访问密码」分别填上，点「重新连接」。
+3. Mac 要开着、不能睡眠；Mac 首次弹出「允许 node 接受传入连接」时点允许。
+
+其他设备的请求必须带访问密码（`Authorization: Bearer <密码>` 或 `X-Claude-Max-Key`），本机不需要。没开「手机连接」时，就算代理绑到 `0.0.0.0` 也会拒绝所有局域网请求。不要在公共 Wi-Fi 开启，密码不要外传：拿到密码的人用的是你的订阅。手动启动时对应的环境变量是 `CLAUDE_SUBSCRIPTION_HOST=0.0.0.0`、`CLAUDE_SUBSCRIPTION_LAN_KEY=<密码>`。
+
+</details>
+
+<details>
 <summary>实验性：Windows 与安卓 Termux 脚本（未经实测）</summary>
 
 以下脚本只做过语法检查，没有在真机上运行过，可能需要自己排错。欢迎反馈。

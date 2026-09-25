@@ -20,6 +20,7 @@ ST_PORT=8000
 PROXY_PORT=8901
 COMFY_DIR="${PROXY_DIR:h}/ComfyUI"   # 可选：本地生图（ComfyUI），没装就忽略
 COMFY_PORT=8188
+LAN_KEY_FILE="$PROXY_DIR/launcher/lan-key.local"   # 有这个文件 = 手机连接（局域网访问）已开启
 [[ -f "$PROXY_DIR/launcher/config.local" ]] && source "$PROXY_DIR/launcher/config.local"
 if [[ -z "$ST_DIR" ]]; then
     if [[ ${PROXY_DIR:h:t} == plugins && -f ${PROXY_DIR:h:h}/server.js ]]; then
@@ -342,6 +343,24 @@ check_port() {
     fi
 }
 
+# ── 手机连接（局域网） ─────────────────────────
+
+lan_ip() {
+    local ip
+    for ifc in en0 en1 en2; do
+        ip=$(ipconfig getifaddr $ifc 2>/dev/null) && [[ -n "$ip" ]] && { print $ip; return; }
+    done
+}
+
+# 代理在忙（正在生成回复）时不重启
+proxy_busy() {
+    local pid
+    for pid in $(our_pids $PROXY_PORT); do
+        [[ -n "$(pgrep -P $pid)" ]] && return 0
+    done
+    return 1
+}
+
 # ── 启动 / 关闭 ───────────────────────────────
 
 start_proxy() {
@@ -353,7 +372,12 @@ start_proxy() {
     fi
     rotate_log "$PROXY_LOG"
     mark_log "$PROXY_LOG"
-    (cd "$PROXY_DIR" && nohup node server.js >>"$PROXY_LOG" 2>&1 &!)
+    if [[ -s "$LAN_KEY_FILE" ]]; then
+        explain "手机连接已开启：同一 Wi-Fi 下的设备带访问密码可以连这个代理。"
+        (cd "$PROXY_DIR" && CLAUDE_SUBSCRIPTION_HOST=0.0.0.0 CLAUDE_SUBSCRIPTION_LAN_KEY="$(<"$LAN_KEY_FILE")" nohup node server.js >>"$PROXY_LOG" 2>&1 &!)
+    else
+        (cd "$PROXY_DIR" && nohup node server.js >>"$PROXY_LOG" 2>&1 &!)
+    fi
     if wait_port $PROXY_PORT 20; then
         ok "代理已启动：http://127.0.0.1:$PROXY_PORT/v1"
         return 0

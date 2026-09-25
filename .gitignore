@@ -8,3 +8,5 @@ package-lock.json
 .claude/
 data/
 launcher/config.local
+launcher/lan-key.local
+launcher/lan-key.local.off
