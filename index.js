@@ -49,6 +49,10 @@
     import(new URL('./lib/lore-constant.js', import.meta.url).href)
         .then((m) => { loreConst = m; refreshLoreBox(); })
         .catch(() => { /* lore tool unavailable */ });
+    let cardAudit = null;
+    import(new URL('./lib/card-audit.js', import.meta.url).href)
+        .then((m) => { cardAudit = m; runCardAudit({ toast: true }); })
+        .catch(() => { /* card audit unavailable */ });
     let presetReco = null;
     import(new URL('./lib/preset-reco.js', import.meta.url).href)
         .then((m) => { presetReco = m; adoptUnrecordedReco(); })
@@ -495,6 +499,53 @@
         }
     }
 
+    // ── 角色卡检查：未成年人物与幼态化描写（lib/card-audit.js）──
+
+    const auditedCards = new Set(); // warned once per card per page load
+
+    async function runCardAudit({ toast = false } = {}) {
+        const box = document.getElementById('claude_max_card_audit');
+        if (!cardAudit) {
+            box?.replaceChildren(el('small', 'cm-hint', '这个功能没有加载（扩展文件不完整），重新安装扩展即可。'));
+            return;
+        }
+        const ctx = SillyTavern.getContext();
+        const ch = ctx.groupId ? null : ctx.characters?.[ctx.characterId];
+        if (!ch) { box?.replaceChildren(el('small', 'cm-hint', '打开一张角色卡的聊天后可用。')); return; }
+        const items = cardAudit.cardItems(ch.data ?? ch);
+        const books = new Set([ch.data?.extensions?.world].filter(Boolean));
+        try {
+            const wi = await import('/scripts/world-info.js');
+            for (const n of wi.selected_world_info ?? []) books.add(n);
+        } catch { /* global lorebooks unknown in this frontend */ }
+        for (const name of books) {
+            try { items.push(...cardAudit.worldItems(await ctx.loadWorldInfo(name), name)); } catch { /* unreadable book */ }
+        }
+        const persona = ctx.powerUserSettings?.persona_description;
+        if (persona) items.push({ where: '你的人设', text: persona });
+        const found = cardAudit.auditTexts(items);
+        const high = found.filter((f) => f.level === 'high');
+        if (box) {
+            const card = el('div', high.length ? 'cm-last-error' : found.length ? 'cm-last-error cm-tip' : 'cm-cache');
+            card.append(el('div', 'cm-last-error-title', found.length
+                ? `「${ch.name}」：高风险 ${high.length} 处，提醒 ${found.length - high.length} 处`
+                : `「${ch.name}」：没有发现未成年人物或幼态化描写`));
+            for (const f of found.slice(0, 12)) {
+                card.append(el('small', 'cm-hint', `${f.level === 'high' ? '✗' : '!'} ${f.text} · ${f.where}${f.disabled ? '（已关闭）' : ''}：${f.snippet}`));
+            }
+            if (found.length > 12) card.append(el('small', 'cm-hint', `……另有 ${found.length - 12} 处。`));
+            if (found.length) {
+                card.append(el('small', 'cm-hint', '这类内容会让 Claude 每轮先在思考里核查年龄、主动收敛剧情，也违反 Anthropic 的使用政策。已关闭的条目也列出来了：换个开关组合就可能被发出去。'));
+            }
+            box.replaceChildren(card);
+        }
+        const key = ch.avatar ?? ch.name;
+        if (toast && high.length && !auditedCards.has(key)) {
+            auditedCards.add(key);
+            toastr?.error?.(`「${ch.name}」里有 ${high.length} 处未成年人物相关内容（${[...new Set(high.map((f) => f.where))].slice(0, 3).join('、')}）。详情见 Claude Max 面板「体检 → 角色卡检查」。`, 'Claude Max · 角色卡检查', { timeOut: 15000 });
+        }
+    }
+
     async function showDebugRequest() {
         let data;
         try {
@@ -851,6 +902,7 @@
         refreshStatsPage();
         refreshLoreBox();
         runCheckup();
+        runCardAudit();
     }
 
     // ── Settings UI ──
@@ -1061,6 +1113,14 @@
         pane.append(checkBox);
         pane.append(el('small', 'cm-hint', '检查字数、禁词、破折号、「不是A，是B」、人称、选项格式、重复段落、数值突变等。字数范围和禁词表自动从当前预设读取。'));
 
+        const auditTools = el('div', 'cm-section-tools');
+        auditTools.append(iconButton('fa-user-shield', '重新检查当前角色卡', () => runCardAudit()));
+        pane.append(section('角色卡检查', auditTools));
+        const auditBox = el('div', 'cm-stats');
+        auditBox.id = 'claude_max_card_audit';
+        pane.append(auditBox);
+
+        pane.append(section('设置'));
         const leakField = el('div', 'cm-field');
         leakField.append(el('div', 'cm-field-label', '隐藏设定关键词'));
         const leakInput = el('input', 'text_pole');
@@ -1272,6 +1332,7 @@
         if (leak) leak.value = getSettings().leakWords?.[currentCharKey()] ?? '';
         runCheckup();
         refreshLoreBox();
+        runCardAudit({ toast: true });
     }, 200));
     // Model / API switches: keep the header summary and connect button current.
     for (const ev of [eventTypes.CHATCOMPLETION_MODEL_CHANGED, eventTypes.CHATCOMPLETION_SOURCE_CHANGED, eventTypes.MAIN_API_CHANGED, eventTypes.SETTINGS_UPDATED]) {
