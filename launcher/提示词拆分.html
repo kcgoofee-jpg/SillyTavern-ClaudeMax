@@ -73,6 +73,11 @@ button.small { padding: 2px 10px; font-size: 12px; border-radius: 6px; }
       <div class="out"><textarea id="o-quality" readonly></textarea><button class="copy" data-for="o-quality">复制</button></div></div>
     <div class="group"><h3>负面提示词 → 柏宝绘「负面提示词」</h3>
       <div class="out"><textarea id="o-neg" readonly></textarea><button class="copy" data-for="o-neg">复制</button></div></div>
+    <div class="group"><h3>或者一键导入 <small>三块和参数存成一个配方文件，再双击「导入柏宝绘配方」</small></h3>
+      <div class="out"><input id="preset-name" autocomplete="off" placeholder="配方名字（柏宝绘画师串列表里显示）"
+        style="flex:1;border:1px solid var(--line);border-radius:8px;padding:8px 10px;background:var(--bg);color:var(--ink);font:14px/1.4 inherit">
+        <button class="copy" id="export" type="button">导出柏宝绘配方</button></div>
+      <p class="hint" id="export-note">参数（步数不超过 28、引导、采样器、噪声调度、模型）一起带上；尺寸和种子不动，免得扣 Anlas、每楼构图雷同。</p></div>
   </div>
 
   <div class="card" id="inspect-card" hidden>
@@ -125,6 +130,7 @@ const STYLE = new Set(['anime coloring', 'flat color', 'cel shading', 'sketch', 
 const cats = new Map(); // core → 'artist' | 'quality' | 'content'（手动改过的）
 let lastRead = null; // 最近一次读图的结构信息（给核对码用，不含内容）
 let shownKeys = new Set(); // 页面上显示出来的 Comment 字段
+let lastParams = null; // 读图得到的生成参数（导出配方用）
 const SALT = crypto.getRandomValues(new Uint8Array(16));
 
 function splitTop(str) {
@@ -495,6 +501,8 @@ async function loadImage(file) {
     };
     if (pos != null) $('pos').value = pos;
     if (neg != null) $('neg').value = neg;
+    lastParams = c ? { steps: c.steps, scale: c.scale, cfgRescale: c.cfg_rescale, sampler: c.sampler, noiseSchedule: c.noise_schedule, source: t.Source ?? '' } : null;
+    if (!$('preset-name').value) $('preset-name').value = file.name.replace(/\.[^.]+$/, '');
     cats.clear();
     render();
   } catch (e) {
@@ -509,7 +517,7 @@ function clearAll() {
   $('preview').removeAttribute('src');
   $('inspect').style.display = 'none'; $('inspect-card').hidden = true;
   $('status').textContent = '经过截图、压缩或聊天软件转发的图，生成信息通常已经丢失。';
-  cats.clear(); lastRead = null; shownKeys = new Set();
+  cats.clear(); lastRead = null; shownKeys = new Set(); lastParams = null; $('preset-name').value = '';
   render();
 }
 $('clear').addEventListener('click', clearAll);
@@ -521,6 +529,35 @@ document.addEventListener('dragover', (e) => { e.preventDefault(); drop.classLis
 document.addEventListener('dragleave', () => drop.classList.remove('over'));
 document.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); const f = e.dataTransfer?.files?.[0]; if (f) loadImage(f); });
 document.addEventListener('paste', (e) => { const f = [...(e.clipboardData?.files ?? [])][0]; if (f) loadImage(f); });
+
+// NAI 图里的 Source（如「NovelAI Diffusion V4.5 …」）→ 柏宝绘的模型名；认不出就不改
+function modelFromSource(src) {
+  const curated = /curated/i.test(src);
+  if (/V5/i.test(src)) return curated ? 'nai-diffusion-5-curated' : 'nai-diffusion-5-full';
+  if (/V4\.5/i.test(src)) return curated ? 'nai-diffusion-4-5-curated' : 'nai-diffusion-4-5-full';
+  if (/V4/i.test(src)) return curated ? 'nai-diffusion-4-curated-preview' : 'nai-diffusion-4-full';
+  return null;
+}
+
+$('export').addEventListener('click', () => {
+  const name = $('preset-name').value.trim() || '导入的画师串';
+  const params = {};
+  if (lastParams) {
+    if (Number.isFinite(lastParams.steps)) params.steps = Math.min(28, lastParams.steps);
+    if (Number.isFinite(lastParams.scale)) params.scale = lastParams.scale;
+    if (Number.isFinite(lastParams.cfgRescale)) params.cfgRescale = lastParams.cfgRescale;
+    if (lastParams.sampler) params.sampler = lastParams.sampler;
+    if (lastParams.noiseSchedule) params.noiseSchedule = lastParams.noiseSchedule;
+    const model = modelFromSource(lastParams.source);
+    if (model) params.model = model;
+  }
+  const preset = { type: 'baibai-nai-preset', v: 1, name, prompt: $('o-artist').value, quality: $('o-quality').value, negative: $('o-neg').value, params };
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(preset, null, 2)], { type: 'application/json' }));
+  a.download = `柏宝绘配方-${name.replace(/[\\/:*?"<>|]/g, '_')}.json`;
+  document.body.append(a); a.click(); a.remove();
+  $('export-note').textContent = `已导出「${a.download}」到下载文件夹。关掉酒馆网页和 TT，双击「导入柏宝绘配方」。`;
+});
 
 $('pos').addEventListener('input', render);
 $('neg').addEventListener('input', render);
