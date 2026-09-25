@@ -554,3 +554,81 @@
 .claude-max .cm-heading-name {
     white-space: nowrap;
 }
+
+/* ── stats page: one-line quota rows, usage table, small disclosures ── */
+.claude-max .cm-qline {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-areas: "label reset pct" "bar bar bar";
+    align-items: baseline;
+    column-gap: 6px;
+    row-gap: 2px;
+    font-size: 0.88em;
+}
+
+.claude-max .cm-qline-label {
+    grid-area: label;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.claude-max .cm-qline-pct {
+    grid-area: pct;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.claude-max .cm-qline-reset {
+    grid-area: reset;
+    white-space: nowrap;
+    font-size: 0.8em;
+}
+
+.claude-max .cm-qline .cm-quota-bar {
+    grid-area: bar;
+    height: 4px;
+}
+
+.claude-max .cm-quota:has(.cm-qline) {
+    gap: 5px;
+}
+
+.claude-max .cm-usage {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.88em;
+    font-variant-numeric: tabular-nums;
+}
+
+.claude-max .cm-usage th {
+    text-align: right;
+    font-weight: 600;
+    opacity: 0.75;
+    padding: 0 0 3px;
+}
+
+.claude-max .cm-usage td {
+    padding: 3px 0;
+    border-top: 1px solid var(--cm-border);
+}
+
+.claude-max .cm-usage td:not(:first-child) {
+    text-align: right;
+    font-weight: 600;
+}
+
+.claude-max .cm-usage td.cm-hint {
+    display: table-cell;
+}
+
+.claude-max .cm-mini > summary {
+    cursor: pointer;
+    font-size: 0.82em;
+    opacity: 0.7;
+    user-select: none;
+}
+
+.claude-max .cm-mini[open] > summary {
+    margin-bottom: 2px;
+}
