@@ -9,72 +9,83 @@
   --bg: #f6f4ef; --panel: #fffdf8; --ink: #23201a; --muted: #6d665a; --line: #e2dccf;
   --accent: #9a5b13; --accent-ink: #fff;
   --artist: #e7eefc; --artist-ink: #1f3f8a; --quality: #e6f4e8; --quality-ink: #1d6130;
-  --content: #efece6; --content-ink: #8a8377; --blocked: #fbe4e2; --blocked-ink: #9b2319;
+  --content: #efece6; --content-ink: #8a8377;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --bg: #1b1a17; --panel: #24221e; --ink: #ece7dc; --muted: #a39c8e; --line: #3a362f;
     --accent: #d99545; --accent-ink: #1b1a17;
     --artist: #22314f; --artist-ink: #b9cdf7; --quality: #1f3a27; --quality-ink: #aee0bb;
-    --content: #2e2b26; --content-ink: #8f887b; --blocked: #4a2320; --blocked-ink: #f3b2aa;
+    --content: #2e2b26; --content-ink: #8f887b;
   }
 }
 * { box-sizing: border-box; }
 body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
-main { max-width: 980px; margin: 0 auto; padding: 24px 16px 48px; }
+main { max-width: 1040px; margin: 0 auto; padding: 24px 16px 48px; }
 h1 { font-size: 22px; margin: 0 0 4px; }
+h2 { font-size: 17px; margin: 0 0 10px; }
 .sub { color: var(--muted); margin: 0 0 20px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; }
 label { font-weight: 600; display: block; margin-bottom: 6px; }
 textarea { width: 100%; min-height: 110px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; padding: 10px;
   background: var(--bg); color: var(--ink); font: 13px/1.5 ui-monospace, Menlo, monospace; }
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-@media (max-width: 720px) { .row { grid-template-columns: 1fr; } }
+@media (max-width: 720px) { .row, .inspect { grid-template-columns: 1fr !important; } }
+.drop { border: 2px dashed var(--line); border-radius: 10px; padding: 18px; text-align: center; color: var(--muted); }
+.drop.over { border-color: var(--accent); color: var(--ink); }
+.inspect { display: none; grid-template-columns: 280px 1fr; gap: 16px; margin-top: 14px; }
+.inspect img { width: 100%; border-radius: 8px; border: 1px solid var(--line); }
+.fields { display: grid; gap: 8px; min-width: 0; }
+.field { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; min-width: 0; }
+.field .k { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 600; font-size: 13px; }
+.field pre { margin: 4px 0 0; white-space: pre-wrap; word-break: break-word; font: 13px/1.5 ui-monospace, Menlo, monospace; }
+.params { display: flex; flex-wrap: wrap; gap: 6px 14px; font: 13px/1.5 ui-monospace, Menlo, monospace; }
+.params span b { color: var(--muted); font-weight: 400; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; min-height: 30px; }
 .chip { border: 0; border-radius: 999px; padding: 3px 10px; font: 13px/1.5 ui-monospace, Menlo, monospace; cursor: pointer; }
 .chip.artist { background: var(--artist); color: var(--artist-ink); }
 .chip.quality { background: var(--quality); color: var(--quality-ink); }
 .chip.content { background: var(--content); color: var(--content-ink); text-decoration: line-through; }
-.chip.blocked { background: var(--blocked); color: var(--blocked-ink); cursor: not-allowed; text-decoration: line-through; }
 .group h3 { font-size: 14px; margin: 14px 0 6px; }
 .group h3 small { color: var(--muted); font-weight: 400; }
 .out { display: flex; gap: 8px; align-items: flex-start; }
 .out textarea { min-height: 70px; }
-button.copy { flex: none; border: 0; border-radius: 8px; padding: 8px 14px; background: var(--accent); color: var(--accent-ink); font-weight: 600; cursor: pointer; }
-.warn { background: var(--blocked); color: var(--blocked-ink); border-radius: 8px; padding: 10px 12px; margin-top: 12px; display: none; }
+button.copy, button.small { flex: none; border: 0; border-radius: 8px; padding: 8px 14px; background: var(--accent); color: var(--accent-ink); font-weight: 600; cursor: pointer; }
+button.small { padding: 2px 10px; font-size: 12px; border-radius: 6px; }
 .hint { color: var(--muted); font-size: 13px; margin: 6px 0 0; }
 </style>
 </head>
 <body>
 <main>
   <h1>提示词拆分</h1>
-  <p class="sub">把别人分享的一整段 NAI 提示词粘进来，自动分成柏宝绘要的三块：画师串、正面质量词、负面提示词。画面内容（人物、动作、衣服、构图）由写 tag 的 AI 按剧情写，这里会划掉。全部在本机处理，不联网。</p>
+  <p class="sub">读取 NovelAI 图片里记录的生成信息（同官方 novelai.net/inspect），再把提示词拆成柏宝绘的画师串、正面质量词、负面提示词。全部在本机处理，不联网。</p>
 
-  <div class="card" id="drop">
-    <label for="file">从 NAI 原图读取（和官方 novelai.net/inspect 一样）</label>
-    <input type="file" id="file" accept="image/png,image/webp,image/*">
-    <p class="hint">选择或拖入一张 NovelAI 生成的原图（PNG），自动读出里面记录的提示词并填到下面。图片只在本机读取，不上传。经过截图、压缩或转发的图通常已经丢了这些信息。</p>
-    <div id="meta" class="hint"></div>
-  </div>
-
-  <div class="card row">
-    <div>
-      <label for="pos">正面提示词（整段粘贴）</label>
-      <textarea id="pos" placeholder="例：1.2::artist:xxx::, masterpiece, best quality, 1girl, long hair, sitting, ..."></textarea>
-    </div>
-    <div>
-      <label for="neg">负面提示词（可选）</label>
-      <textarea id="neg" placeholder="例：lowres, bad anatomy, bad hands, watermark, ..."></textarea>
+  <div class="card">
+    <h2>图片信息</h2>
+    <div class="drop" id="drop">把 NovelAI 原图拖到这里、粘贴，或 <input type="file" id="file" accept="image/*"></div>
+    <p class="hint" id="status">经过截图、压缩或聊天软件转发的图，生成信息通常已经丢失。</p>
+    <div class="inspect" id="inspect">
+      <img id="preview" alt="">
+      <div class="fields" id="fields"></div>
     </div>
   </div>
 
   <div class="card">
-    <strong>识别结果</strong>
-    <p class="hint">点一下 tag 可以改分类（画师串 → 质量词 → 不用 → 画师串）。认不出的画师名会落在「不用」里，点一下挪到画师串。</p>
+    <h2>转成柏宝绘</h2>
+    <div class="row">
+      <div>
+        <label for="pos">正面提示词</label>
+        <textarea id="pos" placeholder="读图后自动填入，也可以直接粘贴别人分享的一整段"></textarea>
+      </div>
+      <div>
+        <label for="neg">负面提示词</label>
+        <textarea id="neg" placeholder="读图后自动填入（Undesired Content），也可以直接粘贴"></textarea>
+      </div>
+    </div>
+    <p class="hint">点一下 tag 改分类（画师串 → 质量词 → 不用 → 画师串）。不带 artist: 前缀的画师名认不出来，会在「不用」里，点一下挪到画师串。</p>
     <div class="group"><h3>画师串 <small>画风：画师名、画风词</small></h3><div class="chips" id="c-artist"></div></div>
     <div class="group"><h3>正面质量词 <small>画质</small></h3><div class="chips" id="c-quality"></div></div>
-    <div class="group"><h3>不用 <small>画面内容，交给写 tag 的 AI</small></h3><div class="chips" id="c-content"></div></div>
-    <div class="warn" id="warn"></div>
+    <div class="group"><h3>不用 <small>画面内容，柏宝绘里由写 tag 的 AI 按剧情写</small></h3><div class="chips" id="c-content"></div></div>
   </div>
 
   <div class="card">
@@ -83,25 +94,23 @@ button.copy { flex: none; border: 0; border-radius: 8px; padding: 8px 14px; back
     <div class="group"><h3>正面质量词 → 柏宝绘「质量词」</h3>
       <div class="out"><textarea id="o-quality" readonly></textarea><button class="copy" data-for="o-quality">复制</button></div></div>
     <div class="group"><h3>负面提示词 → 柏宝绘「负面提示词」</h3>
-      <div class="out"><textarea id="o-neg" readonly></textarea><button class="copy" data-for="o-neg">复制</button></div>
-      <p class="hint" id="neg-note"></p></div>
+      <div class="out"><textarea id="o-neg" readonly></textarea><button class="copy" data-for="o-neg">复制</button></div></div>
   </div>
 </main>
 <script>
+// ── 拆分 ──
+
 const QUALITY = new Set(['masterpiece', 'best quality', 'amazing quality', 'great quality', 'good quality', 'high quality',
   'normal quality', 'very aesthetic', 'aesthetic', 'displeasing', 'absurdres', 'incredibly absurdres', 'highres', 'hires',
   'ultra detailed', 'extremely detailed', 'highly detailed', 'very detailed', 'detailed', 'ultra-detailed', '4k', '8k',
   'newest', 'recent', 'mid', 'early', 'old', 'no text', 'very awa', 'official art', 'score_9', 'score_8_up', 'score_7_up',
-  'sharp focus', 'high resolution', 'best aesthetic']);
+  'sharp focus', 'high resolution', 'best aesthetic', 'location']);
 const STYLE = new Set(['anime coloring', 'flat color', 'cel shading', 'sketch', 'lineart', 'watercolor', 'watercolor (medium)',
   'oil painting (medium)', 'traditional media', 'realistic', 'photorealistic', 'semi-realistic', '3d', 'pixel art', 'chibi style',
-  'thick lines', 'thick outlines', 'painterly', 'impasto', 'monochrome', 'greyscale', 'retro artstyle', '1990s (style)',
-  '1980s (style)', '2000s (style)', 'oekaki', 'ink wash painting', 'digital painting', 'soft shading', 'gradient shading']);
-// 未成年 / 幼态 tag：一律拦截，不进任何输出
-const MINOR = /\b(loli|lolicon|shota|shotacon|child|children|kid|kids|toddler|baby|infant|aged down|young(er)? girl|little girl|little boy|elementary|junior high|middle school|kindergarten|preteen|underage|petite child|flat chest child)\b/i;
-const SAFETY_NEG = ['loli', 'child', 'shota', 'aged down'];
+  'thick lines', 'thick outlines', 'painterly', 'impasto', 'monochrome', 'greyscale', 'retro artstyle', 'oekaki',
+  'ink wash painting', 'digital painting', 'soft shading', 'gradient shading']);
 
-const cats = new Map(); // core → 'artist' | 'quality' | 'content'
+const cats = new Map(); // core → 'artist' | 'quality' | 'content'（手动改过的）
 
 function splitTop(str) {
   const out = []; let depth = 0; let cur = '';
@@ -127,7 +136,7 @@ function parse(str) {
     // 外层强调括号 {{…}} / [[…]] / (…)：两头各剥同样层数，名字里自带的括号保留
     let parts = [tok]; let bl = ''; let bRight = '';
     const lead = tok.match(/^[{[(]+/)?.[0] ?? '';
-    if (lead && tok.length > lead.length * 2 && /[}\])]$/.test(tok)) {
+    if (lead && tok.length > lead.length * 2) {
       const tail = tok.slice(-lead.length);
       if (/^[}\])]+$/.test(tail)) {
         bl = lead; bRight = tail;
@@ -136,18 +145,16 @@ function parse(str) {
     }
     for (const p of parts) {
       const core = p.replace(/:\s*-?[\d.]+$/, '').replace(/_/g, ' ').trim().toLowerCase();
-      if (!core) continue;
-      items.push({ text: `${pre}${bl}${p}${bRight}${post}`, core });
+      if (core) items.push({ text: `${pre}${bl}${p}${bRight}${post}`, core });
     }
   }
   return items;
 }
 
 function guess(core) {
-  if (MINOR.test(core)) return 'blocked';
   if (/^(artist:|by\s)/.test(core)) return 'artist';
   if (QUALITY.has(core) || /^year \d{4}$/.test(core)) return 'quality';
-  if (STYLE.has(core) || /\(style\)$/.test(core) || /\(medium\)$/.test(core)) return 'artist';
+  if (STYLE.has(core) || /\((style|medium)\)$/.test(core)) return 'artist';
   return 'content';
 }
 
@@ -155,47 +162,29 @@ const $ = (id) => document.getElementById(id);
 const NEXT = { artist: 'quality', quality: 'content', content: 'artist' };
 
 function render() {
-  const items = parse($('pos').value);
+  const lists = { artist: [], quality: [], content: [] };
   const seen = new Set();
-  const lists = { artist: [], quality: [], content: [], blocked: [] };
-  for (const it of items) {
+  for (const it of parse($('pos').value)) {
     if (seen.has(it.text)) continue;
     seen.add(it.text);
-    const auto = guess(it.core);
-    const cat = auto === 'blocked' ? 'blocked' : cats.get(it.core) ?? auto;
-    lists[cat].push(it);
+    lists[cats.get(it.core) ?? guess(it.core)].push(it);
   }
-  for (const cat of ['artist', 'quality', 'content']) {
-    const box = $(`c-${cat}`);
-    box.replaceChildren(...lists[cat].concat(cat === 'content' ? lists.blocked : []).map((it) => {
+  for (const cat of Object.keys(lists)) {
+    $(`c-${cat}`).replaceChildren(...lists[cat].map((it) => {
       const b = document.createElement('button');
-      const c = guess(it.core) === 'blocked' ? 'blocked' : cat;
-      b.className = `chip ${c}`;
+      b.className = `chip ${cat}`;
       b.textContent = it.text;
-      if (c !== 'blocked') b.onclick = () => { cats.set(it.core, NEXT[cat]); render(); };
-      else b.title = '未成年 / 幼态 tag，已拦截';
+      b.onclick = () => { cats.set(it.core, NEXT[cat]); render(); };
       return b;
     }));
   }
   $('o-artist').value = lists.artist.map((i) => i.text).join(', ');
   $('o-quality').value = lists.quality.map((i) => i.text).join(', ');
-  const warn = $('warn');
-  if (lists.blocked.length) {
-    warn.style.display = 'block';
-    warn.textContent = `拦截了 ${lists.blocked.length} 个未成年 / 幼态 tag（${lists.blocked.map((i) => i.core).join('、')}），不会出现在任何输出里。这类内容不要用。`;
-  } else warn.style.display = 'none';
-
-  const negItems = parse($('neg').value);
   const negSeen = new Set();
-  const neg = [];
-  const added = [];
-  for (const s of SAFETY_NEG) if (!negItems.some((i) => i.core === s)) { neg.push(s); added.push(s); negSeen.add(s); }
-  for (const i of negItems) if (!negSeen.has(i.core)) { negSeen.add(i.core); neg.push(i.text); }
-  $('o-neg').value = neg.join(', ');
-  $('neg-note').textContent = added.length ? `已在最前面补上底线保护：${added.join(', ')}` : '底线保护（loli, child, shota, aged down）已包含。';
+  $('o-neg').value = parse($('neg').value).filter((i) => !negSeen.has(i.text) && negSeen.add(i.text)).map((i) => i.text).join(', ');
 }
 
-// ── 从 NAI 原图读取提示词（PNG 文本块，或写在透明通道里的 stealth 信息）──
+// ── 读图（同官方 inspect：PNG 文本块，或透明通道里的 stealth 信息）──
 
 async function inflate(bytes, format) {
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream(format));
@@ -234,7 +223,7 @@ async function pngText(buf) {
   return out;
 }
 
-/** NAI 也把同样的信息写进透明通道最低位（stealth_pngcomp = gzip 的 JSON） */
+/** 透明通道最低位：stealth_pngcomp（gzip）/ stealth_pnginfo，按列读取 */
 async function stealthText(file) {
   const bmp = await createImageBitmap(file);
   const canvas = document.createElement('canvas');
@@ -252,42 +241,107 @@ async function stealthText(file) {
   let bits = 0; for (let k = 0; k < 32; k++) bits = (bits << 1) | bit();
   const data = bytes(Math.floor(bits / 8));
   const text = new TextDecoder().decode(magic === 'stealth_pngcomp' ? await inflate(data, 'gzip') : data);
-  try { const j = JSON.parse(text); return typeof j.Comment === 'string' ? { ...j, Comment: j.Comment } : { Comment: JSON.stringify(j) }; } catch { return { Description: text }; }
+  try {
+    const j = JSON.parse(text);
+    return Object.fromEntries(Object.entries(j).map(([k, v]) => [k, typeof v === 'string' ? v : JSON.stringify(v)]));
+  } catch { return { Description: text }; }
+}
+
+function copyText(text, btn) {
+  navigator.clipboard.writeText(text).catch(() => {});
+  const old = btn.textContent; btn.textContent = '已复制'; setTimeout(() => { btn.textContent = old; }, 1200);
+}
+
+function field(key, value) {
+  const d = document.createElement('div');
+  d.className = 'field';
+  const k = document.createElement('div'); k.className = 'k';
+  const name = document.createElement('span'); name.textContent = key;
+  const b = document.createElement('button'); b.className = 'small'; b.textContent = '复制';
+  b.onclick = () => copyText(value, b);
+  k.append(name, b);
+  const pre = document.createElement('pre'); pre.textContent = value;
+  d.append(k, pre);
+  return d;
+}
+
+const LABELS = { Title: '标题', Description: '描述', Software: '软件', Source: '模型', 'Generation time': '生成耗时' };
+const PARAM_KEYS = ['width', 'height', 'steps', 'scale', 'cfg_rescale', 'uncond_scale', 'seed', 'sampler', 'noise_schedule',
+  'n_samples', 'sm', 'sm_dyn', 'dynamic_thresholding', 'skip_cfg_above_sigma', 'deliberate_euler_ancestral_bug', 'prefer_brownian',
+  'legacy', 'legacy_v3_extend', 'legacy_uc', 'request_type', 'strength', 'noise', 'controlnet_strength', 'reference_strength',
+  'use_coords', 'signed_hash'];
+
+function showInspect(file, t) {
+  const fields = $('fields');
+  fields.replaceChildren();
+  $('preview').src = URL.createObjectURL(file);
+  let c = null;
+  try { c = t.Comment ? JSON.parse(t.Comment) : null; } catch { /* 不是 JSON，原样显示 */ }
+  for (const [k, v] of Object.entries(t)) if (k !== 'Comment' || !c) fields.append(field(LABELS[k] ? `${LABELS[k]}（${k}）` : k, v));
+  if (c) {
+    const base = c.v4_prompt?.caption?.base_caption ?? c.prompt;
+    const uc = c.v4_negative_prompt?.caption?.base_caption ?? c.uc;
+    if (base != null) fields.append(field('提示词（Prompt）', base));
+    (c.v4_prompt?.caption?.char_captions ?? []).forEach((ch, i) => {
+      const at = ch.centers?.length ? `  · 位置 ${ch.centers.map((p) => `(${p.x}, ${p.y})`).join(' ')}` : '';
+      fields.append(field(`角色提示词 ${i + 1}${at}`, ch.char_caption ?? ''));
+    });
+    if (uc != null) fields.append(field('负面提示词（Undesired Content）', uc));
+    (c.v4_negative_prompt?.caption?.char_captions ?? []).forEach((ch, i) => {
+      if (ch.char_caption) fields.append(field(`角色负面提示词 ${i + 1}`, ch.char_caption));
+    });
+    const params = document.createElement('div');
+    params.className = 'field';
+    const head = document.createElement('div'); head.className = 'k'; head.textContent = '参数';
+    const list = document.createElement('div'); list.className = 'params';
+    for (const key of PARAM_KEYS) {
+      if (c[key] === undefined) continue;
+      const s = document.createElement('span');
+      const b = document.createElement('b'); b.textContent = key;
+      s.append(b, ' ', typeof c[key] === 'object' ? JSON.stringify(c[key]) : String(c[key]));
+      list.append(s);
+    }
+    params.append(head, list);
+    fields.append(params);
+    fields.append(field('完整 Comment（JSON）', JSON.stringify(c, null, 2)));
+  }
+  $('inspect').style.display = 'grid';
+  return c;
 }
 
 async function loadImage(file) {
-  const meta = $('meta');
-  meta.textContent = '读取中…';
+  $('status').textContent = '读取中…';
   try {
     let t = await pngText(await file.arrayBuffer());
     if (!t.Comment) t = { ...t, ...(await stealthText(file).catch(() => null) ?? {}) };
-    let c = {};
-    try { c = t.Comment ? JSON.parse(t.Comment) : {}; } catch { /* 不是 JSON */ }
-    const pos = c.v4_prompt?.caption?.base_caption ?? c.prompt ?? t.Description ?? '';
-    const neg = c.v4_negative_prompt?.caption?.base_caption ?? c.uc ?? '';
-    const chars = (c.v4_prompt?.caption?.char_captions ?? []).map((x) => x.char_caption).filter(Boolean);
-    if (!pos && !neg) { meta.textContent = '这张图里没有找到 NAI 的提示词记录（可能不是原图，或被压缩 / 截图过）。'; return; }
-    $('pos').value = pos;
-    $('neg').value = neg;
-    const params = [t.Source && `模型：${t.Source}`, c.steps && `步数 ${c.steps}`, c.scale && `引导 ${c.scale}`, c.sampler && `采样 ${c.sampler}`, c.seed && `种子 ${c.seed}`].filter(Boolean).join(' · ');
-    meta.textContent = `已读取。${params}${chars.length ? `。另有 ${chars.length} 段角色提示词（画面内容，已略过）` : ''}`;
+    if (!Object.keys(t).length) {
+      $('inspect').style.display = 'none';
+      $('status').textContent = '这张图里没有生成信息（不是原图，或被压缩 / 截图 / 转发过）。';
+      return;
+    }
+    const c = showInspect(file, t);
+    $('status').textContent = `${file.name} · 已读取`;
+    const pos = c?.v4_prompt?.caption?.base_caption ?? c?.prompt ?? t.Description;
+    const neg = c?.v4_negative_prompt?.caption?.base_caption ?? c?.uc;
+    if (pos != null) $('pos').value = pos;
+    if (neg != null) $('neg').value = neg;
+    cats.clear();
     render();
   } catch (e) {
-    meta.textContent = `读取失败：${e.message}`;
+    $('status').textContent = `读取失败：${e.message}`;
   }
 }
 
 $('file').addEventListener('change', (e) => { const f = e.target.files?.[0]; if (f) loadImage(f); });
-document.addEventListener('dragover', (e) => e.preventDefault());
-document.addEventListener('drop', (e) => { e.preventDefault(); const f = e.dataTransfer?.files?.[0]; if (f) loadImage(f); });
+const drop = $('drop');
+document.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
+document.addEventListener('dragleave', () => drop.classList.remove('over'));
+document.addEventListener('drop', (e) => { e.preventDefault(); drop.classList.remove('over'); const f = e.dataTransfer?.files?.[0]; if (f) loadImage(f); });
+document.addEventListener('paste', (e) => { const f = [...(e.clipboardData?.files ?? [])][0]; if (f) loadImage(f); });
 
 $('pos').addEventListener('input', render);
 $('neg').addEventListener('input', render);
-document.querySelectorAll('button.copy').forEach((b) => b.addEventListener('click', async () => {
-  const t = $(b.dataset.for);
-  try { await navigator.clipboard.writeText(t.value); } catch { t.select(); document.execCommand('copy'); }
-  const old = b.textContent; b.textContent = '已复制'; setTimeout(() => { b.textContent = old; }, 1200);
-}));
+document.querySelectorAll('button.copy').forEach((b) => b.addEventListener('click', () => copyText($(b.dataset.for).value, b)));
 render();
 </script>
 </body>
