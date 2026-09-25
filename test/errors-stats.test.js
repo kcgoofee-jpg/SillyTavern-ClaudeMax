@@ -41,6 +41,9 @@ test('usage stats record metadata only and aggregate today / week', async () => 
             textChars: 3000, reasoningChars: 50, finish: 'stop',
         });
         stats.recordRequest({ model: 'claude-fable-5', path: 'resume', stream: true, startedAt: t0, textChars: 0, reasoningChars: 0, error: 'Not logged in' });
+        // A background call (another extension's image-tag request) after the reply.
+        stats.recordRequest({ model: 'claude-haiku-4-5', path: 'resume', stream: false, startedAt: t0, auxiliary: true, purpose: 'quiet',
+            usage: { input_tokens: 5, output_tokens: 40 }, textChars: 80, reasoningChars: 0 });
     } finally {
         console.log = log;
     }
@@ -51,8 +54,10 @@ test('usage stats record metadata only and aggregate today / week', async () => 
     assert.equal(s.today.cacheHitRate, 0.8);
     assert.equal(s.today.withReasoning, 1);
     assert.equal(s.lastError.code, 'not_logged_in');
+    assert.equal(s.background.today.requests, 1, 'background calls counted apart');
+    assert.equal(s.lastRequest.model, 'claude-fable-5', 'the last-turn card ignores background calls');
     const file = readFileSync(process.env.CLAUDE_SUBSCRIPTION_STATS_FILE, 'utf8');
-    assert.equal(file.trim().split('\n').length, 2);
+    assert.equal(file.trim().split('\n').length, 3);
     assert.ok(!/mes|content/.test(file), 'no message content persisted');
     delete process.env.CLAUDE_SUBSCRIPTION_STATS_FILE;
 });

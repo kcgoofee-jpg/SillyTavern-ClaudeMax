@@ -30,3 +30,13 @@ test('CLAUDE_SUBSCRIPTION_AUX_THINKING overrides the auxiliary default', () => {
         delete process.env.CLAUDE_SUBSCRIPTION_AUX_THINKING;
     }
 });
+
+test('purpose: quiet from the panel marks a background call as auxiliary', () => {
+    const s = extractSettings({ claude_subscription: { purpose: 'quiet', effort: 'low', thinking: 'adaptive' } });
+    assert.equal(s.auxiliary, true);
+    assert.equal(s.purpose, 'quiet');
+    assert.equal(s.effort, 'low');
+    const chat = extractSettings({ claude_subscription: { effort: 'high' } });
+    assert.equal(chat.auxiliary, false);
+    assert.equal(chat.purpose, 'chat');
+});

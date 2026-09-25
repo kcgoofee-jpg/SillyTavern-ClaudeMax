@@ -109,6 +109,7 @@
         presetRecoRecord: null,  // 上一个预设的推荐改了什么（切走时恢复）
         tailBlockFront: false,   // 实验：预设后置条目提前（省缓存）
         loreTail: true,          // 每轮变化的世界书移到本轮消息开头（省缓存）
+        quietEffort: 'low',      // 后台请求（其他插件的生图 tag、总结等）的思考深度；'follow' = 跟随面板
         panelTab: 'reason',      // 面板上次打开的分页
         compactScriptButtons: true, // 输入栏上方的脚本按钮并排显示
     };
@@ -257,9 +258,11 @@
         return nextEffort ?? settings.effort;
     }
 
-    function buildIncludeBodyYaml(settings) {
+    function buildIncludeBodyYaml(settings, quiet = false) {
         const lines = ['claude_subscription:'];
-        const effort = effectiveEffort(settings);
+        // Background calls never take the one-shot effort meant for the next reply.
+        const effort = quiet ? (settings.quietEffort === 'follow' ? settings.effort : settings.quietEffort) : effectiveEffort(settings);
+        if (quiet) lines.push('  purpose: quiet');
         if (effort !== 'auto') lines.push(`  effort: ${effort}`);
         lines.push(`  thinking: ${settings.thinking}`);
         lines.push(`  show_reasoning: ${settings.showReasoning}`);
@@ -284,7 +287,7 @@
                 .replace(/^claude_subscription:[\s\S]*?(?=^\S|\s*$(?![\s\S]))/m, '')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
-            data.custom_include_body = (cleaned ? cleaned + '\n' : '') + buildIncludeBodyYaml(settings);
+            data.custom_include_body = (cleaned ? cleaned + '\n' : '') + buildIncludeBodyYaml(settings, data.type === 'quiet');
             preflightCheck(data);
             postProcessingCheck(data);
         } catch (err) {
@@ -849,11 +852,15 @@
             } else {
                 box.append(usageTable(data.today, data.week));
             }
+            const bg = data.background;
+            if (bg?.week?.requests) {
+                box.append(el('small', 'cm-hint', `后台请求（其他插件的生图 tag、总结等，不计入上表）：今天 ${bg.today.requests} 次、近 7 天 ${bg.week.requests} 次，输出 ${fmtK(bg.week.outputTokens)} token${bg.week.failed ? `，失败 ${bg.week.failed} 次` : ''}。`));
+            }
             // Only surface a failure from the last day; older ones are noise.
             if (data.lastError && Date.now() - data.lastError.at < 24 * 3600 * 1000) {
                 const err = el('div', 'cm-last-error');
                 err.append(
-                    el('div', 'cm-last-error-title', `最近一次失败 · ${fmtWhen(data.lastError.at)} · ${shortModel(data.lastError.model)}`),
+                    el('div', 'cm-last-error-title', `最近一次失败 · ${fmtWhen(data.lastError.at)} · ${shortModel(data.lastError.model)}${data.lastError.background ? ' · 后台请求' : ''}`),
                     el('small', null, data.lastError.message),
                 );
                 const more = el('details', 'cm-mini');
@@ -1053,6 +1060,15 @@
             options: THINKING_OPTIONS,
             current: settings.thinking,
             onChange: (v) => { settings.thinking = VALID_THINKING.includes(v) ? v : 'adaptive'; save(); },
+        }));
+        pane.append(segmented({
+            label: '后台请求的思考深度',
+            options: [
+                { value: 'low', label: '低', hint: '其他插件在后台发的请求（柏宝绘写生图 tag、总结等）用「低」，快、省额度。不影响聊天回复。' },
+                { value: 'follow', label: '跟随上面', hint: '后台请求也用上面的思考深度（「仅下一轮」不会用到后台请求上）。' },
+            ],
+            current: settings.quietEffort === 'follow' ? 'follow' : 'low',
+            onChange: (v) => { settings.quietEffort = v === 'follow' ? 'follow' : 'low'; save(); },
         }));
         pane.append(toggleRow({
             id: 'claudeMaxShowReasoning',
