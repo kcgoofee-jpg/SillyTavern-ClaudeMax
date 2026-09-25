@@ -50,6 +50,36 @@ npm start
 - 面板从「扩展 → 安装扩展」安装，地址填本仓库的 git 地址。
 - 第一次连接时 TauriTavern 会弹出授权框，允许访问 `127.0.0.1:8901` 即可。
 
+### 一键启动脚本（可选）
+
+仓库的 `launcher/` 里有现成的脚本，双击就能启动、关闭、检查状态和登录，不用记命令。脚本会自动识别酒馆位置：仓库装在酒馆的 `plugins/` 下，或者和 `SillyTavern` 文件夹放在一起时，会连酒馆一起启动；找不到酒馆时只启动代理（适合 TauriTavern）。
+
+| 系统 | 位置 | 用法 |
+| --- | --- | --- |
+| macOS | `launcher/mac/` | 双击 `启动酒馆.command`。第一次运行时如果被系统拦截，右键 → 打开 |
+| Windows | `launcher/windows/` | 双击 `启动酒馆.bat` |
+| 安卓 Termux | `launcher/termux/claude-max.sh` | 见下文 |
+
+每个系统都有这些脚本：启动酒馆、关闭酒馆、重启酒馆、检查状态、登录 Claude、修复依赖、开机自动启动、打开日志。遇到问题先运行「检查状态」：它会逐项检查环境、登录、端口和日志，并给出解决办法。
+
+想手动指定路径，在 `launcher/` 下新建 `config.local`（macOS）或 `config.local.ps1`（Windows），写入酒馆目录、日志目录或端口，例如 `ST_DIR="/path/to/SillyTavern"`。
+
+#### 安卓（Termux）
+
+Claude CLI 没有安卓版，不能直接在 Termux 里运行。脚本会在 Termux 里装一个 Debian 子系统，让代理跑在里面；酒馆照常跑在 Termux 里，两边共用网络。
+
+```bash
+curl -fsSLO https://raw.githubusercontent.com/kcgoofee-jpg/SillyTavern-ClaudeMax/main/launcher/termux/claude-max.sh
+bash claude-max.sh install
+claude-max login
+claude-max start
+```
+
+- 安装约需 100MB 流量和几分钟，只需一次。
+- 面板从酒馆的「扩展 → 安装扩展」安装，然后点「一键连接」。
+- 常用命令：`claude-max start`、`stop`、`status`、`update`、`logs`。
+- 安卓会清理后台程序。启动时脚本会申请唤醒锁；另外请在系统设置里关闭 Termux 的电池优化，也不要划掉 Termux 的通知。
+
 ## 使用
 
 1. 打开「扩展」抽屉里的 **Claude Max** 面板，点 **一键连接**。
