@@ -120,3 +120,17 @@ test('chat key survives an injection dropping off the first user message', () =>
     diagnoseCache(sys, [A('greeting'), U('问她们有没有系统\n\n【文风提醒】')]);
     assert.equal(diagnoseCache(sys, [A('greeting'), U('问她们有没有系统'), A('a1'), U('u2\n\n【文风提醒】')]).firstTurn, false);
 });
+
+test('explainCache flags history that stopped caching although nothing changed', () => {
+    const diag = { chat: 'c1', firstTurn: false, systemChanged: false, historyDiffAt: null, historyLen: 9 };
+    const prev = { ok: true, model: 'm', cacheReadTokens: 47000, cacheCreationTokens: 4000, cacheDiag: { chat: 'c1' } };
+    const broken = explainCache({ ok: true, model: 'm', cacheReadTokens: 26000, cacheCreationTokens: 28000, cacheDiag: diag }, prev);
+    assert.match(broken.reasons.join(), /逐轮还原/);
+    const healthy = explainCache({ ok: true, model: 'm', cacheReadTokens: 51000, cacheCreationTokens: 2500, cacheDiag: diag }, prev);
+    assert.doesNotMatch(healthy.reasons.join(), /逐轮还原/);
+});
+
+test('equivalentTokens uses list-price ratios', async () => {
+    const { equivalentTokens } = await import('../lib/cache-diag.js');
+    assert.equal(equivalentTokens({ inputTokens: 2, cacheReadTokens: 50000, cacheCreationTokens: 2800, outputTokens: 5000 }), 2 + 5000 + 3500 + 25000);
+});
