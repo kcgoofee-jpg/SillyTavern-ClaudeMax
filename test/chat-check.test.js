@@ -65,3 +65,14 @@ test('word range from an enabled「字数」entry name, and Ny-style four option
     assert.ok(!checkReply({ mes: ny(4) }).issues.some((i) => i.code === 'options'));
     assert.match(checkReply({ mes: ny(3) }).issues.find((i) => i.code === 'options').text, /只有 3 个/);
 });
+
+test('childhood flashbacks must stay innocent', async () => {
+    const { flashbackText } = await import('../lib/chat-check.js');
+    const clean = '<content>现在的剧情。\n> 【回忆】\n> 那年夏天我们在河边钓鱼，他把唯一的面包掰成两半。\n回到现在。</content>';
+    assert.match(flashbackText(clean), /钓鱼/);
+    assert.ok(!checkReply({ mes: clean }).issues.some((i) => i.code === 'flashback'));
+    const bad = '<content>> 【回忆】\n> 她的胸部……\n</content>';
+    assert.match(checkReply({ mes: bad }).issues.find((i) => i.code === 'flashback').text, /胸部/);
+    // explicit words OUTSIDE the flashback are not this check's business
+    assert.ok(!checkReply({ mes: '<content>成年人的剧情：吻。\n> 【回忆】\n> 我们爬上了老槐树。</content>' }).issues.some((i) => i.code === 'flashback'));
+});
