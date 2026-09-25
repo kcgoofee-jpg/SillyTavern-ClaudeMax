@@ -548,8 +548,8 @@ start_comfy() {
     explain "首次启动要加载模型，约 20–60 秒；出图时会占用约 8GB 内存。"
     rotate_log "$COMFY_LOG"
     mark_log "$COMFY_LOG"
-    # 只监听本机；柏宝绘在浏览器直连失败时会经由酒馆后端转发，不需要打开跨域
-    (cd "$COMFY_DIR" && PYTORCH_ENABLE_MPS_FALLBACK=1 nohup .venv/bin/python main.py --listen 127.0.0.1 --port $COMFY_PORT >>"$COMFY_LOG" 2>&1 &!)
+    # --use-pytorch-cross-attention：M5 上实测 SDXL 832×1216 24 步 131s → 78s。只监听本机；柏宝绘在浏览器直连失败时会经由酒馆后端转发，不需要打开跨域
+    (cd "$COMFY_DIR" && PYTORCH_ENABLE_MPS_FALLBACK=1 nohup .venv/bin/python main.py --listen 127.0.0.1 --port $COMFY_PORT --use-pytorch-cross-attention >>"$COMFY_LOG" 2>&1 &!)
     if wait_port $COMFY_PORT 90; then
         ok "ComfyUI 已启动：http://127.0.0.1:$COMFY_PORT"
         return 0
