@@ -316,12 +316,17 @@
         // route can be an older copy until SillyTavern restarts). On another
         // device 127.0.0.1 is unreachable, so that fails fast and the
         // same-origin plugin route takes over.
+        // The plugin route speaks for the proxy on the default port only: with
+        // another endpoint (phone → Mac, another port) falling back to it
+        // would report a different proxy as healthy while this one is down.
+        const settings = getSettings();
+        const directOnly = IS_TAURI || normalizeEndpoint(settings.endpoint) !== normalizeEndpoint(DEFAULT_ENDPOINT);
         try {
-            const key = getSettings().accessKey;
-            const direct = await fetch(`${proxyBase(getSettings())}${directPath}`, { signal: AbortSignal.timeout(IS_TAURI ? 12000 : 1500), headers: key ? { 'X-Claude-Max-Key': key } : {} });
-            if (direct.ok || IS_TAURI) return direct;
+            const key = settings.accessKey;
+            const direct = await fetch(`${proxyBase(settings)}${directPath}`, { signal: AbortSignal.timeout(directOnly ? 12000 : 1500), headers: key ? { 'X-Claude-Max-Key': key } : {} });
+            if (direct.ok || directOnly) return direct;
         } catch (err) {
-            if (IS_TAURI) throw err;
+            if (directOnly) throw err;
         }
         return fetch(`/api/plugins/claude-subscription${pluginPath}`, { signal: AbortSignal.timeout(12000) });
     }
@@ -689,7 +694,16 @@
         sub.textContent = '';
         try {
             const res = await fetchProxy('/status', '/status');
-            const data = await res.json();
+            const data = await res.json().catch(() => ({}));
+            if (res.status === 401 || res.status === 403) {
+                // Reached the proxy, which turned us away (access key / LAN not on)
+                proxyState = 'offline';
+                setDot('offline');
+                title.textContent = res.status === 401 ? '代理拒绝了连接：访问密码不对' : '代理拒绝了连接';
+                sub.textContent = data.error?.message ?? `HTTP ${res.status}`;
+                renderConnect();
+                return;
+            }
             if (!res.ok || !data.ok) throw new Error(data.message || `HTTP ${res.status}`);
             const cred = data.credential ?? {};
             proxyState = cred.present ? 'online' : 'warning';
@@ -703,15 +717,17 @@
             } else {
                 setDot('warning');
                 title.textContent = '代理在线，但未登录';
-                sub.textContent = '在代理目录运行 npm run login 登录 Claude 订阅账号';
+                sub.textContent = 'Mac：双击「酒馆工具」选「登录 Claude」。其他系统：在代理目录运行 npm run login。';
             }
         } catch {
             proxyState = 'offline';
             setDot('offline');
             title.textContent = '连接不到代理';
-            sub.textContent = IS_TAURI
-                ? '请先在代理目录运行 npm start 启动本地代理'
-                : '请确认服务器插件已加载，或在代理目录运行 npm start';
+            const where = normalizeEndpoint(getSettings().endpoint);
+            const remote = !/\/\/(127\.0\.0\.1|localhost)[:/]/.test(where);
+            sub.textContent = remote
+                ? `连不上 ${where}。确认那台电脑开着、代理在运行、「手机连接」已开启，并且两台设备连着同一个 Wi-Fi；换过 Wi-Fi 的话，那台电脑的地址可能变了。`
+                : `连不上 ${where}。Mac：双击「酒馆工具」选「启动酒馆」；其他系统在代理目录运行 npm start。改过代理端口的话，「高级 → 代理地址」要一起改。`;
         }
         renderConnect();
     }
@@ -1355,7 +1371,11 @@
             b.type = 'button';
             b.dataset.tab = k;
             b.setAttribute('role', 'tab');
-            b.addEventListener('click', () => show(k));
+            b.addEventListener('click', () => {
+                show(k);
+                // Stats go stale while the panel sits open: re-read on entering the tab
+                if (k === 'stats') { refreshStats(); refreshQuota(); }
+            });
             bar.append(b);
         }
 

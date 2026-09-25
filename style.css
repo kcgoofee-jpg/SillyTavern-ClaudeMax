@@ -143,8 +143,8 @@
 
 .claude-max .cm-seg-btn {
     flex: 1 1 0;
-    min-width: 3.2em;
-    padding: 5px 4px;
+    min-width: 2.6em; /* 6 个两字按钮在 ~360px 宽的抽屉里也排得下一行 */
+    padding: 5px 2px;
     border: 0;
     border-right: 1px solid var(--cm-border);
     background: transparent;
