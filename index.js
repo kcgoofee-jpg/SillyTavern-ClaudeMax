@@ -103,6 +103,7 @@
         checkupToast: true,      // 本轮体检发现问题时弹提示
         leakWords: {},           // 角色卡 → 隐藏设定关键词（逗号分隔）
         presetRecoRecord: null,  // 上一个预设的推荐改了什么（切走时恢复）
+        tailBlockFront: false,   // 实验：预设后置条目提前（省缓存）
     };
 
     function getSettings() {
@@ -215,6 +216,7 @@
         showReasoning: { label: '显示思考过程', valid: (v) => typeof v === 'boolean' },
         useResume: { label: '会话续接', valid: (v) => typeof v === 'boolean' },
         inlineSystem: { label: '深度注入保持原位', valid: (v) => typeof v === 'boolean' },
+        tailBlockFront: { label: '预设后置条目提前', valid: (v) => typeof v === 'boolean' },
         identityMode: { label: '身份模式', valid: (v) => typeof v === 'boolean' },
     };
 
@@ -256,6 +258,7 @@
         lines.push(`  identity_mode: ${settings.identityMode}`);
         lines.push(`  use_resume: ${settings.useResume}`);
         lines.push(`  system_placement: ${settings.inlineSystem ? 'inline' : 'hoist'}`);
+        if (settings.tailBlockFront) lines.push('  tail_block: front');
         if (settings.debugDump) lines.push('  debug_dump: true');
         return lines.join('\n');
     }
@@ -946,6 +949,13 @@
             desc: '预设里「深度 N」的条目、世界书深度条目、作者注释留在聊天记录里原来的位置，和酒馆直连 Claude 的做法一致，靠近结尾的提醒才有效。关闭则全部提到开头；那样的话只要其中有一条变化（比如世界书被触发），整个系统提示词的缓存都会失效。',
             checked: settings.inlineSystem,
             onChange: (v) => { settings.inlineSystem = v; save(); },
+        }));
+        adv.append(toggleRow({
+            id: 'claudeMaxTailBlock',
+            title: '实验：预设后置条目提前（省缓存）',
+            desc: 'Ny、图灵这类预设把大量规则放在聊天记录后面，每轮整段聊天记录都要重写缓存。打开后，代理把每轮一字不差的后置条目挪到对话最前面（内容和顺序不变，末尾的 AI 预填留在原位），旧楼层就能命中缓存。代价：这些规则离回复更远，效果可能不同；只对这类预设有用。',
+            checked: settings.tailBlockFront,
+            onChange: (v) => { settings.tailBlockFront = v; save(); },
         }));
         adv.append(toggleRow({
             id: 'claudeMaxIdentity',
