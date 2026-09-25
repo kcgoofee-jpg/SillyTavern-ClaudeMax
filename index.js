@@ -104,6 +104,7 @@
         leakWords: {},           // 角色卡 → 隐藏设定关键词（逗号分隔）
         presetRecoRecord: null,  // 上一个预设的推荐改了什么（切走时恢复）
         tailBlockFront: false,   // 实验：预设后置条目提前（省缓存）
+        panelTab: 'main',        // 面板上次打开的分页
     };
 
     function getSettings() {
@@ -293,16 +294,17 @@
      *  the ST UI is opened from another device), then the proxy directly
      *  (standalone mode / TauriTavern). */
     async function fetchProxy(pluginPath, directPath) {
-        let res = null;
-        if (!IS_TAURI) {
-            try {
-                res = await fetch(`/api/plugins/claude-subscription${pluginPath}`, { signal: AbortSignal.timeout(12000) });
-            } catch { /* ST route unavailable — fall back below */ }
+        // The proxy itself first: it is the source of truth (the ST plugin
+        // route can be an older copy until SillyTavern restarts). On another
+        // device 127.0.0.1 is unreachable, so that fails fast and the
+        // same-origin plugin route takes over.
+        try {
+            const direct = await fetch(`${proxyBase(getSettings())}${directPath}`, { signal: AbortSignal.timeout(IS_TAURI ? 12000 : 1500) });
+            if (direct.ok || IS_TAURI) return direct;
+        } catch (err) {
+            if (IS_TAURI) throw err;
         }
-        if (!res || !res.ok) {
-            res = await fetch(`${proxyBase(getSettings())}${directPath}`, { signal: AbortSignal.timeout(12000) });
-        }
-        return res;
+        return fetch(`/api/plugins/claude-subscription${pluginPath}`, { signal: AbortSignal.timeout(12000) });
     }
 
     // ── Small DOM helpers ──
@@ -995,6 +997,41 @@
         }
         notes.append(list);
         content.append(notes);
+
+        // Tabs: the panel grew long — group the sections, remember the last tab.
+        const TAB_OF = { '推理': 'reason', '订阅额度': 'stats', '使用统计': 'stats', '缓存优化 · 世界书': 'stats', '本轮体检': 'check' };
+        const TABS = [['main', '连接'], ['reason', '推理'], ['stats', '统计'], ['check', '体检'], ['adv', '高级']];
+        const panes = Object.fromEntries(TABS.map(([k]) => [k, el('div', 'cm-pane')]));
+        let cur = 'main';
+        for (const child of [...content.children]) {
+            if (child === adv || child === notes) { panes.adv.append(child); continue; }
+            if (child.classList.contains('cm-section-head')) {
+                const t = child.querySelector('.cm-section-title')?.textContent;
+                if (TAB_OF[t]) cur = TAB_OF[t];
+            }
+            panes[cur].append(child);
+        }
+        adv.open = true;
+        const bar = el('div', 'cm-tabs');
+        bar.setAttribute('role', 'tablist');
+        const show = (key) => {
+            for (const [k] of TABS) panes[k].hidden = k !== key;
+            bar.querySelectorAll('button').forEach((b) => {
+                b.classList.toggle('active', b.dataset.tab === key);
+                b.setAttribute('aria-selected', String(b.dataset.tab === key));
+            });
+            if (settings.panelTab !== key) { settings.panelTab = key; save(); }
+        };
+        for (const [k, label] of TABS) {
+            const b = el('button', 'cm-tab', label);
+            b.type = 'button';
+            b.dataset.tab = k;
+            b.setAttribute('role', 'tab');
+            b.addEventListener('click', () => show(k));
+            bar.append(b);
+        }
+        content.replaceChildren(bar, ...TABS.map(([k]) => panes[k]));
+        show(TABS.some(([k]) => k === settings.panelTab) ? settings.panelTab : 'main');
     }
 
     function rebuildPanel() {

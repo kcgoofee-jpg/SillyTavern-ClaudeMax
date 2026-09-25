@@ -428,3 +428,51 @@
 }
 
 .cm-debug-view .cm-details { margin: 6px 0; }
+
+/* ── tabs ── */
+.claude-max .cm-tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 2px;
+    padding: 3px;
+    border: 1px solid var(--cm-border);
+    border-radius: 10px;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--SmartThemeBlurTintColor, transparent);
+    backdrop-filter: blur(6px);
+}
+
+.claude-max .cm-tab {
+    flex: 1 1 0;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border: 0;
+    border-radius: 7px;
+    padding: 5px 2px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-size: 0.85em;
+    cursor: pointer;
+    white-space: nowrap;
+    opacity: 0.75;
+}
+
+.claude-max .cm-tab.active {
+    background: color-mix(in srgb, currentColor 14%, transparent);
+    opacity: 1;
+    font-weight: 700;
+}
+
+.claude-max .cm-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.claude-max .cm-pane[hidden] {
+    display: none;
+}
