@@ -169,3 +169,19 @@ test('what was learned about a chat survives a restart (tags and split only)', a
         __resetCacheDiag();
     }
 });
+
+test('with the lore moved out, a change inside it sets no split and later changes do not move it', () => {
+    __resetCacheDiag();
+    const head = '规则'.repeat(1000) + '\n';
+    const sys = (wi, tail = '尾部') => `${head}<Lore>\n${wi}\n</Lore>\n${tail}`;
+    const h = [A('greeting'), U('u1')];
+    const opts = { moveVolatile: true };
+    diagnoseCache(sys('雪山'), h, opts);
+    const d2 = diagnoseCache(sys('沙漠'), [...h, A('a1'), U('u2')], opts);
+    assert.deepEqual(d2.volatileTags, ['Lore']);
+    assert.equal(d2.splitAt, null);                 // only the moved block changed: nothing to split
+    const d3 = diagnoseCache(sys('森林', '尾部改了'), [...h, A('a1'), U('u2'), A('a2'), U('u3')], opts);
+    assert.ok(d3.splitAt > head.length);            // split after the placeholder, where the sent prompt changed
+    const d4 = diagnoseCache(sys('城市', '尾部改了'), [...h, A('a1'), U('u2'), A('a2'), U('u3'), A('a3'), U('u4')], opts);
+    assert.equal(d4.splitAt, d3.splitAt);           // lore changing every turn never moves it
+});
