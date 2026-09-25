@@ -224,9 +224,9 @@ def fix_endpoint(ph, ip, port, key):
         cm = (d.get('extension_settings') or {}).get('claude_max')
         if key and cm is not None and cm.get('accessKey') != key:
             cm['accessKey'] = key
-        out = json.dumps(d, ensure_ascii=False, indent=4 if rel == 'settings.json' else None)
-        if out == json.dumps(json.loads(raw), ensure_ascii=False, indent=4 if rel == 'settings.json' else None):
+        if d == json.loads(raw):   # 比较内容，不比较排版
             continue
+        out = json.dumps(d, ensure_ascii=False, indent=4 if rel == 'settings.json' else None)
         with tempfile.NamedTemporaryFile(delete=False, mode='w', encoding='utf-8') as f:
             f.write(out)
         ph.run('push', f.name, '/data/local/tmp/cm_cfg.json')
