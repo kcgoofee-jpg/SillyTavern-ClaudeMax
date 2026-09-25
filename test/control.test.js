@@ -39,8 +39,8 @@ test('restart waits while a reply is being written', async () => {
 test('the in-flight counter goes back down when the response ends or the client leaves', () => {
     __setInFlight(0);
     const handlers = {};
-    const res = { on: (ev, fn) => { handlers[ev] = fn; } };
-    countInFlight({}, res, () => {});
+    const res = { statusCode: 200, on: (ev, fn) => { handlers[ev] = fn; } };
+    countInFlight({ socket: { remoteAddress: '192.168.31.6' } }, res, () => {});
     assert.equal(busyCount(), 1);
     handlers.finish();
     handlers.close(); // both fire: counted once

@@ -54,6 +54,13 @@ if has_st && [[ -n "$(our_pids $ST_PORT)" ]]; then
 fi
 
 step "预览要同步的文件"
+# 同步要先关掉手机上的 TT：它正在用、或者有一条回复还没存盘（在后台）时，关掉会丢内容
+busy=$(python3 "${PROXY_DIR:h}/scripts/apply_settings.py" --why-busy 2>/dev/null)
+if [[ -n "$busy" ]]; then
+    warn "手机现在不方便关 TT：$busy"
+    explain "先在手机上打开 TT，等最新一楼显示完整（有回复、有图），再回来同步。"
+    ask_yes "仍然要现在同步吗？（可能丢掉还没存盘的回复）" || { warn "没有同步。"; summary; pause_end; }
+fi
 "$adb" -s "$serial" shell am force-stop $TT_PKG >/dev/null 2>&1
 explain "已先关掉手机上的 TauriTavern（它开着时会把旧设置写回去）。"
 args=(--st "$ST_DIR/data/default-user" --adb "$adb" --serial "$serial"
