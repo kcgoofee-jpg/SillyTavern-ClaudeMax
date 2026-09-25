@@ -76,3 +76,10 @@ test('childhood flashbacks must stay innocent', async () => {
     // explicit words OUTSIDE the flashback are not this check's business
     assert.ok(!checkReply({ mes: '<content>成年人的剧情：吻。\n> 【回忆】\n> 我们爬上了老槐树。</content>' }).issues.some((i) => i.code === 'flashback'));
 });
+
+import { bodyOf as bodyOfForImages } from '../lib/chat-check.js';
+
+test('image tags and HTML cards are not counted as prose', () => {
+    const mes = '<content>她推门。\n<bbi_image>1boy, 2girls, bedroom</bbi_image>\n<htm1fenge><div>卡片</div></htm1fenge>灯亮了。</content>';
+    assert.equal(bodyOfForImages(mes).replace(/\s/g, ''), '她推门。灯亮了。');
+});
