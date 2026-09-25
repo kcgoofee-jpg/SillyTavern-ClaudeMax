@@ -52,3 +52,16 @@ test('second-person presets do not trigger the person check', async () => {
     assert.ok(checkReply({ mes: body }).issues.some((i) => i.code === 'person'));
     assert.ok(!checkReply({ mes: body, secondPerson: true }).issues.some((i) => i.code === 'person'));
 });
+
+test('word range from an enabled「字数」entry name, and Ny-style four options', async () => {
+    const { wordRangeFromPreset } = await import('../lib/chat-check.js');
+    const preset = {
+        prompts: [{ identifier: 'w', name: '✂️ 字数｜1400–1600字', content: '' }, { identifier: 'x', name: '✂️ 字数｜800–1000字', content: '' }],
+        prompt_order: [{ order: [{ identifier: 'w', enabled: true }, { identifier: 'x', enabled: false }] }],
+    };
+    assert.deepEqual(wordRangeFromPreset(preset), [1400, 1600]);
+    assert.equal(wordRangeFromPreset({ prompts: [], prompt_order: [] }), null);
+    const ny = (n) => `<content>正文</content><small>接下来\n${['1️⃣ 走', '2️⃣ 跑', '3️⃣ 停', '4️⃣ 看'].slice(0, n).join('\n')}\ntips: 小心</small>`;
+    assert.ok(!checkReply({ mes: ny(4) }).issues.some((i) => i.code === 'options'));
+    assert.match(checkReply({ mes: ny(3) }).issues.find((i) => i.code === 'options').text, /只有 3 个/);
+});

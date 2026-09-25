@@ -454,7 +454,7 @@
         const prev = ai.length > 1 ? ai[ai.length - 2] : null;
         const r = chatCheck.checkReply({
             mes: last.mes ?? '', prevMes: prev?.mes ?? null,
-            words: chatCheck.wordRangeFromPrompts(prompts), banned: chatCheck.bannedFromPrompts(prompts), leaks,
+            words: chatCheck.wordRangeFromPreset(ctx.chatCompletionSettings), banned: chatCheck.bannedFromPrompts(prompts), leaks,
             secondPerson: chatCheck.secondPersonFromPreset(ctx.chatCompletionSettings),
         });
         if (box) {
