@@ -62,7 +62,7 @@ button.small { padding: 2px 10px; font-size: 12px; border-radius: 6px; }
 
   <div class="card">
     <h2>图片信息</h2>
-    <div class="drop" id="drop">把 NovelAI 原图拖到这里、粘贴，或 <input type="file" id="file" accept="image/*"></div>
+    <div class="drop" id="drop">把 NovelAI 原图拖到这里、粘贴，或 <input type="file" id="file" accept="image/*" autocomplete="off"> <button class="small" id="clear" type="button">清空</button></div>
     <p class="hint" id="status">经过截图、压缩或聊天软件转发的图，生成信息通常已经丢失。</p>
     <div class="inspect" id="inspect">
       <img id="preview" alt="">
@@ -75,11 +75,11 @@ button.small { padding: 2px 10px; font-size: 12px; border-radius: 6px; }
     <div class="row">
       <div>
         <label for="pos">正面提示词</label>
-        <textarea id="pos" placeholder="读图后自动填入，也可以直接粘贴别人分享的一整段"></textarea>
+        <textarea id="pos" autocomplete="off" placeholder="读图后自动填入，也可以直接粘贴别人分享的一整段"></textarea>
       </div>
       <div>
         <label for="neg">负面提示词</label>
-        <textarea id="neg" placeholder="读图后自动填入（Undesired Content），也可以直接粘贴"></textarea>
+        <textarea id="neg" autocomplete="off" placeholder="读图后自动填入（Undesired Content），也可以直接粘贴"></textarea>
       </div>
     </div>
     <p class="hint">点一下 tag 改分类（画师串 → 质量词 → 不用 → 画师串）。不带 artist: 前缀的画师名认不出来，会在「不用」里，点一下挪到画师串。</p>
@@ -96,6 +96,13 @@ button.small { padding: 2px 10px; font-size: 12px; border-radius: 6px; }
     <div class="group"><h3>负面提示词 → 柏宝绘「负面提示词」</h3>
       <div class="out"><textarea id="o-neg" readonly></textarea><button class="copy" data-for="o-neg">复制</button></div></div>
   </div>
+
+  <div class="card">
+    <h2>核对码 <small class="hint">发给 Claude 核对用，不含任何提示词内容</small></h2>
+    <p class="hint">只有结构：读到哪些字段、每段几个 tag / 多少字、分类数量、权重和括号数、自检结果。内容只留加盐哈希，盐只在这个页面里、每次打开都不同，拿到核对码也还原不出词。</p>
+    <p id="check-summary"></p>
+    <div class="out"><textarea id="o-check" readonly></textarea><button class="copy" data-for="o-check">复制</button></div>
+  </div>
 </main>
 <script>
 // ── 拆分 ──
@@ -111,6 +118,8 @@ const STYLE = new Set(['anime coloring', 'flat color', 'cel shading', 'sketch', 
   'ink wash painting', 'digital painting', 'soft shading', 'gradient shading']);
 
 const cats = new Map(); // core → 'artist' | 'quality' | 'content'（手动改过的）
+let lastRead = null; // 最近一次读图的结构信息（给核对码用，不含内容）
+const SALT = crypto.getRandomValues(new Uint8Array(16));
 
 function splitTop(str) {
   const out = []; let depth = 0; let cur = '';
@@ -182,6 +191,97 @@ function render() {
   $('o-quality').value = lists.quality.map((i) => i.text).join(', ');
   const negSeen = new Set();
   $('o-neg').value = parse($('neg').value).filter((i) => !negSeen.has(i.text) && negSeen.add(i.text)).map((i) => i.text).join(', ');
+  buildCheck(lists).catch(() => {});
+}
+
+// ── 核对码：只有结构和加盐哈希，没有内容 ──
+
+/** SHA-256（自带实现：本地文件打开时有的浏览器不给 crypto.subtle） */
+function sha256(bytes) {
+  const K = [0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01,
+    0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+    0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b, 0xc24b8b70,
+    0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+    0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2];
+  const H = [0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19];
+  const l = bytes.length;
+  const n = (((l + 9) >> 6) + 1) << 6;
+  const m = new Uint8Array(n); m.set(bytes); m[l] = 0x80;
+  const dv = new DataView(m.buffer);
+  dv.setUint32(n - 4, (l * 8) >>> 0); dv.setUint32(n - 8, Math.floor(l / 0x20000000));
+  const w = new Uint32Array(64);
+  const r = (x, k) => (x >>> k) | (x << (32 - k));
+  for (let o = 0; o < n; o += 64) {
+    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(o + i * 4);
+    for (let i = 16; i < 64; i++) {
+      const s0 = r(w[i - 15], 7) ^ r(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = r(w[i - 2], 17) ^ r(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+    let [a, b, c, d, e, f, g, hh] = H;
+    for (let i = 0; i < 64; i++) {
+      const t1 = (hh + (r(e, 6) ^ r(e, 11) ^ r(e, 25)) + ((e & f) ^ (~e & g)) + K[i] + w[i]) >>> 0;
+      const t2 = ((r(a, 2) ^ r(a, 13) ^ r(a, 22)) + ((a & b) ^ (a & c) ^ (b & c))) >>> 0;
+      hh = g; g = f; f = e; e = (d + t1) >>> 0; d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    [a, b, c, d, e, f, g, hh].forEach((v, i) => { H[i] = (H[i] + v) >>> 0; });
+  }
+  return H.map((v) => v.toString(16).padStart(8, '0')).join('');
+}
+
+async function h(text) {
+  return sha256(new Uint8Array([...SALT, ...new TextEncoder().encode(text ?? '')])).slice(0, 8);
+}
+
+async function shape(text) {
+  if (text == null) return null;
+  const items = parse(text);
+  return {
+    len: text.length, tags: items.length,
+    weighted: items.filter((i) => /::$/.test(i.text)).length,
+    bracketed: items.filter((i) => /^[{[(]/.test(i.text.replace(/^-?[\d.]+::/, ''))).length,
+    h: await h(text),
+  };
+}
+
+async function buildCheck(lists) {
+  const pos = $('pos').value; const neg = $('neg').value;
+  if (!pos && !neg && !lastRead) { $('check-summary').textContent = ''; $('o-check').value = ''; return; }
+  const items = parse(pos);
+  const uniq = [...new Set(items.map((i) => i.text))];
+  const sorted = [...lists.artist, ...lists.quality, ...lists.content].map((i) => i.text);
+  const outA = parse($('o-artist').value).map((i) => i.text);
+  const outQ = parse($('o-quality').value).map((i) => i.text);
+  const negItems = parse(neg).map((i) => i.text);
+  const outN = parse($('o-neg').value).map((i) => i.text);
+  const same = (a, b) => a.length === b.length && a.every((x, i) => x === b[i]);
+  const checks = {
+    // 每个 tag 恰好进了一个分类，没丢没多
+    partition: same([...sorted].sort(), [...uniq].sort()),
+    // 复制出去的字符串再解析一遍，和分类结果一字不差
+    artistRoundtrip: same(outA, lists.artist.map((i) => i.text)),
+    qualityRoundtrip: same(outQ, lists.quality.map((i) => i.text)),
+    // 负面：只去重，不增不减、不改顺序
+    negKept: same(outN, [...new Set(negItems)]),
+    // 解析幂等：拼回去再解析结果不变
+    reparse: same(parse(items.map((i) => i.text).join(', ')).map((i) => i.text), items.map((i) => i.text)),
+  };
+  const code = {
+    v: 1,
+    read: lastRead,
+    pos: await shape(pos),
+    neg: await shape(neg),
+    duplicates: { pos: items.length - uniq.length, neg: negItems.length - new Set(negItems).size },
+    split: { artist: lists.artist.length, quality: lists.quality.length, content: lists.content.length, moved: cats.size },
+    out: { artist: await h($('o-artist').value), quality: await h($('o-quality').value), neg: await h($('o-neg').value) },
+    negFromImage: lastRead?.negHash ? lastRead.negHash === (await h(neg)) : null,
+    posFromImage: lastRead?.posHash ? lastRead.posHash === (await h(pos)) : null,
+    checks,
+  };
+  const ok = Object.values(checks).every(Boolean);
+  $('check-summary').textContent = ok ? '自检全部通过 ✓' : `自检有问题 ✗：${Object.entries(checks).filter(([, v]) => !v).map(([k]) => k).join('、')}`;
+  $('o-check').value = `BBI-CHECK ${JSON.stringify(code)}`;
 }
 
 // ── 读图（同官方 inspect：PNG 文本块，或透明通道里的 stealth 信息）──
@@ -313,16 +413,32 @@ async function loadImage(file) {
   $('status').textContent = '读取中…';
   try {
     let t = await pngText(await file.arrayBuffer());
-    if (!t.Comment) t = { ...t, ...(await stealthText(file).catch(() => null) ?? {}) };
+    let via = Object.keys(t).length ? 'png-text' : null;
+    if (!t.Comment) {
+      const st = await stealthText(file).catch(() => null);
+      if (st) { t = { ...t, ...st }; via = via ? `${via}+stealth` : 'stealth'; }
+    }
     if (!Object.keys(t).length) {
       $('inspect').style.display = 'none';
       $('status').textContent = '这张图里没有生成信息（不是原图，或被压缩 / 截图 / 转发过）。';
+      lastRead = { via: 'none', type: file.type || '?', size: file.size };
+      render();
       return;
     }
     const c = showInspect(file, t);
     $('status').textContent = `${file.name} · 已读取`;
     const pos = c?.v4_prompt?.caption?.base_caption ?? c?.prompt ?? t.Description;
     const neg = c?.v4_negative_prompt?.caption?.base_caption ?? c?.uc;
+    const chars = c?.v4_prompt?.caption?.char_captions ?? [];
+    lastRead = {
+      via, type: file.type || '?', size: file.size,
+      chunks: Object.keys(t),
+      commentKeys: c ? Object.keys(c) : null,
+      v4: !!c?.v4_prompt,
+      chars: await Promise.all(chars.map(async (x) => ({ ...(await shape(x.char_caption ?? '')), centers: x.centers?.length ?? 0 }))),
+      posHash: pos != null ? await h(pos) : null,
+      negHash: neg != null ? await h(neg) : null,
+    };
     if (pos != null) $('pos').value = pos;
     if (neg != null) $('neg').value = neg;
     cats.clear();
@@ -332,7 +448,20 @@ async function loadImage(file) {
   }
 }
 
-$('file').addEventListener('change', (e) => { const f = e.target.files?.[0]; if (f) loadImage(f); });
+function clearAll() {
+  $('file').value = '';
+  $('pos').value = ''; $('neg').value = '';
+  $('fields').replaceChildren();
+  $('preview').removeAttribute('src');
+  $('inspect').style.display = 'none';
+  $('status').textContent = '经过截图、压缩或聊天软件转发的图，生成信息通常已经丢失。';
+  cats.clear(); lastRead = null;
+  render();
+}
+$('clear').addEventListener('click', clearAll);
+// 浏览器刷新 / 后退时会把上次的文件和文字填回来：一律清空
+window.addEventListener('pageshow', clearAll);
+$('file').addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) loadImage(f); });
 const drop = $('drop');
 document.addEventListener('dragover', (e) => { e.preventDefault(); drop.classList.add('over'); });
 document.addEventListener('dragleave', () => drop.classList.remove('over'));
