@@ -64,7 +64,7 @@ function isNewerVersion(a, b) {
 // style.css) so the repo can ALSO be installed directly through
 // SillyTavern's "Install extension" dialog, which requires a root
 // manifest.json. Only these files make up the extension.
-const UI_EXTENSION_FILES = ['manifest.json', 'index.js', 'style.css', 'lib/chat-check.js', 'lib/preset-reco.js'];
+const UI_EXTENSION_FILES = ['manifest.json', 'index.js', 'style.css', 'lib/chat-check.js', 'lib/preset-reco.js', 'lib/lore-constant.js'];
 
 /**
  * Install or update the companion UI extension into SillyTavern's

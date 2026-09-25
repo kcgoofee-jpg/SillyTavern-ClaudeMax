@@ -45,6 +45,10 @@
     import(new URL('./lib/chat-check.js', import.meta.url).href)
         .then((m) => { chatCheck = m; runCheckup(); })
         .catch(() => { /* check-up unavailable */ });
+    let loreConst = null;
+    import(new URL('./lib/lore-constant.js', import.meta.url).href)
+        .then((m) => { loreConst = m; refreshLoreBox(); })
+        .catch(() => { /* lore tool unavailable */ });
     let presetReco = null;
     import(new URL('./lib/preset-reco.js', import.meta.url).href)
         .then((m) => { presetReco = m; adoptUnrecordedReco(); })
@@ -350,6 +354,77 @@
         if (!nextEffort) return;
         nextEffort = null;
         document.getElementById('claude_max_oneshot')?.refresh?.();
+    }
+
+    // ── 缓存优化：当前角色卡的世界书设为常驻 ──
+
+    async function refreshLoreBox() {
+        const box = document.getElementById('claude_max_lore');
+        if (!box) return;
+        if (!loreConst) {
+            box.replaceChildren(el('small', 'cm-hint', '这个功能没有加载（扩展文件不完整），重新安装扩展即可。'));
+            return;
+        }
+        const ctx = SillyTavern.getContext();
+        const ch = ctx.groupId ? null : ctx.characters?.[ctx.characterId];
+        const name = ch?.data?.extensions?.world;
+        if (!ch) { box.replaceChildren(el('small', 'cm-hint', '打开一张角色卡的聊天后可用。')); return; }
+        if (!name) { box.replaceChildren(el('small', 'cm-hint', `「${ch.name}」没有绑定世界书，不需要处理。`)); return; }
+        let book;
+        try { book = await ctx.loadWorldInfo(name); } catch { book = null; }
+        if (!book) { box.replaceChildren(el('small', 'cm-hint', `读不到世界书「${name}」。`)); return; }
+        const sum = loreConst.summarizeLore(book);
+        const backup = loreConst.backupName(name);
+        const hasBackup = (ctx.getWorldInfoNames?.() ?? []).includes(backup);
+        box.replaceChildren(el('small', 'cm-hint', sum.keyword
+            ? `「${name}」有 ${sum.keyword} 条按关键词触发的条目（约 ${sum.keywordChars.toLocaleString()} 字）。每轮触发的条目不同，会让整段聊天记录重写缓存。设为常驻后每轮都发送这些条目（多占上下文），但聊天记录能命中缓存；实测每轮缓存写入约从 2.8 万降到 3 千 token。`
+            : `「${name}」的条目已全部常驻，世界书不会破坏聊天记录的缓存。`));
+        const row = el('div', 'cm-oneshot-row');
+        if (sum.keyword) {
+            const b = el('div', 'menu_button', '设为常驻（先自动备份）');
+            b.addEventListener('click', () => convertLore(name, book, backup));
+            row.append(b);
+        }
+        if (hasBackup) {
+            const r = el('div', 'menu_button', '恢复为设为常驻之前');
+            r.addEventListener('click', () => restoreLore(name, backup));
+            row.append(r);
+        }
+        if (row.childElementCount) box.append(row);
+    }
+
+    async function convertLore(name, book, backup) {
+        const ctx = SillyTavern.getContext();
+        const ok = await ctx.callGenericPopup(`把世界书「${name}」里按关键词触发的条目全部改为常驻？\n原世界书会先备份为「${backup}」，之后可以一键恢复。`, ctx.POPUP_TYPE.CONFIRM);
+        if (!ok) return;
+        try {
+            if (!(ctx.getWorldInfoNames?.() ?? []).includes(backup)) {
+                await ctx.saveWorldInfo(backup, book, true);
+                await ctx.updateWorldInfoList?.();
+            }
+            const { book: next, changed } = loreConst.makeAllConstant(book);
+            await ctx.saveWorldInfo(name, next, true);
+            ctx.reloadWorldInfoEditor?.(name);
+            toastr?.success?.(`「${name}」：${changed} 条改为常驻，备份在「${backup}」。`, 'Claude Max');
+        } catch (err) {
+            toastr?.error?.(`没改成：${err instanceof Error ? err.message : err}`, 'Claude Max');
+        }
+        refreshLoreBox();
+    }
+
+    async function restoreLore(name, backup) {
+        const ctx = SillyTavern.getContext();
+        const ok = await ctx.callGenericPopup(`用备份「${backup}」覆盖世界书「${name}」，恢复成设为常驻之前的样子？`, ctx.POPUP_TYPE.CONFIRM);
+        if (!ok) return;
+        try {
+            const saved = await ctx.loadWorldInfo(backup);
+            await ctx.saveWorldInfo(name, saved, true);
+            ctx.reloadWorldInfoEditor?.(name);
+            toastr?.success?.(`「${name}」已恢复。备份仍保留，不需要时可在世界书列表里删除。`, 'Claude Max');
+        } catch (err) {
+            toastr?.error?.(`没恢复成：${err instanceof Error ? err.message : err}`, 'Claude Max');
+        }
+        refreshLoreBox();
     }
 
     // ── 本轮体检（M4）──
@@ -695,6 +770,8 @@
         refreshProxyStatus();
         refreshQuota();
         refreshStats();
+        refreshLoreBox();
+        runCheckup();
     }
 
     // ── Settings UI ──
@@ -800,6 +877,12 @@
         cotTip.id = 'claude_max_cot_tip';
         cotTip.hidden = true;
         content.append(cotTip);
+
+        // Cache optimisation: world info
+        content.append(section('缓存优化 · 世界书'));
+        const loreBox = el('div', 'cm-field');
+        loreBox.id = 'claude_max_lore';
+        content.append(loreBox);
 
         // Reply check-up
         const checkTools = el('div', 'cm-section-tools');
@@ -932,7 +1015,7 @@
     };
     eventSource.on(eventTypes.MESSAGE_RECEIVED, clearOneShotEffort);
     eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED ?? eventTypes.MESSAGE_RECEIVED, () => setTimeout(() => runCheckup({ toast: true }), 200));
-    eventSource.on(eventTypes.CHAT_CHANGED, () => setTimeout(() => runCheckup(), 200));
+    eventSource.on(eventTypes.CHAT_CHANGED, () => setTimeout(() => { runCheckup(); refreshLoreBox(); }, 200));
     eventSource.on(eventTypes.MESSAGE_RECEIVED, refreshIfOpen);
     eventSource.on(eventTypes.CHAT_CHANGED, refreshIfOpen);
     eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, applyPresetRecommendation);
