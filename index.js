@@ -104,7 +104,7 @@
         leakWords: {},           // 角色卡 → 隐藏设定关键词（逗号分隔）
         presetRecoRecord: null,  // 上一个预设的推荐改了什么（切走时恢复）
         tailBlockFront: false,   // 实验：预设后置条目提前（省缓存）
-        panelTab: 'main',        // 面板上次打开的分页
+        panelTab: 'reason',      // 面板上次打开的分页
     };
 
     function getSettings() {
@@ -598,6 +598,15 @@
     const SUBSCRIPTION_LABELS = { max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterprise' };
     const SOURCE_LABELS = { keychain: '钥匙串', file: '凭据文件', env: '环境变量' };
 
+    let proxyState = null;
+
+    /** Card title once the proxy is up: whether SillyTavern is pointed at it, and with which model. */
+    function statusTitleOnline() {
+        const { connected, model } = connectionInfo();
+        if (!connected) return '代理在线，酒馆还没连上';
+        return model ? `已连接 · ${shortModel(model)}` : '已连接 · 请在模型下拉框里选 Claude 模型';
+    }
+
     async function refreshProxyStatus() {
         const title = document.getElementById('claude_max_status_title');
         const sub = document.getElementById('claude_max_status_sub');
@@ -610,23 +619,28 @@
             const data = await res.json();
             if (!res.ok || !data.ok) throw new Error(data.message || `HTTP ${res.status}`);
             const cred = data.credential ?? {};
+            proxyState = cred.present ? 'online' : 'warning';
             if (cred.present) {
                 setDot('online');
-                title.textContent = '代理在线，已登录';
+                title.textContent = statusTitleOnline();
                 const plan = SUBSCRIPTION_LABELS[cred.subscriptionType] ?? cred.subscriptionType ?? '订阅';
                 sub.textContent = `${plan} 订阅 · 凭据来自${SOURCE_LABELS[cred.source] ?? cred.source} · 代理 v${data.version}`;
+                const info = document.getElementById('claude_max_proxy_info');
+                if (info) info.textContent = `代理 v${data.version} 在线 · ${plan} 订阅 · 凭据来自${SOURCE_LABELS[cred.source] ?? cred.source}`;
             } else {
                 setDot('warning');
                 title.textContent = '代理在线，但未登录';
                 sub.textContent = '在代理目录运行 npm run login 登录 Claude 订阅账号';
             }
         } catch {
+            proxyState = 'offline';
             setDot('offline');
             title.textContent = '连接不到代理';
             sub.textContent = IS_TAURI
                 ? '请先在代理目录运行 npm start 启动本地代理'
                 : '请确认服务器插件已加载，或在代理目录运行 npm start';
         }
+        renderConnect();
     }
 
     // ── Quota meter ──
@@ -894,15 +908,20 @@
         const c = glance.cache;
         const n = glance.issues;
         chips.replaceChildren(
-            chip('模型', connected ? (model ? shortModel(model) : '未选') : '未连接', connected ? 'reason' : 'main', connected ? '' : 'bad'),
+            // 「1M」goes into the label so the model name fits the narrow chip.
+            chip(connected && / 1M$/.test(shortModel(model)) ? '模型 · 1M' : '模型',
+                connected ? (model ? shortModel(model).replace(/ 1M$/, '') : '未选') : '未连接', 'reason', connected ? '' : 'bad'),
             chip('5 小时额度', q == null ? '–' : `${q}%`, 'stats', q >= 90 ? 'bad' : q >= 70 ? 'warn' : ''),
             chip('上轮缓存', c == null ? '–' : `${c}%`, 'stats', c != null && c < 50 ? 'warn' : ''),
             chip('体检', n == null ? '–' : n ? `${n} 项` : '正常', 'check', n ? 'warn' : ''),
         );
     }
 
-    /** Tab 连接: status, one-click connect, what to do next. */
-    function buildMainTab(pane, settings) {
+    /** Status card + one-click connect, above the tabs. Shown only while
+     *  something needs doing (proxy down, not logged in, ST not connected). */
+    function buildStatusBlock() {
+        const block = el('div', 'cm-status-block');
+        block.id = 'claude_max_status_block';
         const card = el('div', 'cm-card cm-status');
         const statusText = el('div', 'cm-status-text');
         const statusTitle = el('div', 'cm-status-title');
@@ -911,16 +930,17 @@
         statusSub.id = 'claude_max_status_sub';
         statusText.append(statusTitle, statusSub);
         card.append(el('span', 'cm-dot cm-dot-lg'), statusText, iconButton('fa-rotate', '重新检测', refreshAll));
-        pane.append(card);
-
         const connectBtn = el('div', 'menu_button cm-connect');
         connectBtn.id = 'claude_max_connect';
+        connectBtn.append(el('i', 'fa-solid fa-plug'), document.createTextNode(' 一键连接'));
         connectBtn.addEventListener('click', () => connect(getSettings()));
-        const connectHint = el('small', 'cm-hint cm-center');
+        const connectHint = el('small', 'cm-hint cm-center', '自动切到 Chat Completion → Custom 并填好地址，连接后在模型下拉框里选择 Claude 模型。');
         connectHint.id = 'claude_max_connect_hint';
-        pane.append(connectBtn, connectHint);
-        renderConnect();
+        block.append(card, connectBtn, connectHint);
+        return block;
+    }
 
+    function usageNotes() {
         const steps = el('details', 'cm-details');
         steps.append(el('summary', null, '使用说明'));
         const list = el('ol', 'cm-notes');
@@ -933,22 +953,24 @@
                 : '从手机等其他设备打开酒馆时，额度和状态经由酒馆服务器转发读取。',
             '订阅通道不支持温度、Top-P 等采样参数（Agent SDK 限制）。',
             '「(1M context)」模型提供 100 万上下文；部分套餐需要开通额外用量，失败时自动退回普通版一小时。',
+            '顶部的状态卡只在需要处理时出现（代理没开、没登录、酒馆没连上）；一切正常时，标题旁的绿点就是在线。',
         ]) list.append(el('li', null, line));
         steps.append(list);
-        pane.append(steps);
+        return steps;
     }
 
-    /** Connect button: primary when not connected, quiet once it is. */
+    /** Hide the status block once everything is fine; connect button only when ST isn't connected. */
     function renderConnect() {
+        const block = document.getElementById('claude_max_status_block');
         const btn = document.getElementById('claude_max_connect');
         const hint = document.getElementById('claude_max_connect_hint');
-        if (!btn || !hint) return;
-        const { connected, model } = connectionInfo();
-        btn.classList.toggle('cm-connect-quiet', connected);
-        btn.replaceChildren(el('i', `fa-solid ${connected ? 'fa-rotate' : 'fa-plug'}`), document.createTextNode(connected ? ' 重新连接' : ' 一键连接'));
-        hint.textContent = connected
-            ? `已连接本代理${model ? `，当前模型 ${shortModel(model)}` : '，请在模型下拉框里选择 Claude 模型'}。`
-            : '自动切到 Chat Completion → Custom 并填好地址，连接后在模型下拉框里选择 Claude 模型。';
+        if (!block || !btn || !hint) return;
+        const { connected } = connectionInfo();
+        btn.hidden = connected;
+        hint.hidden = connected;
+        block.hidden = connected && proxyState === 'online';
+        const title = document.getElementById('claude_max_status_title');
+        if (title && proxyState === 'online') title.textContent = statusTitleOnline();
     }
 
     /** Tab 推理: effort, one-shot effort, thinking mode, reasoning display. */
@@ -1090,6 +1112,9 @@
         pane.append(debugBtn);
 
         pane.append(section('连接'));
+        const info = el('small', 'cm-hint');
+        info.id = 'claude_max_proxy_info';
+        pane.append(info);
         const endpointField = el('div', 'cm-field');
         endpointField.append(el('div', 'cm-field-label', '代理地址'));
         const endpointInput = el('input', 'text_pole');
@@ -1100,8 +1125,12 @@
             settings.endpoint = endpointInput.value || DEFAULT_ENDPOINT;
             save();
         });
-        endpointField.append(endpointInput, el('small', 'cm-hint', `默认 ${DEFAULT_ENDPOINT}。改了代理端口时同步改这里，再点一键连接。`));
+        endpointField.append(endpointInput, el('small', 'cm-hint', `默认 ${DEFAULT_ENDPOINT}。改了代理端口时同步改这里，再点下面的重新连接。`));
         pane.append(endpointField);
+        const reconnect = el('div', 'menu_button cm-connect cm-connect-quiet');
+        reconnect.append(el('i', 'fa-solid fa-plug'), document.createTextNode(' 重新连接'));
+        reconnect.addEventListener('click', () => connect(getSettings()));
+        pane.append(reconnect);
         pane.append(toggleRow({
             id: 'claudeMaxEnabled',
             title: '把面板设置附加到请求',
@@ -1117,9 +1146,10 @@
             checked: settings.identityMode,
             onChange: (v) => { settings.identityMode = v; save(); },
         }));
+        pane.append(usageNotes());
     }
 
-    const TABS = [['main', '连接'], ['reason', '推理'], ['stats', '统计'], ['check', '体检'], ['adv', '高级']];
+    const TABS = [['reason', '推理'], ['stats', '统计'], ['check', '体检'], ['adv', '高级']];
 
     function addExtensionSettings(settings) {
         const container = document.getElementById('extensions_settings') ?? document.body;
@@ -1146,7 +1176,6 @@
         }, 50));
 
         const panes = Object.fromEntries(TABS.map(([k]) => [k, el('div', 'cm-pane')]));
-        buildMainTab(panes.main, settings);
         buildReasonTab(panes.reason, settings, save);
         buildStatsTab(panes.stats);
         buildCheckTab(panes.check, settings, save);
@@ -1174,8 +1203,9 @@
         const chips = el('div', 'cm-glance');
         chips.id = 'claude_max_glance';
         chips.showTab = show;
-        content.append(chips, bar, ...TABS.map(([k]) => panes[k]));
-        show(TABS.some(([k]) => k === settings.panelTab) ? settings.panelTab : 'main');
+        content.append(buildStatusBlock(), chips, bar, ...TABS.map(([k]) => panes[k]));
+        show(TABS.some(([k]) => k === settings.panelTab) ? settings.panelTab : 'reason');
+        renderConnect();
         renderGlance();
     }
 

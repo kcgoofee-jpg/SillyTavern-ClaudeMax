@@ -632,3 +632,14 @@
 .claude-max .cm-mini[open] > summary {
     margin-bottom: 2px;
 }
+
+/* header summary is for the collapsed drawer; the chips cover it when open */
+.claude-max:has(.inline-drawer-icon.up) .cm-head-sum {
+    display: none;
+}
+
+.claude-max .cm-status-block {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
