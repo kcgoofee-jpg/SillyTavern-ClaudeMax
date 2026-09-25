@@ -24,6 +24,8 @@ lid_tick() {
     local why="" pct
     if [[ "$LID_AWAKE" == 0 ]]; then
         why=off
+    elif [[ -f "$LID_PAUSE_FILE" ]]; then
+        why="手机上暂停了合盖不睡"
     elif on_battery; then
         pct=$(battery_pct)
         if (( pct < LID_BATTERY_FLOOR )); then

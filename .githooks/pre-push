@@ -1,0 +1,2 @@
+#!/bin/sh
+exec zsh "$(git rev-parse --show-toplevel)/scripts/gate.sh" --push

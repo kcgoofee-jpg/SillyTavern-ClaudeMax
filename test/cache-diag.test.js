@@ -185,3 +185,21 @@ test('with the lore moved out, a change inside it sets no split and later change
     const d4 = diagnoseCache(sys('城市', '尾部改了'), [...h, A('a1'), U('u2'), A('a2'), U('u3'), A('a3'), U('u4')], opts);
     assert.equal(d4.splitAt, d3.splitAt);           // lore changing every turn never moves it
 });
+
+test('with lore moving on, a new chat treats the world info wrappers as volatile from the first turn', () => {
+    __resetCacheDiag();
+    const sys = (w, l) => `<preset>${'r'.repeat(3000)}</preset><Lore>${l}</Lore><world_info>${w}</world_info><end>x</end>`;
+    const first = diagnoseCache(sys('雪山', '甲'), [A('greet-lore'), U('u1')], { moveVolatile: true });
+    assert.equal(first.firstTurn, true);
+    assert.deepEqual([...first.volatileTags].sort(), ['Lore', 'world_info']);
+    assert.match(describeDiag(first), /一开始就移到消息里/);
+    // Both blocks change next turn: the prompt as sent is unchanged, so no split.
+    const d = diagnoseCache(sys('沙漠', '乙'), [A('greet-lore'), U('u1'), A('a1'), U('u2')], { moveVolatile: true });
+    assert.equal(d.splitAt, null);
+});
+
+test('without lore moving, a new chat learns nothing up front', () => {
+    __resetCacheDiag();
+    const first = diagnoseCache('<Lore>a</Lore>', [A('greet-plain'), U('u1')]);
+    assert.deepEqual(first.volatileTags, []);
+});

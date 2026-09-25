@@ -24,6 +24,24 @@ test('leading system messages stay; depth-injected ones merge into the neighbori
     ]);
 });
 
+test('a deep injection moves up to the current turn so older turns never change', () => {
+    const out = inlineLateSystemMessages([
+        S('preset'),
+        A('greeting'),
+        U('u1'),
+        S('<mvu>格式</mvu>'),     // depth 4: would merge into u1
+        A('a1'), U('u2'), A('a2'),
+        S('<style>文风</style>'), // depth 2
+        U('u3'),
+    ]);
+    assert.deepEqual(out, [
+        S('preset'),
+        A('greeting'),
+        U('u1'), A('a1'), U('u2'), A('a2'),
+        U('<mvu>格式</mvu>\n\n<style>文风</style>\n\nu3'),
+    ]);
+});
+
 test('system note after the last user message merges into it (depth 0)', () => {
     const out = inlineLateSystemMessages([S('sys'), U('hi'), S('author note')]);
     assert.deepEqual(out, [S('sys'), U('hi\n\nauthor note')]);

@@ -494,14 +494,16 @@
             mes: last.mes ?? '', prevMes: prev?.mes ?? null,
             words: chatCheck.wordRangeFromPreset(ctx.chatCompletionSettings), banned: chatCheck.bannedFromPrompts(prompts), leaks,
             secondPerson: chatCheck.secondPersonFromPreset(ctx.chatCompletionSettings),
+            paragraphs: chatCheck.paragraphRangeFromPreset?.(ctx.chatCompletionSettings) ?? null,
+            sceneCard: chatCheck.sceneCardFromPreset?.(ctx.chatCompletionSettings) ?? false,
         });
         glance.issues = r.issues.length;
         renderGlance();
         if (box) {
             const card = el('div', r.issues.length ? 'cm-last-error cm-tip' : 'cm-cache');
             card.append(el('div', 'cm-last-error-title', r.issues.length
-                ? `最新回复 · 正文 ${r.chars} 字 · ${r.issues.length} 个问题`
-                : `最新回复 · 正文 ${r.chars} 字 · 没发现问题`));
+                ? `最新回复 · 正文 ${r.chars} 字 / ${r.paragraphs ?? '?'} 段 · ${r.issues.length} 个问题`
+                : `最新回复 · 正文 ${r.chars} 字 / ${r.paragraphs ?? '?'} 段 · 没发现问题`));
             for (const i of r.issues) card.append(el('small', 'cm-hint', `· ${i.text}`));
             box.replaceChildren(card);
         }
@@ -1240,7 +1242,91 @@
     }
 
     /** Tab 高级: grouped by what the switches affect. */
+    // ── Mac（手机遥控）: the proxy's /v1/control routes (lib/control.js) ──
+
+    async function controlFetch(path, body) {
+        const settings = getSettings();
+        const headers = settings.accessKey ? { 'X-Claude-Max-Key': settings.accessKey } : {};
+        if (body) headers['Content-Type'] = 'application/json';
+        return fetch(`${proxyBase(settings)}${path}`, {
+            method: body ? 'POST' : 'GET', headers, body: body ? JSON.stringify(body) : undefined,
+            signal: AbortSignal.timeout(20000),
+        });
+    }
+
+    async function refreshMac() {
+        const box = document.getElementById('claude_max_mac');
+        if (!box) return;
+        let s;
+        try {
+            const res = await controlFetch('/v1/control/status');
+            s = await res.json();
+        } catch {
+            box.replaceChildren(el('small', 'cm-hint', '连不上代理，看不到 Mac 的状态。'));
+            return;
+        }
+        if (!s?.supported) {
+            box.replaceChildren(el('small', 'cm-hint', '这个代理不是用 Mac 启动器开的，没有遥控。'));
+            return;
+        }
+        const lines = [
+            `模式：${s.phoneMode ? '手机模式' : '电脑模式'}${s.watchdog ? '（守护中）' : ''}${s.ip ? ` · ${s.ip}` : ''}`,
+            `电量：${s.battery ?? '?'}%${s.onBattery ? '（用电池）' : '（插着电）'} · 盖子${s.lid.closed ? '合着' : '开着'}`,
+            `合盖不睡：${!s.lid.installed ? '没安装' : s.lid.paused ? '已暂停' : s.lid.on ? '开着' : '放开了（电量低 / 闲置）'}`,
+            `本地生图：${s.comfy ? '运行中' : '没开'} · 正在写的回复：${s.busy}`,
+        ];
+        const card = el('div', 'cm-cache');
+        for (const l of lines) card.append(el('small', 'cm-hint', l));
+        for (const e of s.recentErrors ?? []) card.append(el('small', 'cm-hint cm-warn', `最近的错误：${e}`));
+        const row = el('div', 'cm-btn-row');
+        const act = (label, action, confirmText) => {
+            const b = el('button', 'menu_button', label);
+            b.type = 'button';
+            b.addEventListener('click', async () => {
+                if (confirmText && !window.confirm(confirmText)) return;
+                b.disabled = true;
+                try {
+                    const res = await controlFetch('/v1/control/action', { action });
+                    const r = await res.json().catch(() => ({}));
+                    toastr?.[res.ok ? 'success' : 'warning']?.(r.message ?? `HTTP ${res.status}`, 'Claude Max · Mac');
+                } catch {
+                    toastr?.warning?.('没发出去：连不上代理', 'Claude Max · Mac');
+                } finally {
+                    b.disabled = false;
+                    setTimeout(refreshMac, action === 'restart-proxy' ? 6000 : 1500);
+                }
+            });
+            row.append(b);
+        };
+        act('重启代理', 'restart-proxy', '重启 Mac 上的代理？几秒后自动恢复。');
+        if (s.lid.installed) act(s.lid.paused ? '恢复合盖不睡' : '暂停合盖不睡', s.lid.paused ? 'lid-resume' : 'lid-pause');
+        act(s.comfy ? '关闭本地生图' : '启动本地生图', s.comfy ? 'comfy-stop' : 'comfy-start');
+        if (s.phoneMode) act('同步手机', 'phone-sync', '从 Mac 同步这台手机？TauriTavern 会先关闭，同步完自动重新打开。');
+        const logBtn = el('button', 'menu_button', '看日志');
+        logBtn.type = 'button';
+        const pre = el('pre', 'cm-log');
+        pre.hidden = true;
+        logBtn.addEventListener('click', async () => {
+            if (!pre.hidden) { pre.hidden = true; return; }
+            try {
+                const r = await (await controlFetch('/v1/control/log')).json();
+                pre.textContent = [...(r.launcher ?? []), '──', ...(r.proxy ?? [])].join('\n');
+                pre.hidden = false;
+            } catch {
+                toastr?.warning?.('取日志失败', 'Claude Max · Mac');
+            }
+        });
+        row.append(logBtn);
+        box.replaceChildren(card, row, pre);
+    }
+
     function buildAdvTab(pane, settings, save) {
+        pane.append(section('Mac（手机遥控）'));
+        const macBox = el('div');
+        macBox.id = 'claude_max_mac';
+        macBox.append(el('small', 'cm-hint', '正在读取…'));
+        pane.append(macBox);
+        setTimeout(refreshMac, 0);
         pane.append(section('缓存与上下文'));
         pane.append(toggleRow({
             id: 'claudeMaxResume',
@@ -1413,6 +1499,42 @@
         renderGlance();
     }
 
+    // /图分 1–5: the user's own rating of this reply's images, stored on the
+    // latest AI message (extra.cm_img_score) for the turn report. We never
+    // look at the images ourselves; the score is the only signal.
+    function registerImageScore() {
+        const ctx = SillyTavern.getContext();
+        const { SlashCommandParser, SlashCommand, SlashCommandArgument, ARGUMENT_TYPE } = ctx;
+        if (!SlashCommandParser?.addCommandObject || !SlashCommand?.fromProps) return;
+        SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+            name: '图分',
+            aliases: ['imgscore'],
+            helpString: '给最新一楼的图打分（1–5，准不准），记在这条消息上，供逐楼报表统计。例：/图分 4',
+            unnamedArgumentList: SlashCommandArgument?.fromProps
+                ? [SlashCommandArgument.fromProps({ description: '1–5', typeList: [ARGUMENT_TYPE.NUMBER], isRequired: true })]
+                : [],
+            callback: async (_args, value) => {
+                const n = Number(String(value ?? '').trim());
+                if (!Number.isInteger(n) || n < 1 || n > 5) {
+                    toastr?.warning?.('图分是 1–5 的整数，例：/图分 4', 'Claude Max');
+                    return '';
+                }
+                const c = SillyTavern.getContext();
+                const chat = c.chat ?? [];
+                for (let i = chat.length - 1; i >= 0; i--) {
+                    const m = chat[i];
+                    if (m.is_user || m.is_system) continue;
+                    m.extra = { ...(m.extra ?? {}), cm_img_score: n };
+                    await c.saveChat?.();
+                    toastr?.success?.(`第 ${i} 楼的图：${n} 分`, 'Claude Max · 图分', { timeOut: 3000 });
+                    return String(n);
+                }
+                toastr?.warning?.('还没有 AI 回复', 'Claude Max');
+                return '';
+            },
+        }));
+    }
+
     function rebuildPanel() {
         const old = document.querySelector('.inline-drawer.claude-max');
         const wasOpen = old?.querySelector('.inline-drawer-content')?.offsetParent != null;
@@ -1467,5 +1589,6 @@
     eventSource.on(eventTypes.CHAT_CHANGED, refreshIfOpen);
     eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, applyPresetRecommendation);
     if (eventTypes.APP_READY) eventSource.on(eventTypes.APP_READY, adoptUnrecordedReco);
+    registerImageScore();
     console.log(`[claude-max] UI extension loaded${IS_TAURI ? ' (TauriTavern mode)' : ''}`);
 })();

@@ -152,6 +152,14 @@ export async function init(router) {
     const port = parseInt(process.env.CLAUDE_SUBSCRIPTION_PORT, 10) || DEFAULT_PORT;
     const host = process.env.CLAUDE_SUBSCRIPTION_HOST || DEFAULT_HOST;
 
+    // Probe first: on macOS a standalone proxy bound to 0.0.0.0 does not stop
+    // us binding 127.0.0.1 on the same port, and then local requests would go
+    // to this copy while the phone talks to the other (seen live: two proxies
+    // on 8901, the one inside SillyTavern running older code).
+    if (await probeExistingProxy({ port, host })) {
+        console.log(`[${info.id}] reusing the standalone proxy already running at http://${host}:${port}/v1 (npm start / launcher)`);
+        return;
+    }
     try {
         await startStandaloneListener({ port, host });
         console.log(

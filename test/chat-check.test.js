@@ -83,3 +83,26 @@ test('image tags and HTML cards are not counted as prose', () => {
     const mes = '<content>她推门。\n<bbi_image>1boy, 2girls, bedroom</bbi_image>\n<htm1fenge><div>卡片</div></htm1fenge>灯亮了。</content>';
     assert.equal(bodyOfForImages(mes).replace(/\s/g, ''), '她推门。灯亮了。');
 });
+
+import { paragraphRangeFromPreset, sceneCardFromPreset, paragraphCount } from '../lib/chat-check.js';
+
+test('paragraph plan and scene card come from the preset; the reply is checked against them', () => {
+    const preset = {
+        prompts: [
+            { identifier: 'w', content: '{{setvar::word_plan::  - 按段落控制篇幅：正文分 8–11 段，每段约 120–180 字}}' },
+            { identifier: 'c', content: '<scene_card_rule>…</scene_card_rule>' },
+        ],
+        prompt_order: [{ character_id: 100001, order: [{ identifier: 'w', enabled: true }, { identifier: 'c', enabled: true }] }],
+    };
+    assert.deepEqual(paragraphRangeFromPreset(preset), [8, 11]);
+    assert.equal(sceneCardFromPreset(preset), true);
+    const para = '她抬手把门推开，走廊的灯一格一格亮起来，照出地毯上的铆钉印。';
+    const long = `<content>\n${Array(15).fill(para).join('\n')}\n</content>`;
+    const r = checkReply({ mes: long, paragraphs: [8, 11], sceneCard: true });
+    assert.equal(r.paragraphs, 15);
+    assert.ok(r.issues.some((i) => i.code === 'paragraphs'));
+    assert.ok(r.issues.some((i) => i.code === 'scenecard'));
+    const ok = checkReply({ mes: `<content>\n${Array(9).fill(para).join('\n')}\n</content>\n<scene_card>地点：书房</scene_card>`, paragraphs: [8, 11], sceneCard: true });
+    assert.ok(!ok.issues.some((i) => i.code === 'paragraphs' || i.code === 'scenecard'));
+    assert.equal(paragraphCount('短\n' + para), 1);
+});

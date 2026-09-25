@@ -438,6 +438,7 @@ watchdog_stop() {
 # 低电量模式、合盖且代理 LID_IDLE_HOURS 小时没有请求、手机模式关闭、守护退出。
 LID_SUDOERS=/etc/sudoers.d/claudemax-lid
 LID_OWNED_FILE="$PROXY_DIR/launcher/lid-awake.local"   # 有 = 这个开关是我们打开的
+LID_PAUSE_FILE="$PROXY_DIR/launcher/lid-pause.local"   # 有 = 手机上按了「暂停合盖不睡」
 : ${LID_BATTERY_FLOOR:=25}
 : ${LID_IDLE_HOURS:=3}
 
@@ -451,6 +452,27 @@ low_power()     { [[ "$(pmset -g | awk '/lowpowermode/ {print $2}')" == 1 ]]; }
 lid_set() {   # lid_set 1|0
     sudo -n /usr/bin/pmset -a disablesleep $1 >/dev/null 2>&1 || return 1
     if (( $1 )); then : >"$LID_OWNED_FILE"; else rm -f "$LID_OWNED_FILE"; fi
+}
+
+# 手机遥控「同步」：不问问题直接双向同步（关掉手机上的 TT → 同步 → 再打开），结果发通知
+phone_sync_auto() {
+    local adb serial args out
+    adb=$(find_adb) || { notify "手机同步没做成" "Mac 上找不到 adb"; return 1; }
+    serial=$(phone_serial)
+    if [[ -z "$serial" && -s "$PROXY_DIR/launcher/phone.local" ]]; then
+        "$adb" connect "$(<"$PROXY_DIR/launcher/phone.local")" >/dev/null 2>&1; sleep 1; serial=$(phone_serial)
+    fi
+    [[ -n "$serial" ]] || { notify "手机同步没做成" "Mac 连不上手机的无线调试"; return 1; }
+    has_st || { notify "手机同步没做成" "Mac 上没有酒馆数据"; return 1; }
+    "$adb" -s "$serial" shell am force-stop com.tauritavern.client >/dev/null 2>&1
+    args=(--st "$ST_DIR/data/default-user" --adb "$adb" --serial "$serial"
+          --state "$PROXY_DIR/launcher/phone-sync-state.local.json" --backups "${PROXY_DIR:h}/backups" --port $PROXY_PORT
+          --ext-dir "$ST_DIR/public/scripts/extensions/third-party")
+    [[ -s "$LAN_KEY_FILE" && -n "$(lan_ip)" ]] && args+=(--mac-ip "$(lan_ip)" --lan-key-file "$LAN_KEY_FILE")
+    out=$(python3 "$LAUNCHER_DIR/../phone_sync.py" "${args[@]}" 2>&1 | grep '✓ 同步完成\|✗' | head -2)
+    log_event "[同步] 手机遥控触发：${out//$'\n'/；}"
+    "$adb" -s "$serial" shell monkey -p com.tauritavern.client -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+    notify "手机同步完成" "${out:-已同步}"
 }
 
 # 守护被强杀、死机重启后，我们打开的开关可能还开着：没有守护在跑就关掉
