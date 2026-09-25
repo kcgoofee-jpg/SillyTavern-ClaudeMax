@@ -104,6 +104,7 @@
         leakWords: {},           // 角色卡 → 隐藏设定关键词（逗号分隔）
         presetRecoRecord: null,  // 上一个预设的推荐改了什么（切走时恢复）
         tailBlockFront: false,   // 实验：预设后置条目提前（省缓存）
+        loreTail: true,          // 每轮变化的世界书移到本轮消息开头（省缓存）
         panelTab: 'reason',      // 面板上次打开的分页
         compactScriptButtons: true, // 输入栏上方的脚本按钮并排显示
     };
@@ -219,6 +220,7 @@
         useResume: { label: '会话续接', valid: (v) => typeof v === 'boolean' },
         inlineSystem: { label: '深度注入保持原位', valid: (v) => typeof v === 'boolean' },
         tailBlockFront: { label: '预设后置条目提前', valid: (v) => typeof v === 'boolean' },
+        loreTail: { label: '世界书变化部分移到末尾', valid: (v) => typeof v === 'boolean' },
         identityMode: { label: '身份模式', valid: (v) => typeof v === 'boolean' },
     };
 
@@ -261,6 +263,7 @@
         lines.push(`  use_resume: ${settings.useResume}`);
         lines.push(`  system_placement: ${settings.inlineSystem ? 'inline' : 'hoist'}`);
         if (settings.tailBlockFront) lines.push('  tail_block: front');
+        lines.push(`  lore_tail: ${settings.loreTail}`);
         if (settings.debugDump) lines.push('  debug_dump: true');
         return lines.join('\n');
     }
@@ -1098,6 +1101,14 @@
             more: '预设里「深度 N」的条目、世界书深度条目、作者注释留在原位，和酒馆直连 Claude 的做法一致，靠近结尾的提醒才有效。关闭则全部提到系统提示词；那样只要其中一条变化（比如世界书被触发），整个系统提示词的缓存都会失效。',
             checked: settings.inlineSystem,
             onChange: (v) => { settings.inlineSystem = v; save(); },
+        }));
+        pane.append(toggleRow({
+            id: 'claudeMaxLoreTail',
+            title: '世界书变化部分移到末尾',
+            desc: '按关键词触发的世界书不再让整段聊天记录重写缓存。',
+            more: '代理会记住每个聊天里哪一块（如 <world_info>）每轮都在变，把它从系统提示词挪到本轮消息开头，原位留一句固定说明。系统提示词和之前的聊天记录每轮一字不差，能读缓存，只重写最近一轮。设定资料离本轮更近，但不再在系统提示词里。不想挪动就关掉，或用「统计」页把世界书设为常驻。',
+            checked: settings.loreTail,
+            onChange: (v) => { settings.loreTail = v; save(); },
         }));
         pane.append(toggleRow({
             id: 'claudeMaxTailBlock',
