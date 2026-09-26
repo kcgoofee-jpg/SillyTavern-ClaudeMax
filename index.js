@@ -809,6 +809,7 @@
             up = res.ok;
         } catch { /* down */ }
         if (up) diagIfAsked();
+        quietSweep();
         if (!up && !heartbeatDown) {
             heartbeatDown = true;
             downToast = toastr?.warning?.('连不上 Claude 代理，正在每 20 秒自动重试。手机连 Mac 时：确认 Mac 没睡眠、两边在同一个 Wi-Fi。', 'Claude Max · 断线', { timeOut: 0, extendedTimeOut: 0, preventDuplicates: true });
@@ -1310,8 +1311,8 @@
         pane.append(toggleRow({
             id: 'claudeMaxQuietRender',
             title: '省电显示',
-            desc: '最新一楼以外，美化界面的动画只播一遍、不做毛玻璃。',
-            more: '状态栏、选项栏、摘要这类美化界面每一楼都在循环播放动画、做毛玻璃模糊，楼一多，手机的网页渲染会一直占满一个核、发烫。打开后旧楼层的界面还在，只是停下来不动；最新一楼不受影响。实测（安卓 TauriTavern，70 楼）：配合酒馆助手「渲染深度」3，渲染进程 101% → 17%。',
+            desc: '最新一楼以外，美化界面的动画只播一遍、不做毛玻璃；聊天外的悬浮挂件也停下来。',
+            more: '状态栏、选项栏、摘要这类美化界面每一楼都在循环播放动画、做毛玻璃模糊，楼一多，手机的网页渲染会一直占满一个核、发烫。打开后旧楼层的界面还在，只是停下来不动；最新一楼和加载中的转圈不受影响。聊天外一直循环的悬浮挂件（比如睡觉的宠物球）会播完这一轮后停住。实测（安卓 TauriTavern，70 楼）：配合酒馆助手「渲染深度」3，渲染进程 101% → 17%。',
             checked: settings.quietRender,
             onChange: (v) => { settings.quietRender = v; applyQuietRender(); save(); },
         }));
@@ -1320,8 +1321,38 @@
         pane.append(perfBox);
     }
 
+    // CSS only reaches the old floors in this document. Endless animations
+    // elsewhere (floating widgets, beautifiers inside same-origin frames)
+    // are told to finish their current loop instead; the latest floor and
+    // anything that looks like a loading indicator keep looping.
+    const quieted = new Set();
+    const QUIET_KEEP = /spin|load|typing|generat|progress/i;
+    function quietSweep() {
+        if (!getSettings().quietRender || document.hidden) return;
+        const docs = [document];
+        for (const fr of document.querySelectorAll('iframe')) {
+            try { if (fr.contentDocument && !fr.closest('#chat .last_mes')) docs.push(fr.contentDocument); } catch { /* cross-origin */ }
+        }
+        for (const doc of docs) {
+            for (const a of doc.getAnimations?.() ?? []) {
+                const t = a.effect?.target;
+                if (a.playState !== 'running' || a.effect?.getTiming?.().iterations !== Infinity || !t) continue;
+                if (doc === document && (t.closest?.('#chat .last_mes, #send_form, .claude-max') || !t.closest?.('body'))) continue;
+                if (QUIET_KEEP.test(`${a.animationName ?? ''} ${t.className?.baseVal ?? t.className ?? ''}`)) continue;
+                const done = Math.floor((a.currentTime ?? 0) / (a.effect.getTiming().duration || 1)) + 1;
+                a.effect.updateTiming({ iterations: done });
+                quieted.add(a);
+            }
+        }
+    }
     function applyQuietRender() {
-        document.body.classList.toggle('cm-quiet', !!getSettings().quietRender);
+        const on = !!getSettings().quietRender;
+        document.body.classList.toggle('cm-quiet', on);
+        if (on) return quietSweep();
+        for (const a of quieted) {
+            try { a.effect.updateTiming({ iterations: Infinity }); a.play(); } catch { /* element gone */ }
+        }
+        quieted.clear();
     }
 
     async function showPerfDiag() {
