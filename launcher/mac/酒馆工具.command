@@ -28,7 +28,7 @@ item_unavailable() {
     case $1 in
         启动生图|关闭生图) has_comfy || print "没装本地 ComfyUI，用不上（用 NovelAI 出图不需要它）" ;;
         本机TT导入) { has_st && [[ -d "$MAC_TT_DATA/default-user" ]]; } || print "测试用，要同时有电脑酒馆和 Mac 上的 TauriTavern" ;;
-        安卓保活模块) [[ -f "${TT_MODULE_DIR:-${PROXY_DIR:h}/tt-root-module}/build-ksu-module.sh" ]] || print "需要单独的 tt-root-module 模块仓库（暂未公开）" ;;
+        安卓保活模块) [[ -f "${TT_MODULE_DIR:-${PROXY_DIR:h}/tt-root-module}/build-ksu-module.sh" ]] || print "需要 tt-root-module（git clone 到本仓库同级目录）" ;;
     esac
 }
 

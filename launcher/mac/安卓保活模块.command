@@ -16,7 +16,7 @@ MAC_BK=${TT_PHONE_BACKUP_DIR:-${PROXY_DIR:h}/phone-backups/tt}
 step "打包"
 [[ -f "$MODULE_REPO/build-ksu-module.sh" ]] || {
     fail "找不到模块仓库：$MODULE_REPO"
-    fix "把 tt-root-module 放在酒馆扩展的同级目录，或在 launcher/config.local 里写 TT_MODULE_DIR=\"模块仓库目录\"。"
+    fix "git clone https://github.com/kcgoofee-jpg/tt-root-module 到酒馆扩展的同级目录，或在 launcher/config.local 里写 TT_MODULE_DIR=\"模块仓库目录\"。"
     summary; pause_end 1
 }
 zip_path=$(/bin/zsh "$MODULE_REPO/build-ksu-module.sh" 2>&1 | tail -1)
