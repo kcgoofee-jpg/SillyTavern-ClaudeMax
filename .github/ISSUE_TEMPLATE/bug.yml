@@ -1,0 +1,23 @@
+name: 问题反馈
+description: 用着出错了
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes: { label: CCST 版本, description: 面板「设置」或酒馆工具顶部能看到, placeholder: "3.1.1" }
+    validations: { required: true }
+  - type: dropdown
+    id: where
+    attributes:
+      label: 在哪用
+      options: [Mac + TauriTavern, Mac + 酒馆, 安卓 TauriTavern, 安卓 SillyDroid / Termux 酒馆, Windows, 云酒馆, 其他]
+    validations: { required: true }
+  - type: dropdown
+    id: source
+    attributes:
+      label: Claude 从哪来
+      options: [订阅（本代理）, API 密钥（本代理）, 官方 Claude 源直连, OpenRouter, 其他]
+  - type: textarea
+    id: what
+    attributes: { label: 发生了什么, description: 报错原文、怎么操作的。不要贴聊天内容、密钥或访问密码。 }
+    validations: { required: true }
