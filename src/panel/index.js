@@ -2448,6 +2448,8 @@
     if (eventTypes.GENERATION_STOPPED) eventSource.on(eventTypes.GENERATION_STOPPED, islandStopped);
     if (eventTypes.GENERATION_ENDED) eventSource.on(eventTypes.GENERATION_ENDED, () => setTimeout(islandGenEnd, 100));
     if (eventTypes.APP_READY) eventSource.on(eventTypes.APP_READY, adoptUnrecordedReco);
+    // After a sync or a fresh start the preset may already be one with a per-model profile: apply it once.
+    if (eventTypes.APP_READY) eventSource.on(eventTypes.APP_READY, () => setTimeout(applyModelProfile, 1500));
     registerImageScore();
     applyQuietRender();
     console.log(`[claude-max] UI extension loaded${IS_TAURI ? ' (TauriTavern mode)' : ''}`);
