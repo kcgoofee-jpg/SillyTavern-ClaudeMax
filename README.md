@@ -2,9 +2,9 @@
 
 # CCST
 
-**Claude Code × SillyTavern**：让酒馆里的 Claude 角色扮演更省、更稳、跨设备不断线。
+**Claude Code × SillyTavern**：酒馆里用 Claude 的懒人层。不管 Claude 从哪来，装上就是最好的状态。
 
-面板对任何 Claude 连接都能用（官方 API、OpenRouter）；配上自带的代理，可以用自己的 **Claude Pro / Max 订阅**玩，并获得缓存排布、手机防丢回复、Mac ↔ 手机同步。
+面板对任何 Claude 连接都能用（官方 API、OpenRouter）；配上自带的代理，可以用自己的 **Claude Pro / Max 订阅**或 API 密钥玩，并获得缓存排布、手机防丢回复、Mac ↔ 手机同步。更多来源（Bedrock、Vertex、中转）见[路线图](docs/路线图.md)。
 
 <sub>非 Anthropic 官方产品，与 Anthropic 无关。Claude 是 Anthropic 的商标。</sub>
 
@@ -19,6 +19,17 @@
 <sub>面板顶部的「灵动岛」：一个形状在状态之间弹簧变形，这张图也是代码画的（<a href="scripts/make_island_svg.py">scripts/make_island_svg.py</a>）</sub>
 
 </div>
+
+## 截图
+
+<p align="center">
+<img src="docs/assets/panel-reason.png" width="200" alt="推理页：模型与思考深度">
+<img src="docs/assets/panel-status.png" width="200" alt="状态页：缓存、额度、用量">
+<img src="docs/assets/panel-check.png" width="200" alt="体检页">
+<img src="docs/assets/panel-settings.png" width="200" alt="设置页">
+</p>
+
+<sub>从左到右：推理、状态、体检、设置（手机宽度，暗色主题）。</sub>
 
 - **本地代理**：通过官方 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) 调用你登录的订阅，对外提供 OpenAI 兼容接口 `http://127.0.0.1:8901/v1`。
 - **CCST 面板**：酒馆扩展，一键连接；只有一个设置项（思考深度），其余自动处理。
@@ -105,6 +116,17 @@ npm start
 打开「扩展」里的 **CCST** 面板，点 **一键连接**，开始聊天。要调的只有「推理」页的模型和思考深度，其余自动处理（缓存排布、预设推荐、体检、手机防丢回复）。桌面上的「酒馆工具」管启动、关闭、检查状态和手机同步。
 
 面板各页、菜单、缓存原理、手机设置、常见问题和环境变量：**[使用指南](docs/使用指南.md)**。
+
+## 路线图
+
+目标是**所有来源的 Claude 都能一键用好**：
+
+- **3.2** 所有来源一个面板：识别 Claude 官方源 / OpenRouter / Bedrock / Vertex / OpenAI 兼容中转，一键套用各自的缓存设置，模型切换和按模型自动切思维链覆盖所有来源。
+- **3.3** 代理多后端：订阅、API 密钥、Bedrock、Vertex、OpenRouter 任选，缓存排布和防丢回复对所有后端生效。
+- **3.4** 一键部署：首次引导、Windows / Linux / Termux 转正、云酒馆一条命令装代理、Docker。
+- **3.5** 手机与多客户端：TauriTavern、SillyDroid、Termux 版酒馆；不需要 root 的同步。
+
+详细见 [docs/路线图.md](docs/路线图.md)。
 
 ## 利弊
 
