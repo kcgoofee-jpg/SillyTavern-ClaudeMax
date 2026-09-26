@@ -1,9 +1,32 @@
+<div align="center">
+
 # Claude Max for SillyTavern
 
 用自己的 **Claude Pro / Max 订阅** 在 SillyTavern（酒馆）或 TauriTavern 里聊天，不用另买 API 额度。
 
+[![版本](https://img.shields.io/github/package-json/v/kcgoofee-jpg/SillyTavern-ClaudeMax?label=%E7%89%88%E6%9C%AC&color=0d0d0d)](https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax/releases)
+[![测试](https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax/actions/workflows/test.yml/badge.svg)](https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax/actions/workflows/test.yml)
+[![Node](https://img.shields.io/badge/Node-%E2%89%A518-3c873a)](https://nodejs.org)
+[![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%C2%B7%20Android%20TauriTavern-555)](#安装)
+[![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-AGPL--3.0-blue)](LICENSE)
+
+<img src="docs/island.svg" width="620" alt="灵动岛：思考中 → 写作中 → 完成（字数 · 用时 · 缓存）→ 体检提示 → 缩回小点">
+
+<sub>面板的「灵动岛」：一个形状在状态之间弹簧变形，这张图也是代码画的（<a href="docs/make_island_svg.py">docs/make_island_svg.py</a>）</sub>
+
+</div>
+
 - **本地代理**：通过官方 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) 调用你登录的订阅，对外提供 OpenAI 兼容接口 `http://127.0.0.1:8901/v1`。
-- **Claude Max 面板**：酒馆扩展，一键连接，并提供思考深度、额度、缓存、回复体检等设置。
+- **Claude Max 面板**：酒馆扩展，一键连接；只有一个设置项（思考深度），其余自动处理。
+
+| | |
+| --- | --- |
+| **缓存几乎全中** | 会话续接 + 世界书 / 深度注入自动挪位 + 重启后固定会话背景，长聊天每轮只写最近一楼（实测读 18 万 / 写 6.2k） |
+| **回复不丢** | 手机切后台、断网、App 被杀，代理照样写完并暂存，回来自动补回 |
+| **灵动岛** | 思考中 → 实时字数 → 完成（字数 · 用时 · 缓存命中）；体检、断线、补回都在这一个胶囊里 |
+| **回复体检** | 字数、段数、禁词、破折号、人称、选项格式、重复段落；角色卡未成年人物检查 |
+| **手机友好** | TauriTavern 直连 Mac 上的代理；省电显示自动开；手机上就能遥控 Mac（重启代理、合盖不睡、同步） |
+| **多模型** | Opus 5.5 / 5 / 4.x、Sonnet 5 / 4.x、Fable 5.1、Haiku 4.5，含 1M 上下文版 |
 
 > 基于 [LukaTheHero/SillyTavern-ClaudeSubscription](https://github.com/LukaTheHero/SillyTavern-ClaudeSubscription)（AGPL-3.0）独立维护，感谢原作者。
 
