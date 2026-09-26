@@ -533,6 +533,18 @@ class ChatConflictTests(unittest.TestCase):
         self.assertIn('扩展：没有要推的', buf.getvalue())
 
 
+class SecretsMergeTests(unittest.TestCase):
+    def test_keeps_keys_from_both_sides_and_newer_active(self):
+        newer = {'api_key_custom': [{'id': 'a', 'value': 'K1', 'active': True}], 'api_key_nai': [{'id': 'n', 'value': 'N', 'active': True}]}
+        older = {'api_key_custom': [{'id': 'b', 'value': 'K2', 'active': True}, {'id': 'c', 'value': 'K1', 'active': False}],
+                 'api_key_deepseek': [{'id': 'd', 'value': 'D', 'active': True}]}
+        m = ps.merge_secrets(newer, older)
+        self.assertEqual([e['value'] for e in m['api_key_custom']], ['K1', 'K2'])
+        self.assertEqual([e['active'] for e in m['api_key_custom']], [True, False])
+        self.assertIn('api_key_nai', m)
+        self.assertIn('api_key_deepseek', m)
+
+
 class LocalTTTests(unittest.TestCase):
     def test_local_tt_push_only(self):
         root = tempfile.mkdtemp()

@@ -781,6 +781,65 @@ def sync_api(ph, st, port, bk, dry=False):
     return (f'→ {ph.label}' if to_phone else f'← {LOCAL}') + f'（当前预设「{preset}」）', []
 
 
+def merge_secrets(newer, older):
+    """两份 secrets.json 合并：两边的密钥都留下（按值去重），「当前用哪个」以 newer 为准。
+    旧格式（键 → 字符串）按 newer 覆盖、缺的补上。"""
+    out = {}
+    for k in {**older, **newer}:
+        a, b = newer.get(k), older.get(k)
+        if isinstance(a, list) and isinstance(b, list):
+            vals = {e.get('value') for e in a if isinstance(e, dict)}
+            extra = [dict(e, active=False) for e in b if isinstance(e, dict) and e.get('value') not in vals]
+            out[k] = a + extra
+        else:
+            out[k] = a if k in newer else b
+    return out
+
+
+def sync_secrets(ph, st, bk, dry=False):
+    """API 密钥（secrets.json）两边合并，写回两边。不打印任何密钥。→ (说明 / None, 出错说明列表)"""
+    lpath, rpath = os.path.join(st, 'secrets.json'), f'{ph.base}/secrets.json'
+    try:
+        lraw = open(lpath, 'rb').read() if os.path.exists(lpath) else b'{}'
+        ld = json.loads(lraw)
+    except (OSError, ValueError):
+        return None, [f'{LOCAL}的 secrets.json 读不了']
+    rraw, err = read_remote_text(ph, rpath)
+    if err and err != 'missing':
+        return None, [f'{ph.label}的 secrets.json：{err}']
+    try:
+        rd = json.loads(rraw) if rraw else {}
+    except ValueError:
+        return None, [f'{ph.label}的 secrets.json 不是合法 JSON']
+    if ld == rd:
+        return None, []
+    if isinstance(ph, LocalTT):
+        rtime = os.path.getmtime(rpath) if os.path.exists(rpath) else 0
+    else:
+        out = ph.rsh(f'stat -c %Y {shlex.quote(rpath)} 2>/dev/null').strip()
+        rtime = float(out) if out.isdigit() else 0
+    ltime = os.path.getmtime(lpath) if os.path.exists(lpath) else 0
+    merged = merge_secrets(ld, rd) if ltime >= rtime else merge_secrets(rd, ld)
+    if dry:
+        return 'todo', []
+    body = json.dumps(merged, ensure_ascii=False, indent=4).encode('utf-8')
+    try:
+        # 备份里有密钥：只给本人读
+        for side, raw, ok in ((LOCAL, lraw, os.path.exists(lpath)), (ph.label, rraw, rraw is not None)):
+            if ok and json.loads(raw or b'{}') != merged:
+                f = os.path.join(bk, side, 'secrets.json')
+                atomic_write(f, raw)
+                os.chmod(f, 0o600)
+        if merged != ld:
+            atomic_write(lpath, body)
+            os.chmod(lpath, 0o600)
+        if merged != rd:
+            write_remote_text(ph, rpath, body)
+    except (SyncError, OSError) as e:
+        return None, [str(e)]
+    return f'{len(merged)} 项已两边合并', []
+
+
 # ── 标签 ──────────────────────────────────────
 # 标签存在 settings.json：tags = [{id, name, …}]，tag_map = {角色卡文件名: [标签 id]}。
 # 两边的 id 各是各的（都是随机生成），按标签名对应。
@@ -1174,7 +1233,8 @@ def main(argv=None):
             print(f'  {text}')
         tags_todo = bool(re.search(r'[1-9]\d* 个', text or ''))
         # --exit-if-nothing：没有任何要做的（文件、扩展、标签）时退出码 3，给启动器判断要不要关 TT
-        api_todo = a.exit_if_nothing and not a.push_only and sync_api(ph, a.st, a.port, None, dry=True)[0]
+        api_todo = a.exit_if_nothing and not a.push_only and sync_api(ph, a.st, a.port, None, dry=True)[0] \
+            or a.exit_if_nothing and not a.push_only and sync_secrets(ph, a.st, None, dry=True)[0]
         if a.exit_if_nothing and not (push or pull or conflicts or copies or ext_todo or tags_todo or api_todo):
             print('  两边已经一样，没有要同步的')
             return 3
@@ -1222,7 +1282,14 @@ def main(argv=None):
         if errs:
             notes.append('API 设置没同步')
         elif text:
-            print(f'  ✓ API 和预设设置 {text}；密钥不同步')
+            print(f'  ✓ API 和预设设置 {text}')
+        text, errs = sync_secrets(ph, a.st, bk)
+        for e in errs:
+            print(f'  ✗ API 密钥没同步：{e}')
+        if errs:
+            notes.append('API 密钥没同步')
+        elif text:
+            print(f'  ✓ API 密钥：{text}（不显示内容）')
     if a.mac_ip:
         key = None
         if a.lan_key_file and os.path.exists(a.lan_key_file) and not a.local_tt:
