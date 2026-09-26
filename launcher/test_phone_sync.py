@@ -551,5 +551,25 @@ class LocalTTTests(unittest.TestCase):
             shutil.rmtree(root, ignore_errors=True)
 
 
+    def test_same_content_different_time_is_not_a_change(self):
+        # TT 每次启动都重写快速回复：内容一样、时间不同 → 不算改动；预览退出码 3（没有要同步的）
+        root = tempfile.mkdtemp()
+        try:
+            st, tt = os.path.join(root, 'st'), os.path.join(root, 'tt', 'data', 'default-user')
+            write(f'{st}/QuickReplies/Default.json', '{"a":1}', 1_700_000_000)
+            write(f'{tt}/QuickReplies/Default.json', '{"a":1}', 1_700_009_000)
+            args = ['--st', st, '--local-tt', tt, '--state', f'{root}/s.json', '--backups', f'{root}/bk']
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                rc = ps.main(args + ['--dry-run', '--exit-if-nothing'])
+            self.assertEqual(rc, 3, buf.getvalue())
+            # 内容不同就照常同步
+            write(f'{tt}/QuickReplies/Default.json', '{"a":2}', 1_700_009_000)
+            with redirect_stdout(io.StringIO()):
+                self.assertEqual(ps.main(args + ['--dry-run', '--exit-if-nothing']), 0)
+        finally:
+            shutil.rmtree(root, ignore_errors=True)
+
+
 if __name__ == '__main__':
     unittest.main()

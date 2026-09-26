@@ -243,6 +243,33 @@ def plan(loc, rem, state):
     return push, pull, conflicts, sorted(clashes)
 
 
+IDENTICAL_MAX = 2 * 1024 * 1024
+
+
+def settle_identical(ph, st, loc, rem, rels):
+    """大小一样、只有修改时间不同的文件，比一下内容：一模一样的不算改动（TT 每次启动都会重写
+    快速回复等文件，内容没变）。→ 内容相同的文件集合。只比 2MB 以内的，读不了就当不同。"""
+    cand = [r for r in rels if r in loc and r in rem and loc[r][1] == rem[r][1] and loc[r][1] <= IDENTICAL_MAX]
+    if not cand:
+        return set()
+    try:
+        data, _ = pull_tar(ph, cand, only_existing=True)
+    except SyncError:
+        return set()
+    same_ = set()
+    with tarfile.open(fileobj=io.BytesIO(data)) as t:
+        for m in t.getmembers():
+            if not m.isfile() or m.name not in cand:
+                continue
+            try:
+                with open(os.path.join(st, m.name), 'rb') as f:
+                    if f.read() == t.extractfile(m).read():
+                        same_.add(m.name)
+            except OSError:
+                pass
+    return same_
+
+
 # ── 打包 / 解包 ──────────────────────────────────────
 
 def tar_bytes(st, rels):
@@ -983,6 +1010,7 @@ def main(argv=None):
     ap.add_argument('--state')
     ap.add_argument('--backups')
     ap.add_argument('--dry-run', action='store_true')
+    ap.add_argument('--exit-if-nothing', action='store_true', help='预览时两边已经一样就以退出码 3 结束')
     ap.add_argument('--mac-ip')
     ap.add_argument('--port', type=int, default=8901)
     ap.add_argument('--lan-key-file')
@@ -1044,6 +1072,11 @@ def main(argv=None):
         print('  如果确实在手机上删了这么多文件，加 --trust-listing 再运行（删掉的会从电脑复制回去）。')
         return 2
     push, pull, conflicts, clashes = plan(loc, rem, state)
+    identical = settle_identical(ph, a.st, loc, rem, set(push) | set(pull)) if not a.push_only else set()
+    if identical:
+        push = [r for r in push if r not in identical]
+        pull = [r for r in pull if r not in identical]
+        conflicts = [r for r in conflicts if r not in identical]
     if a.push_only:
         kept = [r for r in pull if r in loc]   # 对方的更新：不覆盖
         only_there = [r for r in pull if r not in loc]
@@ -1085,6 +1118,11 @@ def main(argv=None):
             print(f'  ! {e}')
         if text:
             print(f'  {text}')
+        tags_todo = bool(re.search(r'[1-9]\d* 个', text or ''))
+        # --exit-if-nothing：没有任何要做的（文件、扩展、标签）时退出码 3，给启动器判断要不要关 TT
+        if a.exit_if_nothing and not (push or pull or conflicts or copies or ext_todo or tags_todo):
+            print('  两边已经一样，没有要同步的')
+            return 3
         return 0
 
     bk = os.path.join(a.backups, time.strftime('%Y-%m-%d'), f"{time.strftime('%H%M%S')}-{side}同步前")
@@ -1104,6 +1142,9 @@ def main(argv=None):
     missing = set(failed)
     if rem2 is not None:
         new_state = merge_state(state, loc2, rem2, touched, failed)
+        for rel in identical:   # 内容一样的：按现在两边的时间记下，下次不再比较
+            if rel in loc2 and rel in rem2:
+                new_state[rel] = {'l': list(loc2[rel]), 'r': list(rem2[rel])}
         missing |= {r for r in touched if r not in new_state or not same(loc2.get(r), rem2.get(r))}
         save_state(a.state, new_state)
 

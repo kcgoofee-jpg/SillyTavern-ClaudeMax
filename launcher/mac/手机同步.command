@@ -4,6 +4,7 @@
 # 其他设置和 API 密钥不同步；只改手机设置里的一处：Claude Max 的代理地址对准这台 Mac 的 IP，
 # 手机模式开着时顺便填上 Mac 的访问密码（lan-key.local）。
 # 手机用 USB 线连着（开了 USB 调试），或者之前在这里开过无线调试
+# 全自动：不问问题。两边已经一样就什么都不关；要同步时手机弹通知倒数 10 秒，同步完把原来开着的 TT 重新打开。
 source "${0:A:h}/lib.zsh"
 banner "手机同步（$(hub_label) ↔ 手机）"
 TT_PKG=com.tauritavern.client   # 无线调试时手机的地址在 $PHONE_FILE（lib.zsh）
@@ -51,7 +52,9 @@ if [[ -z "$serial" ]]; then
 fi
 ok "已连接：$serial"
 
-if [[ "$serial" != *:* ]] && ask_yes "要开启无线调试吗？（以后不插线、同一个 Wi-Fi 也能同步；手机重启后要插线再开一次）"; then
+# 插着线、还没开过无线调试（或记的地址已经失效）：顺手开，以后同一 Wi-Fi 不插线也能同步
+if [[ "$serial" != *:* ]] && { [[ ! -s "$PHONE_FILE" ]] || ! "$adb" devices 2>/dev/null | grep -q "^$(<"$PHONE_FILE")[[:space:]]*device"; }; then
+    explain "顺手开启无线调试（以后不插线、同一个 Wi-Fi 也能同步；手机重启后要插线再开一次）"
     pip=$("$adb" -s "$serial" shell ip -f inet addr show wlan0 2>/dev/null | awk '/inet /{sub(/\/.*/,"",$2); print $2; exit}')
     if [[ -n "$pip" ]] && "$adb" -s "$serial" tcpip 5555 >/dev/null 2>&1; then
         sleep 2
@@ -76,7 +79,7 @@ fi
 if [[ $HUB == st ]] && [[ -n "$(our_pids $ST_PORT)" ]]; then
     step "电脑上的酒馆在运行"
     explain "同步会改写聊天文件。浏览器里开着的酒馆页面可能把旧内容再存回去，先把酒馆网页都关掉（酒馆程序可以不关）。"
-    ask_yes "酒馆网页都关好了吗？" || { warn "没有同步。"; summary; pause_end; }
+    warn "浏览器里开着的酒馆页面可能把旧内容存回去：同步完刷新一下页面。"
 fi
 
 step "预览要同步的文件"
@@ -88,41 +91,42 @@ fi
 args=("${(@0)$(hub_sync_args)}" --adb "$adb" --serial "$serial")
 [[ -s "$LAN_KEY_FILE" && -n "$(lan_ip)" ]] && args+=(--mac-ip "$(lan_ip)" --lan-key-file "$LAN_KEY_FILE")
 hub_update_mac_tt_ext --dry-run
-python3 "$LAUNCHER_DIR/../phone_sync.py" "${args[@]}" --dry-run || { fail "读取数据失败"; summary; pause_end 1; }
-tt_was=0
-if [[ $HUB == tt ]] && mac_tt_running; then
-    explain "Mac 上的 TauriTavern 开着：开始同步时会先让它正常退出（它开着会把旧内容存回去），同步完再打开。"
-fi
-if ask_yes "开始同步吗？（会先关掉手机上的 TauriTavern$([[ $HUB == tt ]] && print "和 Mac 上的 TauriTavern")，同步完可以再打开）"; then
-    # 手机上弹通知让你离开键盘，倒数 10 秒（代理在写回复时先等它写完）
-    phone_handoff "$serial" "$adb" "同步" || { warn "代理一直在写回复，没有同步，手机上的 TT 没动。"; summary; pause_end; }
-    if [[ $HUB == tt ]] && mac_tt_running; then
-        # Mac TT 可能正在写回复（经过同一个代理）：先确认，再正常退出
-        confirm_proxy_idle "退出 Mac 上的 TauriTavern" || { warn "没有同步，两边的 TT 都没动。"; summary; pause_end; }
-        mac_tt_quit || { fail "Mac 上的 TauriTavern 没能退出，先手动退出再同步"; summary; pause_end 1; }
-        tt_was=1
-        explain "已退出 Mac 上的 TauriTavern。"
-    fi
-    "$adb" -s "$serial" shell am force-stop $TT_PKG >/dev/null 2>&1
-    explain "已关掉手机上的 TauriTavern（它开着时会把旧设置写回去）。"
-    if [[ $HUB == tt ]]; then
-        step "更新 Mac TT 上的扩展"
-        hub_update_mac_tt_ext || warn "有扩展没更新成，看上面的说明"
-    fi
-    step "同步"
-    if python3 "$LAUNCHER_DIR/../phone_sync.py" "${args[@]}"; then
-        ok "同步完成"
-        log_event "[同步] $(hub_label) ↔ 手机同步完成"
-    else
-        warn "有文件没同步成功，看上面的列表"
-    fi
-    [[ -s "$LAN_KEY_FILE" ]] || explain "现在是电脑模式：手机要连这台 Mac 的代理，先在菜单里打开「手机模式」。"
-else
-    warn "没有同步，手机上的 TT 没动。"
+python3 "$LAUNCHER_DIR/../phone_sync.py" "${args[@]}" --dry-run --exit-if-nothing
+rc=$?
+if (( rc == 3 )); then
+    ok "两边已经一样，没有关任何 TT"
+    [[ $HUB == tt ]] && ! mac_tt_running && hub_update_mac_tt_ext >/dev/null 2>&1
+    log_event "[同步] $(hub_label) ↔ 手机：两边已经一样"
     summary; pause_end
 fi
-if ask_yes "打开手机上的 TauriTavern 吗？"; then
-    "$adb" -s "$serial" shell monkey -p $TT_PKG -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 && ok "已打开"
+(( rc == 0 )) || { fail "读取数据失败"; summary; pause_end 1; }
+tt_was=0
+phone_was=0
+[[ -n "$("$adb" -s "$serial" shell pidof $TT_PKG 2>/dev/null)" ]] && phone_was=1
+# 手机上的 TT 开着：弹通知让你离开键盘，倒数 10 秒；没开就不用等（代理在写回复时都先等它写完）
+phone_handoff "$serial" "$adb" "同步" $(( phone_was ? 10 : 0 )) || { warn "代理一直在写回复，没有同步，手机上的 TT 没动。"; summary; pause_end; }
+if [[ $HUB == tt ]] && mac_tt_running; then
+    # 上面已经等代理写完了回复（Mac TT 也走同一个代理），直接正常退出
+    mac_tt_quit || { fail "Mac 上的 TauriTavern 没能退出，先手动退出再同步"; summary; pause_end 1; }
+    tt_was=1
+    explain "已退出 Mac 上的 TauriTavern。"
+fi
+"$adb" -s "$serial" shell am force-stop $TT_PKG >/dev/null 2>&1
+explain "已关掉手机上的 TauriTavern（它开着时会把旧设置写回去）。"
+if [[ $HUB == tt ]]; then
+    step "更新 Mac TT 上的扩展"
+    hub_update_mac_tt_ext || warn "有扩展没更新成，看上面的说明"
+fi
+step "同步"
+if python3 "$LAUNCHER_DIR/../phone_sync.py" "${args[@]}"; then
+    ok "同步完成"
+    log_event "[同步] $(hub_label) ↔ 手机同步完成"
+else
+    warn "有文件没同步成功，看上面的列表"
+fi
+[[ -s "$LAN_KEY_FILE" ]] || explain "现在是电脑模式：手机要连这台 Mac 的代理，先在菜单里打开「手机模式」。"
+if (( phone_was )); then
+    "$adb" -s "$serial" shell monkey -p $TT_PKG -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1 && ok "已重新打开手机上的 TauriTavern"
 fi
 (( tt_was )) && mac_tt_open && ok "已重新打开 Mac 上的 TauriTavern"
 summary
