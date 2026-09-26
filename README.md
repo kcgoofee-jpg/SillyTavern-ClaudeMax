@@ -4,7 +4,7 @@
 
 **Claude Code × SillyTavern**：酒馆里用 Claude 的懒人层。不管 Claude 从哪来，装上就是最好的状态。
 
-面板对任何 Claude 连接都能用（官方 API、OpenRouter）；配上自带的代理，可以用自己的 **Claude Pro / Max 订阅**或 API 密钥玩，并获得缓存排布、手机防丢回复、Mac ↔ 手机同步。更多来源（Bedrock、Vertex、中转）见[路线图](docs/路线图.md)。
+面板对任何 Claude 连接都能用（官方 API、OpenRouter）；配上自带的代理，可以用自己的 **Claude Pro / Max 订阅**或 API 密钥玩，并获得缓存排布、手机防丢回复、Mac ↔ 手机同步。代理也能改走 API 密钥、AWS Bedrock、Google Vertex、OpenRouter 或 Anthropic 兼容网关。
 
 <sub>非 Anthropic 官方产品，与 Anthropic 无关。Claude 是 Anthropic 的商标。</sub>
 
@@ -55,7 +55,7 @@
 | 你的情况 | 看这里 |
 | --- | --- |
 | Mac + TauriTavern 或酒馆（最省事） | [Mac 一键安装](#mac-一键安装) |
-| 用 Anthropic API 密钥，不想用订阅 | 照常装代理，在酒馆「API 连接」密钥栏填 `sk-ant-…`：按密钥计费，缓存 1 小时 |
+| 用 API 密钥 / Bedrock / Vertex / OpenRouter / 兼容网关，不想用订阅 | 照常装代理，在面板「设置 → 代理后端」选好填上（见[使用指南](docs/使用指南.md#使用)）：按 token 计费，用量页显示估算花费 |
 | 已直连 Claude API / OpenRouter，不想跑代理 | 只装扩展，见[不用代理也能用](#no-proxy) |
 | 云酒馆（酒馆装在服务器上） | 订阅代理跑在你自己的电脑上，云端连不到：用 API 密钥直连，或把代理装到同一台服务器 |
 | 安卓手机上的 TauriTavern | 先装好 Mac，再看[使用指南 · 手机](docs/使用指南.md#手机) |
@@ -122,7 +122,7 @@ npm start
 目标是**所有来源的 Claude 都能一键用好**：
 
 - **3.2** 所有来源一个面板：识别 Claude 官方源 / OpenRouter / Bedrock / Vertex / OpenAI 兼容中转，一键套用各自的缓存设置，模型切换和按模型自动切思维链覆盖所有来源。
-- **3.3** 代理多后端：订阅、API 密钥、Bedrock、Vertex、OpenRouter 任选，缓存排布和防丢回复对所有后端生效。
+- **3.3（已完成）** 代理多后端：订阅、API 密钥、Bedrock、Vertex、OpenRouter、兼容网关任选，缓存排布和防丢回复对所有后端生效。
 - **3.4** 一键部署：首次引导、Windows / Linux / Termux 转正、云酒馆一条命令装代理、Docker。
 - **3.5** 手机与多客户端：TauriTavern、SillyDroid、Termux 版酒馆；不需要 root 的同步。
 

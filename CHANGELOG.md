@@ -4,6 +4,17 @@
 
 ## 未发布
 
+## 3.3.0 - 2026-09-26
+
+### 新增（3.3 代理多后端）
+- 代理后端可选：订阅（默认）、Anthropic API 密钥、AWS Bedrock、Google Vertex AI、Anthropic 兼容网关、OpenRouter（#8）。面板「设置 → 代理后端」切换和填写，从下一条回复起生效，不用重启代理；配置存在代理电脑的 `data/backend.json`（0600），也可用 `CLAUDE_SUBSCRIPTION_BACKEND*` 环境变量。密钥不回传网页、不写日志，只发给对应的服务。
+- 模型名按后端自动换（Bedrock `us.anthropic.…`、Vertex `…@日期`、OpenRouter `anthropic/…`）；后端没有的模型直接报错，不换别的。
+- 用量按后端分开统计，API 类后端显示估算花费（token 数 × 官方价，2026-06-24）（#9）；非订阅后端隐藏订阅额度。
+- 新接口 `GET/POST /v1/backend`；`/status` 带当前后端名。
+
+### 变更
+- CLI 子进程清掉 shell 里继承的 `CLAUDE_CODE_USE_BEDROCK` / `_VERTEX` 等后端开关和 `AWS_BEARER_TOKEN_BEDROCK`，不再可能悄悄改走别的计费。
+
 ## 3.2.0 - 2026-09-26
 
 ### 新增（3.2 所有来源一个面板）
