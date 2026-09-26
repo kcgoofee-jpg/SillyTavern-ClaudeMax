@@ -221,22 +221,35 @@
     // Opus 5.5's safeguards refuse prompts that make the model write its
     // reasoning into the reply (category reasoning_extraction). Presets that
     // prescribe a <thinking>/<cot> block in the output trip it every time.
+    // The instruction can also sit in a character card's lorebook (seen live: a constant entry
+    // 「<think> 已被禁止，请立即用全英文输出 <draft_notes>」), so user messages are read too.
+    const COT_TAGS = 'thinking|think|cot|draft_notes|draft|scratchpad|reasoning|analysis|思考|思维链';
+    const COT_ASK = new RegExp(
+        `(?:输出|写出|写下|先写|先在|用全英文|放进|output|write)[^\\n]{0,40}<(?:${COT_TAGS})>` +
+        `|<(?:${COT_TAGS})>[^\\n]{0,40}(?:中思考|里思考|内思考|中分析|里分析)`, 'i');
     const warnedPresets = new Set();
     function preflightCheck(data) {
         // Verified live: Opus 5 refuses these too, not only Opus 5.5 (the docs say 5.5 only).
         if (!/opus-5/i.test(String(data.model ?? ''))) return;
-        const preset = SillyTavern.getContext().chatCompletionSettings?.preset_settings_openai ?? '';
-        if (warnedPresets.has(preset)) return;
-        const text = (data.messages ?? [])
-            .filter((m) => m?.role === 'system')
+        const ctx = SillyTavern.getContext();
+        const preset = ctx.chatCompletionSettings?.preset_settings_openai ?? '';
+        const key = `${preset}\u0000${ctx.characterId ?? ''}`;
+        if (warnedPresets.has(key)) return;
+        const textOf = (role) => (data.messages ?? [])
+            .filter((m) => m?.role === role)
             .map((m) => (typeof m.content === 'string' ? m.content : ''))
             .join('\n');
-        if (!/<\/?(thinking|cot)>/i.test(text)) return;
-        warnedPresets.add(preset);
-        notify('warn', `预设「${preset}」可能被拦`,
-            '它要求模型把思考过程（<thinking>/<cot>）写进回复，Opus 5 / Opus 5.5 的安全分类器会拦截这类请求（reasoning_extraction），而且被拦也照样计费。' +
-            '建议换用改成原生思考的预设（十四行诗3.0-Claude），想看写在正文里的思维链就改用 Opus 4.6 并把思考模式设为关闭。',
-            { ms: 15000 });
+        const system = textOf('system');
+        const asked = (system + '\n' + textOf('user')).match(COT_ASK);
+        if (!asked && !/<\/?(thinking|cot)>/i.test(system)) return;
+        warnedPresets.add(key);
+        const where = asked
+            ? `这段要求：「${asked[0].slice(0, 60)}」（多半在角色卡的世界书或预设条目里，把那一条关掉就好）。`
+            : `预设「${preset}」要求模型把思考过程（<thinking>/<cot>）写进回复。`;
+        notify('warn', 'Opus 5 / 5.5 可能会拦这条请求',
+            `${where}Opus 5 / Opus 5.5 的安全分类器会拦截「把思考写进正文」的请求（reasoning_extraction），被拦也照样计费。` +
+            '本扩展用的是原生思考，不需要这类条目；想看写在正文里的思维链，就在「推理」页把模型切到 Opus 4.6 并把思考关掉。',
+            { ms: 20000 });
     }
 
     // ST's Custom-endpoint "prompt post-processing" (merge / semi / strict)
@@ -276,6 +289,7 @@
     };
 
     function applyPresetRecommendation() {
+        syncModelControl();   // presets carry their own model
         if (!presetReco) return;
         const ctx = SillyTavern.getContext();
         const rec = ctx.chatCompletionSettings?.extensions?.claude_max;
@@ -1520,7 +1534,59 @@
         document.getElementById('claude_max_thinking')?.select?.(s.thinking);
     }
 
+    // Quick model switch for the two models people actually alternate between. It writes
+    // SillyTavern's own custom model field (the same path as its model dropdown), so it lasts
+    // until the next preset switch — presets store their own model.
+    const MODEL_PICKS = [
+        { value: 'claude-opus-5-5', label: 'Opus 5.5', hint: '思考总是开着。要求把思考写进正文的预设或世界书条目会被拦（reasoning_extraction）。' },
+        { value: 'claude-opus-4-6', label: 'Opus 4.6', hint: '思考可以关；写法更干净。切换预设时会换回预设里存的模型。' },
+    ];
+    const modelBase = (id) => String(id ?? '').replace(/\[1m\]$/i, '');
+
+    function setModel(id) {
+        const ctx = SillyTavern.getContext();
+        const $ = globalThis.jQuery;
+        const input = $?.('#custom_model_id');
+        if (input?.length) input.val(id).trigger('input');
+        else if (ctx.chatCompletionSettings) {
+            ctx.chatCompletionSettings.custom_model = id;
+            ctx.saveSettingsDebounced?.();
+        }
+    }
+
+    function modelRow() {
+        const { connected, model } = connectionInfo();
+        if (!connected) return null;
+        const current = modelBase(model);
+        const options = [...MODEL_PICKS];
+        if (current && !options.some((o) => o.value === current)) {
+            options.push({ value: current, label: shortModel(current), hint: '现在用的模型（在酒馆的 API 连接里选的）。' });
+        }
+        const row = segmented({
+            label: '模型',
+            options,
+            current,
+            onChange: (v) => {
+                const cur = connectionInfo().model ?? '';
+                const id = v + (/\[1m\]$/i.test(cur) ? '[1m]' : '');
+                if (id === cur) return;
+                setModel(id);
+                renderGlance();
+                notify('info', `已切到 ${shortModel(id)}`, '到下次切换预设为止；想让某个预设固定用它，就在预设里保存一次。', { ms: 6000 });
+            },
+        });
+        row.id = 'claude_max_model';
+        return row;
+    }
+
+    function syncModelControl() {
+        const { model } = connectionInfo();
+        document.getElementById('claude_max_model')?.select?.(modelBase(model));
+    }
+
     function buildReasonTab(pane, settings, save) {
+        const model = modelRow();
+        if (model) pane.append(model);
         const depth = segmented({
             label: '思考深度',
             options: [...EFFORT_OPTIONS, { value: 'off', label: '不思考', hint: '不思考，回得最快。Fable、Opus 4.7 及以上（含 Opus 5 / 5.5）总会思考，对它们无效。' }],
