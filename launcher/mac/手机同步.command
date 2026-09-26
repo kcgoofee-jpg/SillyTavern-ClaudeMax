@@ -117,7 +117,7 @@ if ask_yes "开始同步吗？（会先关掉手机上的 TauriTavern$([[ $HUB =
     step "同步"
     if python3 "$LAUNCHER_DIR/../phone_sync.py" "${args[@]}"; then
         ok "同步完成"
-        log_event "[同步] 电脑 ↔ 手机同步完成"
+        log_event "[同步] $(hub_label) ↔ 手机同步完成"
     else
         warn "有文件没同步成功，看上面的列表"
     fi
