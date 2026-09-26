@@ -49,6 +49,12 @@ LAUNCHER_LOG="$LOG_DIR/launcher.log"
 LOG_MAX_BYTES=$((5 * 1024 * 1024))
 
 mkdir -p "$LOG_DIR"
+# npm 的「有新版本」「求赞助」提示对用户没用，还会混进安装输出里
+export NPM_CONFIG_UPDATE_NOTIFIER=false NPM_CONFIG_FUND=false
+# 注意：UTF-8 下 zsh 会把中文当成变量名的一部分（"$name的" 读成变量 name的），变量后面紧跟中文时要写 ${name}
+
+# 测试用：CM_NO_OPEN=1 时不真的打开 App、网页或文件夹，只打印出来（模拟新用户安装时用）
+[[ -n "$CM_NO_OPEN" ]] && open() { print -r -- "  [CM_NO_OPEN] open $*"; }
 
 # ── 输出 ─────────────────────────────────────
 
@@ -185,16 +191,16 @@ diagnose_log() {
 
     _diag 'EADDRINUSE|address already in use' \
         "端口被占用，程序无法监听" \
-        "先双击「关闭酒馆」，再双击「启动酒馆」；如果还不行，重启电脑。"
+        "在酒馆工具里先选「关闭酒馆」，再选「启动酒馆」；如果还不行，重启电脑。"
     _diag 'ERR_MODULE_NOT_FOUND|Cannot find module|Cannot find package' \
         "缺少依赖文件（node_modules 不完整）" \
-        "双击「修复依赖」重新安装。"
+        "在酒馆工具里选「修复依赖」重新安装。"
     _diag 'Native CLI binary|claude-agent-sdk-darwin' \
         "找不到 Claude 命令行程序（SDK 安装不完整）" \
-        "双击「修复依赖」重新安装。"
+        "在酒馆工具里选「修复依赖」重新安装。"
     _diag 'Not logged in|Please run /login|authentication_failed|invalid_token|token has expired' \
         "Claude 订阅未登录或登录已失效" \
-        "双击「登录 Claude」重新登录。"
+        "在酒馆工具里选「登录 Claude」重新登录。"
     _diag 'rate.limit|(^|[^0-9.,k])429([^0-9.,k]|$)|Too many requests' \
         "触发了订阅额度限流（请求太频繁或额度用完）" \
         "稍等几分钟再试；在酒馆的 Claude Max 面板里可以看到额度重置时间。"
@@ -341,7 +347,7 @@ self_check() {
         ok "Claude 命令行程序（SDK 自带）"
     else
         fail "缺少 Claude 命令行程序（SDK 的平台包没装上）"
-        fix "双击「修复依赖」重新安装。"
+        fix "在酒馆工具里选「修复依赖」重新安装。"
     fi
 
     # 5. 登录状态
@@ -386,7 +392,8 @@ check_deps() {
     fi
 }
 
-check_login() {
+# 登录状态：打印「yes 套餐」/「no」/「unknown」
+login_state() {
     local json logged=unknown plan
     json=$(cd "$PROXY_DIR" && node scripts/claude-cli.js auth status 2>/dev/null)
     # 不再为解析这点 JSON 单独起一个 node
@@ -394,11 +401,17 @@ check_login() {
         [[ $match[1] == true ]] && logged=yes || logged=no
     fi
     [[ "$json" =~ '"subscriptionType"[[:space:]]*:[[:space:]]*"([^"]*)"' ]] && plan=$match[1]
+    print -r -- "$logged $plan"
+}
+
+check_login() {
+    local st=$(login_state) logged plan
+    logged=${st%% *} plan=${st#* }
     case $logged in
         yes) ok "Claude 订阅已登录（$(plan_name "$plan") 套餐）" ;;
         no)
             warn "Claude 订阅还没有登录 —— 酒馆能打开，但发消息会失败"
-            fix "双击「登录 Claude」，在浏览器里完成授权。"
+            fix "在酒馆工具里选「登录 Claude」，在浏览器里完成授权。"
             ;;
         *)
             warn "无法读取 Claude 登录状态"
@@ -800,9 +813,11 @@ start_proxy() {
     local pid
     if [[ -s "$LAN_KEY_FILE" ]]; then
         explain "手机连接已开启：同一 Wi-Fi 下的设备带访问密码可以连这个代理。"
-        pid=$(CLAUDE_SUBSCRIPTION_HOST=0.0.0.0 CLAUDE_SUBSCRIPTION_LAN_KEY="$(<"$LAN_KEY_FILE")" spawn "$PROXY_DIR" "$PROXY_LOG" node server.js)
+        pid=$(CLAUDE_SUBSCRIPTION_PORT=$PROXY_PORT CLAUDE_SUBSCRIPTION_HOST=0.0.0.0 CLAUDE_SUBSCRIPTION_LAN_KEY="$(<"$LAN_KEY_FILE")" \
+              spawn "$PROXY_DIR" "$PROXY_LOG" node server.js)
     else
-        pid=$(spawn "$PROXY_DIR" "$PROXY_LOG" node server.js)
+        # 端口要告诉代理：config.local 里改了 PROXY_PORT 时，代理自己的默认值还是 8901
+        pid=$(CLAUDE_SUBSCRIPTION_PORT=$PROXY_PORT spawn "$PROXY_DIR" "$PROXY_LOG" node server.js)
     fi
     if wait_port $PROXY_PORT 20 $pid; then
         rm -f "$RESTART_MARK"
@@ -945,11 +960,11 @@ health_check() {
             local repo_v=${f[6]}
             if [[ -n "$repo_v" && "${f[2]}" != "$repo_v" ]]; then
                 warn "代理还在跑旧版本 v${f[2]}，程序已经更新到 v$repo_v"
-                fix "没在生成回复时双击「重启酒馆」（手机模式下代理会自动重启，手机不用动）。"
+                fix "没在生成回复时在酒馆工具里选「重启酒馆」（手机模式下代理会自动重启，手机不用动）。"
             fi
         else
             warn "代理正常，但没有找到 Claude 登录凭据"
-            fix "双击「登录 Claude」。"
+            fix "在酒馆工具里选「登录 Claude」。"
         fi
     fi
 
@@ -984,7 +999,7 @@ show_running() {
         fi
     fi
     if [[ -s "$LAN_KEY_FILE" ]]; then
-        if watchdog_running; then ok "手机模式守护：运行中"; else warn "手机模式开着，但守护没在运行：双击「手机模式」修复"; fi
+        if watchdog_running; then ok "手机模式守护：运行中"; else warn "手机模式开着，但守护没在运行：在酒馆工具里选「手机模式」修复"; fi
         if lid_awake_on; then ok "合盖不睡：开着"
         elif lid_supported; then
             if ! watchdog_running; then why="守护没在运行"
@@ -1020,13 +1035,13 @@ reinstall_deps() {
     local dir=$1 name=$2
     # 目录为空时 cd "" 会成功、npm 会装到当前目录（常常是家目录）：先确认是个真的程序目录
     [[ -n "$dir" && -f "$dir/package.json" ]] || return 0
-    step "重新安装$name的依赖"
+    step "安装依赖：${name}"
     explain "目录：$dir"
     if (cd "$dir" || exit 1; npm install --no-audit --no-fund 2>&1 | tee -a "$LAUNCHER_LOG" | tail -n 6 | sed "s/^/    ${C_DIM}│${C_RESET} /"; exit ${pipestatus[1]}); then
-        ok "$name依赖安装完成"
+        ok "${name}依赖安装完成"
     else
-        fail "$name依赖安装失败"
-        fix "检查网络连接后再双击一次；详细输出在 launcher.log 里。"
+        fail "${name}依赖安装失败"
+        fix "检查网络连接后再运行一次；详细输出在 launcher.log 里。"
     fi
 }
 

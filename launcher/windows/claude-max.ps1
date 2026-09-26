@@ -164,6 +164,8 @@ function StartNode($name, $dir, $port, $secs, $label) {
 
 function StartProxy {
     Step "启动 Claude 代理（端口 $PROXY_PORT）"
+    # 端口要告诉代理：config.local.ps1 里改了 $PROXY_PORT 时，代理自己的默认值还是 8901（子进程继承环境变量）
+    $env:CLAUDE_SUBSCRIPTION_PORT = "$PROXY_PORT"
     StartNode 'proxy' $PROXY_DIR $PROXY_PORT 20 'Claude 代理' | Out-Null
 }
 

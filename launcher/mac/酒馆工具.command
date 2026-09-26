@@ -7,7 +7,7 @@ HERE=${0:A:h}
 # 分组|脚本名|一句话说明（编号按这里的顺序）
 ITEMS=(
     "日常|启动酒馆|$(st_managed && print "启动代理和酒馆，打开浏览器" || print "启动代理，打开 TauriTavern（酒馆不自动启动）")"
-    "日常|关闭酒馆|关闭酒馆和代理"
+    "日常|关闭酒馆|$(has_st && print "关闭酒馆和代理" || print "关闭代理")"
     "日常|重启酒馆|更新代码、改设置、一直出错时用"
     "日常|检查状态|体检：运行、登录、日志错误（不启动也不关闭）"
     "手机|手机模式|电脑模式 ↔ 手机模式（防睡眠、掉线重启、通知）"
@@ -22,6 +22,15 @@ ITEMS=(
     "维护|开机自动启动|开 / 关：登录 Mac 时自动在后台启动"
     "维护|本机TT导入|测试用：电脑酒馆 → 这台 Mac 的 TauriTavern（内容、扩展、设置）"
 )
+
+# 这台 Mac 上用不上的项：打印原因（灰着显示，编号不变，和使用说明对得上）；用得上就什么都不打印
+item_unavailable() {
+    case $1 in
+        启动生图|关闭生图) has_comfy || print "没装本地 ComfyUI，用不上（用 NovelAI 出图不需要它）" ;;
+        本机TT导入) { has_st && [[ -d "$MAC_TT_DATA/default-user" ]]; } || print "测试用，要同时有电脑酒馆和 Mac 上的 TauriTavern" ;;
+        安卓保活模块) [[ -f "${TT_MODULE_DIR:-${PROXY_DIR:h}/tt-root-module}/build-ksu-module.sh" ]] || print "需要单独的 tt-root-module 模块仓库（暂未公开）" ;;
+    esac
+}
 
 # 去掉首尾空白（[[:space:]]# 这种写法要 extendedglob，只在这个函数里打开）
 trim() {
@@ -84,7 +93,12 @@ while true; do
             print
             print -r -- "  ${C_DIM}${group}${C_RESET}"
         fi
-        print -r -- "  $(printf '%2d' $i)  $(pad "${parts[2]}" 16)${C_DIM}${parts[3]}${C_RESET}"
+        why=$(item_unavailable "${parts[2]}")
+        if [[ -n "$why" ]]; then
+            print -r -- "  ${C_DIM}$(printf '%2d' $i)  $(pad "${parts[2]}" 16)${why}${C_RESET}"
+        else
+            print -r -- "  $(printf '%2d' $i)  $(pad "${parts[2]}" 16)${C_DIM}${parts[3]}${C_RESET}"
+        fi
     done
     print
     print -r -- "   h  使用说明      q  退出"

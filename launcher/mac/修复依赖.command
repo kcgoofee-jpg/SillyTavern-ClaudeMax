@@ -6,7 +6,7 @@ explain "重新安装${ST_DIR:+酒馆和 }Claude 代理需要的程序库（npm 
 explain "  · 日志里提示 Cannot find module / 缺少依赖    · 更新代码之后启动失败"
 explain "不会动你的聊天记录、角色卡和设置。需要联网，约 1–2 分钟。"
 if [[ -n "$(our_pids $ST_PORT)$(our_pids $PROXY_PORT)" ]]; then
-    warn "酒馆或代理正在运行，安装完成后需要双击「重启酒馆」才会生效"
+    warn "酒馆或代理正在运行，安装完成后要在酒馆工具里选「重启酒馆」才会生效"
 fi
 if ! ask_yes "开始安装吗？"; then
     pause_end 0

@@ -36,24 +36,36 @@ else
 fi
 
 step "3/5 登录 Claude 订阅（Pro / Max）"
-check_login
-if (( WARN_COUNT > 0 )) && ask_yes "现在登录吗？（会打开浏览器授权，只需要一次）"; then
-    (cd "$PROXY_DIR" && node scripts/claude-cli.js auth login)
-    WARN_COUNT=0
+if [[ "$(login_state)" == yes* ]]; then
     check_login
+elif ask_yes "还没登录。现在登录吗？（会打开浏览器，用你的 Claude 账号授权，只需要一次）"; then
+    (cd "$PROXY_DIR" && node scripts/claude-cli.js auth login)
+    check_login
+else
+    warn "没有登录：代理能启动，但发消息会失败"
+    fix "以后在「酒馆工具」里选「登录 Claude」。"
 fi
 
 step "4/5 桌面快捷方式"
 shortcut="$HOME/Desktop/酒馆工具.command"
+MARK="# 酒馆工具菜单（转到仓库里的脚本"
+make_shortcut() {
+    local t="$LAUNCHER_DIR/酒馆工具.command"
+    print -r -- "#!/bin/zsh
+$MARK，仓库更新后自动跟着更新）
+t=${(q)t}
+[[ -f \"\$t\" ]] || { print \"找不到酒馆工具：\$t\"; print \"下载的文件夹被移动或删掉了。到新位置双击 launcher/mac/首次安装.command，会重新放一个快捷方式。\"; read -k 1 -s 2>/dev/null; exit 1; }
+exec /bin/zsh \"\$t\"" >"$shortcut" && chmod +x "$shortcut"
+}
 if [[ -f "$shortcut" ]] && grep -qF "$LAUNCHER_DIR/酒馆工具.command" "$shortcut"; then
     ok "桌面上已经有「酒馆工具」"
+elif [[ -f "$shortcut" ]] && grep -qF "$MARK" "$shortcut"; then
+    make_shortcut && ok "桌面上的「酒馆工具」指向旧位置，已经换成现在这个文件夹"
 elif [[ -e "$shortcut" ]]; then
     warn "桌面上已经有一个别的「酒馆工具.command」，没有覆盖"
     explain "  菜单本体在：$LAUNCHER_DIR/酒馆工具.command"
 elif ask_yes "在桌面放一个「酒馆工具」快捷方式吗？（平时双击它就行）"; then
-    print -r -- $'#!/bin/zsh\n# 酒馆工具菜单（转到仓库里的脚本，仓库更新后自动跟着更新）\nexec /bin/zsh "'"$LAUNCHER_DIR/酒馆工具.command"'"' >"$shortcut"
-    chmod +x "$shortcut"
-    ok "已放到桌面：酒馆工具"
+    make_shortcut && ok "已放到桌面：酒馆工具（以后别移动下载的这个文件夹；移动了就再运行一次首次安装）"
 fi
 
 step "5/5 启动"
@@ -66,7 +78,7 @@ elif (( have_tt )); then
     mac_tt_open
     explain "TauriTavern 里（只需第一次）："
     explain "  ① 扩展 → 安装扩展，地址填 https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax"
-    explain "  ② 打开 Claude Max 面板，点「一键连接」；弹出授权框时允许访问 127.0.0.1:8901"
+    explain "  ② 打开 Claude Max 面板，点「一键连接」；弹出授权框时允许访问 127.0.0.1:$PROXY_PORT"
 else
     warn "这台 Mac 上没找到 TauriTavern，也没找到酒馆（SillyTavern）"
     fix "推荐装 TauriTavern（桌面 App）：https://github.com/Darkatse/TauriTavern/releases ；装好后再双击本脚本。"
