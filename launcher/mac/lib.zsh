@@ -15,6 +15,12 @@
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
 zmodload zsh/datetime   # EPOCHSECONDS：等端口时按真实经过的时间算
+# Xcode 更新后还没同意许可协议时，/usr/bin 下的 git、python3 都会拒绝运行（整个工具箱跟着失灵）。
+# 这时让它们改用「命令行工具」里的同一套程序；自检会提示去同意许可。
+if [[ -z "$DEVELOPER_DIR" && -d /Library/Developer/CommandLineTools ]] && /usr/bin/git --version 2>&1 | grep -q license; then
+    export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+    XCODE_LICENSE_PENDING=1
+fi
 
 LAUNCHER_DIR=${${(%):-%x}:A:h}
 PROXY_DIR=${LAUNCHER_DIR:h:h}
@@ -307,6 +313,11 @@ self_check() {
         fix "到 https://nodejs.org 安装新版 LTS。"
     else
         ok "Node.js $nv"
+    fi
+
+    if [[ -n "$XCODE_LICENSE_PENDING" ]]; then
+        warn "Xcode 更新后还没同意许可协议：git、python3 暂时改用「命令行工具」里的，工具箱照常能用"
+        fix "有空时在「终端」运行 sudo xcodebuild -license accept（输一次 Mac 密码），或打开一次 Xcode 点同意。"
     fi
 
     # 2. 程序文件
