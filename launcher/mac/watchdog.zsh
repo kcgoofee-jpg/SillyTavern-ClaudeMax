@@ -77,5 +77,10 @@ while [[ -s "$LAN_KEY_FILE" ]]; do
         last_ip=$ip
     fi
     lid_tick
+    # 手机无线调试掉了就重连（手机同步、通知、遥控同步都靠它）
+    if [[ -s "$PROXY_DIR/launcher/phone.local" ]] && adb=$(find_adb); then
+        addr=$(<"$PROXY_DIR/launcher/phone.local")
+        "$adb" devices 2>/dev/null | grep -q "^$addr[[:space:]]*device" || "$adb" connect "$addr" >/dev/null 2>&1
+    fi
 done
 log_event "[守护] 手机模式已关闭，守护退出"
