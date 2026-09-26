@@ -715,7 +715,7 @@ hub_sync_args() {
     print -rn -- "${(pj:\0:)a}"
 }
 
-mac_tt_running() { pgrep -xq tauritavern; }
+mac_tt_running() { pgrep -qf '^/Applications/TauriTavern.app/Contents/MacOS/'; }  # 只认装在「应用程序」里的 TT（别的构建数据目录不同）
 # 正常退出 Mac 上的 TT（它开着时会把旧内容存回去）；10 秒没退出返回 1
 mac_tt_quit() {
     local i
