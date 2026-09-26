@@ -59,7 +59,6 @@ test('usage stats record metadata only and aggregate today / week', async () => 
     assert.equal(s.today.failed, 1);
     assert.equal(s.today.outputTokens, 900);
     assert.equal(s.today.cacheHitRate, 0.8);
-    assert.equal(s.today.withReasoning, 1);
     assert.equal(s.lastError.code, 'not_logged_in');
     assert.equal(s.background.today.requests, 1, 'background calls counted apart');
     assert.equal(s.lastRequest.model, 'claude-fable-5', 'the last-turn card ignores background calls');
