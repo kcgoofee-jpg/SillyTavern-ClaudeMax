@@ -661,3 +661,9 @@ body.cm-compact-qr #qr--bar:has(> .qr--buttons[id^="script_container_"]) {
 .claude-max .cm-btn-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0; }
 .claude-max .cm-btn-row .menu_button { margin: 0; padding: 4px 10px; font-size: 0.9em; }
 .claude-max pre.cm-log { max-height: 40vh; overflow: auto; white-space: pre-wrap; word-break: break-all; font-size: 11px; line-height: 1.4; padding: 6px; border-radius: 6px; background: rgba(0, 0, 0, 0.25); }
+
+/* 省电显示（面板「体检 → 性能」）：最新一楼以外，美化界面的动画只播一遍、不做毛玻璃 */
+body.cm-quiet #chat > .mes:not(.last_mes) *,
+body.cm-quiet #chat > .mes:not(.last_mes) *::before,
+body.cm-quiet #chat > .mes:not(.last_mes) *::after { animation-iteration-count: 1 !important; }
+body.cm-quiet #chat > .mes:not(.last_mes) * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }

@@ -114,6 +114,7 @@
         quietEffort: 'low',      // 后台请求（其他插件的生图 tag、总结等）的思考深度；'follow' = 跟随面板
         panelTab: 'reason',      // 面板上次打开的分页
         compactScriptButtons: true, // 输入栏上方的脚本按钮并排显示
+        quietRender: false,      // 省电显示：最新一楼以外，美化界面的动画只播一遍、不做毛玻璃
     };
 
     function getSettings() {
@@ -1302,6 +1303,45 @@
             checked: settings.checkupToast,
             onChange: (v) => { settings.checkupToast = v; save(); },
         }));
+
+        const perfTools = el('div', 'cm-section-tools');
+        perfTools.append(iconButton('fa-gauge-high', '测一次（约 4 秒）', () => showPerfDiag()));
+        pane.append(section('性能', perfTools));
+        pane.append(toggleRow({
+            id: 'claudeMaxQuietRender',
+            title: '省电显示',
+            desc: '最新一楼以外，美化界面的动画只播一遍、不做毛玻璃。',
+            more: '状态栏、选项栏、摘要这类美化界面每一楼都在循环播放动画、做毛玻璃模糊，楼一多，手机的网页渲染会一直占满一个核、发烫。打开后旧楼层的界面还在，只是停下来不动；最新一楼不受影响。实测（安卓 TauriTavern，70 楼）：配合酒馆助手「渲染深度」3，渲染进程 101% → 17%。',
+            checked: settings.quietRender,
+            onChange: (v) => { settings.quietRender = v; applyQuietRender(); save(); },
+        }));
+        const perfBox = el('div', 'cm-stats');
+        perfBox.id = 'claude_max_perf';
+        pane.append(perfBox);
+    }
+
+    function applyQuietRender() {
+        document.body.classList.toggle('cm-quiet', !!getSettings().quietRender);
+    }
+
+    async function showPerfDiag() {
+        const box = document.getElementById('claude_max_perf');
+        if (!box) return;
+        box.replaceChildren(el('small', 'cm-hint', '正在测（约 4 秒，别滑动）…'));
+        const r = await runPerfDiag();
+        const card = el('div', r.fps < 30 || r.topInfinite.length > 5 ? 'cm-last-error cm-tip' : 'cm-cache');
+        card.append(el('div', 'cm-last-error-title', `帧率 ${r.fps}/秒 · 一直在动的元素 ${r.topInfinite.reduce((n, [, c]) => n + c, 0)} 个 · 毛玻璃 ${r.backdropBlur} 个`));
+        card.append(el('small', 'cm-hint', `显示 ${r.floorsShown}/${r.chatLength} 楼 · 内嵌窗口 ${r.iframes} 个 · 页面元素 ${r.domNodes} 个 · 卡顿 ${r.longTasks} 次（${r.longTaskMs} ms）`));
+        const floors = Object.entries(r.perFloor)
+            .map(([f, t]) => [f, (t.infiniteAnimations ?? 0) * 3 + (t.iframes ?? 0) * 2 + (t.backdropBlur ?? 0), t])
+            .filter(([, w]) => w > 0).sort((a, b) => b[1] - a[1]).slice(0, 5);
+        for (const [f, , t] of floors) {
+            card.append(el('small', 'cm-hint', `${f === 'page' ? '聊天之外' : `第 ${f} 楼`}：循环动画 ${t.infiniteAnimations ?? 0} · 内嵌窗口 ${t.iframes ?? 0} · 毛玻璃 ${t.backdropBlur ?? 0}`));
+        }
+        if (!getSettings().quietRender && floors.length > 2) {
+            card.append(el('small', 'cm-hint cm-warn', '旧楼层还在播动画：打开下面的「省电显示」，并把酒馆助手的「渲染深度」设为 3 左右。'));
+        }
+        box.replaceChildren(card);
     }
 
     /** Tab 高级: grouped by what the switches affect. */
@@ -1743,5 +1783,6 @@
     eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, applyPresetRecommendation);
     if (eventTypes.APP_READY) eventSource.on(eventTypes.APP_READY, adoptUnrecordedReco);
     registerImageScore();
+    applyQuietRender();
     console.log(`[claude-max] UI extension loaded${IS_TAURI ? ' (TauriTavern mode)' : ''}`);
 })();
