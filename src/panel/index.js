@@ -1101,7 +1101,7 @@
                 if (mismatch) {
                     proxyState = 'warning'; // keeps the status card on screen until they match
                     setDot('warning');
-                    sub.textContent += ` · ${mismatch}`;
+                    sub.textContent = `${plan} 订阅 · ${mismatch}`; // the mismatch names both versions
                     const key = `${panelVersion}|${data.version}`;
                     if (warnedVersions !== key) {
                         warnedVersions = key;
