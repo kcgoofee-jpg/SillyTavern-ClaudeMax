@@ -7,7 +7,7 @@
 [![版本](https://img.shields.io/github/package-json/v/kcgoofee-jpg/SillyTavern-ClaudeMax?label=%E7%89%88%E6%9C%AC&color=0d0d0d)](https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax/releases)
 [![测试](https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax/actions/workflows/test.yml/badge.svg)](https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax/actions/workflows/test.yml)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A518-3c873a)](https://nodejs.org)
-[![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%C2%B7%20Android%20TauriTavern-555)](#安装)
+[![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%C2%B7%20Android%20TauriTavern-555)](#快速开始)
 [![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-AGPL--3.0-blue)](LICENSE)
 
 <img src="docs/island.svg" width="620" alt="灵动岛：思考中 → 写作中 → 完成（字数 · 用时 · 缓存）→ 体检提示 → 缩回小点">
@@ -33,15 +33,31 @@
 > [!WARNING]
 > 这不是 Anthropic 官方认可的用法，账号有被限制或封禁的可能。**使用前请先读[风险提示](#风险提示)。**
 
-## 需要什么
+## 快速开始
 
-- Claude **Pro 或 Max** 订阅
-- Node.js 18 或更高版本
-- SillyTavern 或 TauriTavern，和代理运行在同一台电脑上（目前只在 macOS 上实测过）
+先准备：Claude **Pro 或 Max** 订阅；代理跑在电脑上（目前只在 macOS 上实测过），酒馆 / TauriTavern 在同一台电脑，或同一个 Wi-Fi 下的安卓手机。
 
-## 安装
+| 你的情况 | 看这里 |
+| --- | --- |
+| Mac，用 TauriTavern 桌面版（最省事） | [Mac 一键安装](#mac-一键安装) |
+| Mac，用原版 SillyTavern（酒馆） | [Mac 一键安装](#mac-一键安装)，或[手动装进酒馆](#手动装进原版酒馆) |
+| 安卓手机上的 TauriTavern | 先在 Mac 上装好，再看[手机连 Mac](#phone) |
+| Windows | [Windows（实验）](#experimental) |
+| 只有安卓手机、没有电脑 | [Termux（实验）](#experimental) |
 
-### 原版 SillyTavern
+### Mac 一键安装
+
+1. 下载本仓库：右上角 **Code → Download ZIP** 解压；会用 git 的话 `git clone https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax`。
+   用原版酒馆的话，把解压出来的文件夹放在 `SillyTavern` 文件夹**旁边**（同一层），启动器会自动找到酒馆。
+2. 双击 `launcher/mac/首次安装.command`，一路按提示：检查 Node.js（没有会带你去装）→ 安装依赖 → 浏览器登录 Claude 订阅（只需一次）→ 桌面放一个「**酒馆工具**」→ 启动代理，打开 TauriTavern 或酒馆。
+   - 第一次双击提示「无法验证开发者」：在文件上**右键 → 打开**，再点「打开」（或「系统设置 → 隐私与安全性 → 仍要打开」）。只需一次。
+3. 在 TauriTavern / 酒馆里打开 **Claude Max** 面板，点 **一键连接**。
+   - TauriTavern：先「扩展 → 安装扩展」，地址填 `https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax`；第一次连接会弹授权框，允许访问 `127.0.0.1:8901`。
+   - 酒馆：面板会自动出现；没出现就强制刷新（Cmd+Shift+R）。
+
+以后只用桌面上的「酒馆工具」：启动、关闭、检查状态、手机连接、同步都在菜单里。
+
+### 手动装进原版酒馆
 
 1. 在酒馆的 `config.yaml` 里设置 `enableServerPlugins: true`。
 2. 在酒馆目录（有 `server.js` 的那一层）运行：
@@ -55,7 +71,7 @@
    - `npm run login` 会打开浏览器登录订阅账号，只需一次。
 3. 重启酒馆，强制刷新浏览器（Ctrl+F5）。面板会自动安装。
 
-### TauriTavern，或单独运行代理
+### 只跑代理（命令行）
 
 ```bash
 git clone https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax
@@ -65,9 +81,11 @@ npm run login
 npm start
 ```
 
-代理要一直开着。面板从「扩展 → 安装扩展」安装，地址填本仓库。TauriTavern 第一次连接时会弹出授权框，允许访问 `127.0.0.1:8901` 即可。
+代理要一直开着，地址 `http://127.0.0.1:8901/v1`。面板从「扩展 → 安装扩展」安装，地址填本仓库。
 
-macOS 用户双击 `launcher/mac/酒馆工具.command` 打开菜单，输入编号回车（说明见 `launcher/使用说明.txt`），各项也能单独双击：
+## 酒馆工具（Mac 菜单）
+
+桌面上的「酒馆工具」（或 `launcher/mac/酒馆工具.command`）打开菜单，输入编号回车（说明见 `launcher/使用说明.txt`），各项也能单独双击：
 
 | 分组 | 菜单项 |
 | --- | --- |
@@ -196,9 +214,11 @@ macOS 用户双击 `launcher/mac/酒馆工具.command` 打开菜单，输入编�
 
 </details>
 
+<a id="phone"></a>
 <details>
 <summary>手机上的 TauriTavern 连 Mac 的代理（同一 Wi-Fi）</summary>
 
+0. 手机装 [TauriTavern](https://github.com/Darkatse/TauriTavern/releases)（安卓 apk），「扩展 → 安装扩展」填 `https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax`。Mac 上先按[Mac 一键安装](#mac-一键安装)装好代理。
 1. Mac 上菜单选「手机模式」（电脑模式 ↔ 手机模式切换）。它会生成一个访问密码，让代理接受局域网请求，并显示代理地址（`http://<Mac 的局域网 IP>:8901/v1`）和密码。
 2. 手机 TauriTavern → Claude Max 面板顶部状态卡（连不上时出现）或「更多 → 调试选项 → 连接」：「代理地址」「访问密码」分别填上，点「重新连接」。用「手机同步」同步过的话已经填好。
 3. Mac 首次弹出「允许 node 接受传入连接」时点允许。
@@ -219,12 +239,18 @@ macOS 用户双击 `launcher/mac/酒馆工具.command` 打开菜单，输入编�
 
 </details>
 
+<a id="experimental"></a>
 <details>
 <summary>实验性：Windows 与安卓 Termux 脚本（未经实测）</summary>
 
 以下脚本只做过语法检查，没有在真机上运行过，可能需要自己排错。欢迎反馈。
 
-- **Windows**：`launcher/windows/` 里双击 `启动酒馆.bat`、`检查状态.bat` 等。自定义路径写在 `launcher/config.local.ps1`，例如 `$ST_DIR = 'D:\SillyTavern'`。
+- **Windows**：
+  1. 装 [Node.js](https://nodejs.org) LTS（安装时保持默认选项）。
+  2. 下载本仓库（Code → Download ZIP）解压；用原版酒馆的话放在 `SillyTavern` 文件夹旁边。
+  3. 打开 `launcher\windows\`，双击 `登录 Claude.bat`（浏览器登录订阅，只需一次），再双击 `启动酒馆.bat`：它会先自检，缺依赖时问你要不要装。
+  4. TauriTavern / 酒馆里打开 Claude Max 面板，点「一键连接」（TauriTavern 先「扩展 → 安装扩展」填本仓库地址）。
+  其余：`关闭酒馆.bat`、`检查状态.bat`、`开机自动启动.bat` 等。自定义路径写在 `launcher\config.local.ps1`，例如 `$ST_DIR = 'D:\SillyTavern'`。
 - **安卓 Termux**：Claude CLI 没有安卓版，脚本会在 Termux 里装一个 Debian 子系统（约 100MB），代理跑在里面，酒馆照常跑在 Termux 里。
   ```bash
   curl -fsSLO https://raw.githubusercontent.com/kcgoofee-jpg/SillyTavern-ClaudeMax/main/launcher/termux/claude-max.sh
