@@ -116,10 +116,10 @@ export async function readState() {
 /** 要处理的问题，每条带一个修复动作（没有就只提示）。 */
 export function problems(s) {
     const out = [];
-    if (!s.proxy) out.push({ text: '代理没在运行', fix: 'start', fixLabel: '启动' });
+    if (!s.proxy) out.push({ text: '代理没在运行', fix: 'start', fixLabel: '启动代理' });
     else if (s.loggedIn === false) out.push({ text: 'Claude 还没登录', fix: 'login', fixLabel: '登录' });
     if (s.proxy && s.proxyVersion && s.proxyVersion !== VERSION) {
-        out.push({ text: `代理还在跑 v${s.proxyVersion}（本地代码 v${VERSION}）`, fix: 'restart', fixLabel: '重启' });
+        out.push({ text: `代理还在跑 v${s.proxyVersion}（本地代码 v${VERSION}）`, fix: 'restart', fixLabel: '重启代理' });
     }
     if (s.phoneMode && !s.watchdog && OS === 'mac') out.push({ text: '手机模式的守护没在运行', fix: 'phone-mode', fixLabel: '修复' });
     if (s.phone === 'unauthorized') out.push({ text: '手机上还没允许这台电脑调试', fixLabel: '在手机上点「允许」' });
@@ -136,10 +136,10 @@ export function screens(s) {
         title: '首页',
         primary: { id: 'start', label: s.proxy ? openLabel : `启动代理${s.stManaged ? '和酒馆' : ''}` },
         rows: [[
-            { key: '1', id: 'restart', label: '重启' },
-            { key: '2', id: 'stop', label: '关闭' },
+            { key: '1', id: 'restart', label: s.stManaged ? '重启代理和酒馆' : '重启代理' },
+            { key: '2', id: 'stop', label: s.stManaged ? '关闭代理和酒馆' : '关闭代理' },
             { key: '3', id: 'phone-sync', label: '手机同步', why: mac ? null : MAC_ONLY },
-            { key: '4', id: 'check', label: '检查' },
+            { key: '4', id: 'check', label: '检查状态' },
         ], [
             { key: '5', sub: 'phone', label: '手机 >' },
             ...(mac && s.hasComfy ? [{ key: '6', sub: 'comfy', label: '生图 >' }] : []),

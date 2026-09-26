@@ -6,7 +6,7 @@
     "js": "src/panel/index.js",
     "css": "src/panel/style.css",
     "author": "LukaTheHero, kcgoofee-jpg",
-    "version": "3.0.0",
+    "version": "3.0.1",
     "homePage": "https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax",
     "auto_update": false
 }

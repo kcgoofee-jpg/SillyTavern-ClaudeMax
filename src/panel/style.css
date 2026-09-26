@@ -672,6 +672,8 @@ body.cm-quiet #chat > .mes:not(.last_mes) * { backdrop-filter: none !important; 
 
 /* ── 灵动岛 (lib/island.js): lives at the top of the CCST panel ── */
 .cm-island-slot { display: flex; justify-content: center; margin: 2px 0 8px; min-height: 20px; }
+/* 空闲时（只剩一个点）整块不占位置：在线与否标题旁的点已经表示了，只在生成、完成、有提示时出现 */
+.cm-island-slot:has(> .cm-island[data-shape="dot"]) { display: none; }
 .cm-island {
     position: relative;
     overflow: hidden;
