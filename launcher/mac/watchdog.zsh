@@ -72,15 +72,14 @@ while [[ -s "$LAN_KEY_FILE" ]]; do
         if [[ -z "$ip" ]]; then
             notify "Mac 断开了 Wi-Fi" "手机暂时连不上代理，Mac 重新连上 Wi-Fi 后会再通知。"
         else
-            notify "Mac 的地址变了" "新的代理地址：http://$ip:$PROXY_PORT/v1 。手机 Claude Max 面板「高级 → 连接」里改成这个地址。"
+            notify "Mac 的地址变了" "新的代理地址：http://$ip:$PROXY_PORT/v1 。手机上 Claude Max 面板顶部的状态卡（连不上时出现）里改成这个地址，或在 Mac 上跑一次「手机同步」自动改好。"
         fi
         last_ip=$ip
     fi
     lid_tick
-    # 手机无线调试掉了就重连（手机同步、通知、遥控同步都靠它）
-    if [[ -s "$PROXY_DIR/launcher/phone.local" ]] && adb=$(find_adb); then
-        addr=$(<"$PROXY_DIR/launcher/phone.local")
-        "$adb" devices 2>/dev/null | grep -q "^$addr[[:space:]]*device" || "$adb" connect "$addr" >/dev/null 2>&1
+    # 手机一台都没连着（USB 和无线调试都没有）时，按上次的无线调试地址重连（手机同步、遥控同步都靠它）
+    if [[ -s "$PROXY_DIR/launcher/phone.local" && -z "$(phone_serial)" ]] && adb=$(find_adb); then
+        "$adb" connect "$(<"$PROXY_DIR/launcher/phone.local")" >/dev/null 2>&1
     fi
 done
 log_event "[守护] 手机模式已关闭，守护退出"

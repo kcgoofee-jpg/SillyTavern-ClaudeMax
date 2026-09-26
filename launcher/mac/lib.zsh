@@ -182,13 +182,13 @@ diagnose_log() {
     _diag 'Not logged in|Please run /login|authentication_failed|invalid_token|token has expired' \
         "Claude 订阅未登录或登录已失效" \
         "双击「登录 Claude」重新登录。"
-    _diag 'rate limit|429|Too many requests' \
+    _diag 'rate.limit|(^|[^0-9.,k])429([^0-9.,k]|$)|Too many requests' \
         "触发了订阅额度限流（请求太频繁或额度用完）" \
         "稍等几分钟再试；在酒馆的 Claude Max 面板里可以看到额度重置时间。"
     _diag 'Extra Usage|out of extra usage' \
         "1M 上下文需要额外用量，当前套餐不可用" \
         "改用不带「(1M context)」的模型。"
-    _diag 'YAMLException|config\.yaml' \
+    _diag 'YAMLException|config\.yaml.*(error|invalid|fail)|(error|fail).*config\.yaml' \
         "酒馆配置文件 config.yaml 格式有误" \
         "检查 $ST_DIR/config.yaml 最近的改动。"
 
@@ -582,6 +582,11 @@ health_check() {
             diagnose_log "$PROXY_LOG" "代理"
         elif [[ "${f[3]}" == yes ]]; then
             ok "代理正常（v${f[2]}，$(plan_name "${f[4]}") 订阅，凭据来自${${f[5]/keychain/钥匙串}/file/凭据文件}）"
+            local repo_v=$(node -p "require('$PROXY_DIR/package.json').version" 2>/dev/null)
+            if [[ -n "$repo_v" && "${f[2]}" != "$repo_v" ]]; then
+                warn "代理还在跑旧版本 v${f[2]}，程序已经更新到 v$repo_v"
+                fix "没在生成回复时双击「重启酒馆」（手机模式下代理会自动重启，手机不用动）。"
+            fi
         else
             warn "代理正常，但没有找到 Claude 登录凭据"
             fix "双击「登录 Claude」。"

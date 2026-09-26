@@ -668,27 +668,23 @@ body.cm-quiet #chat > .mes:not(.last_mes) *::before,
 body.cm-quiet #chat > .mes:not(.last_mes) *::after { animation-iteration-count: 1 !important; }
 body.cm-quiet #chat > .mes:not(.last_mes) * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
 
-/* ── 灵动岛 (lib/island.js) ── */
+/* ── 灵动岛 (lib/island.js): lives at the top of the Claude Max panel ── */
+.cm-island-slot { display: flex; justify-content: center; margin: 2px 0 8px; min-height: 20px; }
 .cm-island {
-    position: fixed;
-    left: 50%;
-    bottom: 84px;
-    transform: translateX(-50%);
-    z-index: 3000;
+    position: relative;
     overflow: hidden;
     background: #0d0d0d;
     color: #f4f4f2;
     font: 500 13px/1.3 -apple-system, BlinkMacSystemFont, "Geist", "PingFang SC", "Noto Sans SC", sans-serif;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, .28);
-    pointer-events: none;
+    box-shadow: 0 4px 14px rgba(0, 0, 0, .22);
     user-select: none;
     -webkit-user-select: none;
     contain: layout paint;
 }
 .cm-island[data-shape="dot"] { border-radius: 99px; box-shadow: none; background: transparent; }
 .cm-island[data-shape="pill"] { border-radius: 99px; }
-.cm-island[data-shape="card"] { border-radius: 20px; max-width: min(92vw, 380px); }
-.cm-island.cm-isl-tappable { pointer-events: auto; cursor: pointer; }
+.cm-island[data-shape="card"] { border-radius: 20px; max-width: 100%; }
+.cm-island.cm-isl-tappable { cursor: pointer; }
 .cm-island-body { position: relative; }
 .cm-isl-ghost { position: absolute; inset: 0; pointer-events: none; }
 .cm-isl-content { display: flex; align-items: center; gap: 8px; white-space: nowrap; }

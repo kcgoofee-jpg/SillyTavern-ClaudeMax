@@ -57,18 +57,37 @@
     import(new URL('./lib/preset-reco.js', import.meta.url).href)
         .then((m) => { presetReco = m; adoptUnrecordedReco(); })
         .catch(() => { /* preset recommendations unavailable */ });
-    // 灵动岛 (lib/island.js): status and notices in one morphing pill. Without
-    // it, notices fall back to toasts.
+    // 灵动岛 (lib/island.js): one morphing pill at the top of the Claude Max
+    // panel (never over the chat). It shows the reply being generated and,
+    // while the panel is open, the notices; with the panel closed notices are
+    // ordinary toasts.
     let island = null;
     import(new URL('./lib/island.js', import.meta.url).href)
-        .then((m) => { island = m.createIsland(document); island.set({ online: proxyOnline }); })
-        .catch(() => { /* toasts instead */ });
+        .then((m) => {
+            island = m.createIsland(document);
+            island.set({ online: proxyOnline });
+            island.mount(document.getElementById('claude_max_island_slot'));
+        })
+        .catch(() => { /* toasts only */ });
 
     const TOAST_KIND = { ok: 'success', info: 'info', warn: 'warning', bad: 'error' };
-    /** One notice: the island when it's there, a toast otherwise. */
+    const toastByKey = {};
+    /** One notice: the island when the panel is open, a toast otherwise. */
     function notify(tone, title, text = '', opts = {}) {
-        if (island) return island.notice({ tone, title, text, ms: opts.ms ?? 6000, replace: opts.replace, onDismiss: opts.onDismiss });
-        return toastr?.[TOAST_KIND[tone]]?.(text, `Claude Max · ${title}`, { timeOut: opts.ms ?? 6000, extendedTimeOut: opts.ms === 0 ? 0 : 1000 });
+        const ms = opts.ms ?? 6000;
+        if (opts.replace && toastByKey[opts.replace]) {
+            toastr?.clear?.(toastByKey[opts.replace]);
+            delete toastByKey[opts.replace];
+        }
+        if (island?.visible) return island.notice({ tone, title, text, ms, replace: opts.replace, onDismiss: opts.onDismiss });
+        island?.clear(opts.replace);
+        const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+        const t = toastr?.[TOAST_KIND[tone]]?.(esc(text).replace(/\n/g, '<br>'), `Claude Max · ${esc(title)}`, {
+            timeOut: ms, extendedTimeOut: ms === 0 ? 0 : 1000, escapeHtml: false, preventDuplicates: true,
+            onCloseClick: opts.onDismiss,
+        });
+        if (opts.replace && t) toastByKey[opts.replace] = t;
+        return t;
     }
 
     // Recommendations applied by v2.5.0 left no record, so switching away
@@ -1808,7 +1827,10 @@
         const chips = el('div', 'cm-glance');
         chips.id = 'claude_max_glance';
         chips.showTab = show;
-        content.append(buildStatusBlock(), chips, bar, ...TABS.map(([k]) => panes[k]));
+        const islandSlot = el('div', 'cm-island-slot');
+        islandSlot.id = 'claude_max_island_slot';
+        content.append(buildStatusBlock(), islandSlot, chips, bar, ...TABS.map(([k]) => panes[k]));
+        island?.mount(islandSlot);
         show(TABS.some(([k]) => k === settings.panelTab) ? settings.panelTab : 'reason');
         renderConnect();
         renderGlance();
