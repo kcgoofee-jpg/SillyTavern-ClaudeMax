@@ -57,6 +57,19 @@
     import(new URL('./lib/preset-reco.js', import.meta.url).href)
         .then((m) => { presetReco = m; adoptUnrecordedReco(); })
         .catch(() => { /* preset recommendations unavailable */ });
+    // 灵动岛 (lib/island.js): status and notices in one morphing pill. Without
+    // it, notices fall back to toasts.
+    let island = null;
+    import(new URL('./lib/island.js', import.meta.url).href)
+        .then((m) => { island = m.createIsland(document); island.set({ online: proxyOnline }); })
+        .catch(() => { /* toasts instead */ });
+
+    const TOAST_KIND = { ok: 'success', info: 'info', warn: 'warning', bad: 'error' };
+    /** One notice: the island when it's there, a toast otherwise. */
+    function notify(tone, title, text = '', opts = {}) {
+        if (island) return island.notice({ tone, title, text, ms: opts.ms ?? 6000, replace: opts.replace, onDismiss: opts.onDismiss });
+        return toastr?.[TOAST_KIND[tone]]?.(text, `Claude Max · ${title}`, { timeOut: opts.ms ?? 6000, extendedTimeOut: opts.ms === 0 ? 0 : 1000 });
+    }
 
     // Recommendations applied by v2.5.0 left no record, so switching away
     // couldn't undo them. If the active preset's recommendation is in effect
@@ -114,7 +127,8 @@
         quietEffort: 'low',      // 后台请求（其他插件的生图 tag、总结等）的思考深度；'follow' = 跟随面板
         panelTab: 'reason',      // 面板上次打开的分页
         compactScriptButtons: true, // 输入栏上方的脚本按钮并排显示
-        quietRender: false,      // 省电显示：最新一楼以外，美化界面的动画只播一遍、不做毛玻璃
+        quietRender: 'auto',     // 省电显示：'auto'（手机 / TauriTavern 上开）| 'on' | 'off'
+        checkupMuted: {},        // 体检提示被点掉的次数（按问题类型）；两次后不再弹
     };
 
     function getSettings() {
@@ -251,7 +265,7 @@
         const parts = [];
         if (applied.length) parts.push(`按预设「${preset}」的推荐调整：${applied.map((k) => PRESET_FIELDS[k].label).join('、')}`);
         if (restored.length) parts.push(`恢复上一个预设改动过的：${restored.map((k) => PRESET_FIELDS[k].label).join('、')}`);
-        toastr?.info?.(`${parts.join('；')}。`, 'Claude Max', { timeOut: 8000 });
+        notify('info', `预设「${preset}」`, `${parts.join('；')}。`, { ms: 8000 });
     }
 
 
@@ -318,7 +332,7 @@
             last.gen_finished = new Date(kept.at).toISOString();
             ctx.updateMessageBlock?.(i, last);
             await ctx.saveChat?.();
-            toastr?.success?.(`第 ${i} 楼的回复刚才没存上，已从代理补回（${text.length} 字）。`, 'Claude Max · 已补回', { timeOut: 8000 });
+            notify('ok', `第 ${i} 楼已补回`, `刚才没存上，从代理取回 ${text.length} 字`, { ms: 8000 });
         } catch { /* proxy unreachable: try again next time */ } finally {
             recovering = false;
         }
@@ -331,7 +345,9 @@
         if (quiet) lines.push('  purpose: quiet');
         if (effort !== 'auto') lines.push(`  effort: ${effort}`);
         lines.push(`  thinking: ${settings.thinking}`);
-        lines.push(`  show_reasoning: ${settings.showReasoning}`);
+        // Follows ST's「显示模型思维」; a preset can still turn it off.
+        const stShows = SillyTavern.getContext().chatCompletionSettings?.show_thoughts !== false;
+        lines.push(`  show_reasoning: ${settings.showReasoning && stShows}`);
         lines.push(`  identity_mode: ${settings.identityMode}`);
         lines.push(`  use_resume: ${settings.useResume}`);
         lines.push(`  system_placement: ${settings.inlineSystem ? 'inline' : 'hoist'}`);
@@ -573,9 +589,24 @@
         const toastKey = `${currentCharKey()}|${r.issues.map((i) => i.code).sort().join(',')}`;
         if (!r.issues.length) lastToastKey = '';
         const always = r.issues.some((i) => i.code === 'flashback');
-        if (toast && r.issues.length && settings.checkupToast && (always || toastKey !== lastToastKey)) {
+        // Tapping a check-up notice away twice mutes that kind of issue (the
+        // 体检 tab still lists it).
+        const muted = settings.checkupMuted ?? {};
+        const loud = r.issues.filter((i) => (muted[i.code] ?? 0) < 2);
+        if (toast && loud.length && settings.checkupToast && (always || toastKey !== lastToastKey)) {
             lastToastKey = toastKey;
-            toastr?.warning?.(r.issues.map((i) => i.text).join('<br>'), 'Claude Max · 本轮体检', { timeOut: 9000, escapeHtml: false });
+            notify('warn', `本轮体检 · ${loud.length} 个问题`, loud.map((i) => i.text).join('\n'), {
+                ms: 9000,
+                replace: 'checkup',
+                onDismiss: () => {
+                    const m = { ...(getSettings().checkupMuted ?? {}) };
+                    for (const i of loud) m[i.code] = (m[i.code] ?? 0) + 1;
+                    getSettings().checkupMuted = m;
+                    saveSettingsDebounced();
+                    const now = loud.filter((i) => m[i.code] === 2);
+                    if (now.length) notify('info', '这类问题以后不再弹出', '体检页里照样能看到', { ms: 4000 });
+                },
+            });
         }
     }
 
@@ -771,6 +802,8 @@
             if (!res.ok || !data.ok) throw new Error(data.message || `HTTP ${res.status}`);
             const cred = data.credential ?? {};
             proxyState = cred.present ? 'online' : 'warning';
+            proxyOnline = true;
+            island?.set({ online: true });
             if (cred.present) {
                 setDot('online');
                 title.textContent = statusTitleOnline();
@@ -785,13 +818,15 @@
             }
         } catch {
             proxyState = 'offline';
+            proxyOnline = false;
+            island?.set({ online: false });
             setDot('offline');
             title.textContent = '连接不到代理';
             const where = normalizeEndpoint(getSettings().endpoint);
             const remote = !/\/\/(127\.0\.0\.1|localhost)[:/]/.test(where);
             sub.textContent = remote
                 ? `连不上 ${where}。确认那台电脑开着、代理在运行、「手机连接」已开启，并且两台设备连着同一个 Wi-Fi；换过 Wi-Fi 的话，那台电脑的地址可能变了。`
-                : `连不上 ${where}。Mac：双击「酒馆工具」选「启动酒馆」；其他系统在代理目录运行 npm start。改过代理端口的话，「高级 → 代理地址」要一起改。`;
+                : `连不上 ${where}。Mac：双击「酒馆工具」选「启动酒馆」；其他系统在代理目录运行 npm start。改过代理端口的话，在下面改代理地址。`;
         }
         renderConnect();
     }
@@ -800,7 +835,7 @@
 
     const HEARTBEAT_MS = 20000;
     let heartbeatDown = false;
-    let downToast = null;
+    let proxyOnline = null;
     async function heartbeat() {
         if (!getSettings().enabled || document.hidden) return;
         let up = false;
@@ -810,15 +845,14 @@
         } catch { /* down */ }
         if (up) diagIfAsked();
         quietSweep();
+        if (up !== proxyOnline) { proxyOnline = up; island?.set({ online: up }); }
         if (!up && !heartbeatDown) {
             heartbeatDown = true;
-            downToast = toastr?.warning?.('连不上 Claude 代理，正在每 20 秒自动重试。手机连 Mac 时：确认 Mac 没睡眠、两边在同一个 Wi-Fi。', 'Claude Max · 断线', { timeOut: 0, extendedTimeOut: 0, preventDuplicates: true });
+            notify('bad', '连不上代理，自动重试中', '手机连 Mac 时：确认 Mac 没睡眠、两边在同一个 Wi-Fi。', { ms: 0, replace: 'proxy' });
             refreshProxyStatus();
         } else if (up && heartbeatDown) {
             heartbeatDown = false;
-            if (downToast) toastr?.clear?.(downToast);
-            downToast = null;
-            toastr?.success?.('已重新连上 Claude 代理，可以继续发消息了。', 'Claude Max · 已恢复');
+            notify('ok', '代理已恢复', '可以继续发消息了', { ms: 3000, replace: 'proxy' });
             setTimeout(recoverKeptReply, 500);
             refreshProxyStatus();
         }
@@ -963,22 +997,68 @@
         try {
             const res = await fetchProxy('/stats', '/v1/usage/stats');
             if (!res.ok) return;
-            const last = (await res.json()).lastRequest;
+            const data = await res.json();
+            const last = data.lastRequest;
             if (!last || last.auxiliary || last.at <= lastNoticeAt || Date.now() - last.at > 5 * 60 * 1000) return;
             lastNoticeAt = last.at;
+            islandDone({ cache: data.lastCache?.hitPct ?? null, seconds: last.durationMs != null ? Math.round(last.durationMs / 1000) : null });
             const notices = last.notices ?? [];
             const fallback = notices.find((n) => n.startsWith('fallback:'))?.slice(9);
             if (fallback) {
-                toastr?.warning?.(`这条回复被 Claude 的安全机制中途截断，随后由 ${shortModel(fallback)} 重写，不是 ${shortModel(last.model)} 写的。文风可能不同，前半截没能撤回，格式可能错乱。`, 'Claude Max · 换了模型', { timeOut: 15000 });
+                notify('warn', `换了模型：${shortModel(fallback)} 重写`, `${shortModel(last.model)} 被安全机制中途截断。文风可能不同，格式可能错乱。`, { ms: 15000 });
             } else if (notices.includes('refusal') || last.finish === 'content_filter') {
-                toastr?.warning?.('这条回复被 Claude 的安全机制中途截断，结尾缺了内容（变量更新、状态栏可能报错）。可以重新生成，或回退一楼换个说法。', 'Claude Max · 回复被截断', { timeOut: 15000 });
+                notify('warn', '回复被安全机制截断', '结尾缺了内容（变量、状态栏可能报错）。重新生成，或回退一楼换个说法。', { ms: 15000 });
             } else if (last.finish === 'length') {
-                toastr?.warning?.('这条回复写到了最大长度被截断。调高酒馆的「最大回复长度」。', 'Claude Max · 回复被截断', { timeOut: 12000 });
+                notify('warn', '回复写到最大长度被截断', '调高酒馆的「最大回复长度」。', { ms: 12000 });
             }
             if (notices.includes('no-1m')) {
-                toastr?.info?.(`选的是 1M 上下文版，这一轮用的是普通版 ${shortModel(last.model).replace(/\s*1M$/, '')}（1M 额度不可用，一小时后再试）。`, 'Claude Max · 降为普通上下文', { timeOut: 12000 });
+                notify('info', '这一轮用的是普通上下文', `1M 额度不可用，用了 ${shortModel(last.model).replace(/\s*1M$/, '')}，一小时后再试 1M。`, { ms: 12000 });
             }
         } catch { /* proxy unreachable: the status block already says so */ }
+    }
+
+    // ── 灵动岛: follow the reply being generated ──
+    // Only for chat replies going to this proxy (not background requests or
+    // other connections). done → shows length, time and cache, then shrinks
+    // back to the dot.
+    let genActive = false;
+    let doneTimer = null;
+    function islandGenStart(type, _opts, dryRun) {
+        if (!island || dryRun || type === 'quiet' || type === 'impersonate' || !connectionInfo().connected) return;
+        genActive = true;
+        clearTimeout(doneTimer);
+        island.set({ kind: 'thinking', startedAt: Date.now(), chars: 0, cache: null, seconds: null });
+    }
+    let tokenAt = 0;
+    function islandToken(text) {
+        // Fires per token with the whole text so far (empty while the model is still thinking).
+        if (!genActive || Date.now() - tokenAt < 200) return;
+        tokenAt = Date.now();
+        const chars = String(text ?? '').replace(/<[^>]*>/g, '').replace(/\s+/g, '').length;
+        if (chars) island.set({ kind: 'writing', chars });
+    }
+    function islandGenEnd() {
+        if (!genActive) return;
+        genActive = false;
+        const chat = SillyTavern.getContext().chat ?? [];
+        const last = chat[chat.length - 1];
+        if (!last || last.is_user || last.is_system) { island.set({ kind: 'idle' }); return; }
+        const chars = last && !last.is_user ? String(last.mes ?? '').replace(/<[^>]*>/g, '').replace(/\s+/g, '').length : 0;
+        const startedAt = island.state.startedAt;
+        islandDone({ chars, seconds: startedAt ? Math.round((Date.now() - startedAt) / 1000) : null });
+    }
+    function islandStopped() {
+        if (!genActive) return;
+        genActive = false;
+        island.set({ kind: 'idle' });
+    }
+    function islandDone(patch) {
+        if (!island || genActive) return;
+        const wasDone = island.state.kind === 'done';
+        if (!wasDone && patch.chars == null) return; // stats for a turn we didn't watch
+        island.set({ ...patch, kind: 'done' });
+        clearTimeout(doneTimer);
+        doneTimer = setTimeout(() => island.set({ kind: 'idle' }), wasDone ? 2500 : 4000);
     }
 
     async function refreshStats() {
@@ -1045,7 +1125,7 @@
             el('small', 'cm-hint',
                 `最近的回复里有 <${tag}> 块，所以原生思考框是空的：模型已经在正文里思考，就不会再启用原生思考，而且这部分也会占用输出长度和生成时间。` +
                 `想把它收进折叠框：酒馆「用户设置 → 推理 → 自动解析」，前缀填 <${tag}>、后缀填 </${tag}>。` +
-                '想改用原生思考：关掉预设里的思维链条目，并在上面把「思考模式」设为「始终思考」。'),
+                '想改用原生思考：关掉预设里的思维链条目即可（需要时在「更多 → 调试选项」把思考模式设为「始终思考」）。'),
         );
     }
 
@@ -1156,7 +1236,10 @@
         connectBtn.addEventListener('click', () => connect(getSettings()));
         const connectHint = el('small', 'cm-hint cm-center', '自动切到 Chat Completion → Custom 并填好地址，连接后在模型下拉框里选择 Claude 模型。');
         connectHint.id = 'claude_max_connect_hint';
-        block.append(card, connectBtn, connectHint);
+        const conn = connectionFields(getSettings(), () => saveSettingsDebounced());
+        conn.id = 'claude_max_status_conn';
+        conn.hidden = true;
+        block.append(card, connectBtn, connectHint, conn);
         return block;
     }
 
@@ -1189,42 +1272,30 @@
         btn.hidden = connected;
         hint.hidden = connected;
         block.hidden = connected && proxyState === 'online';
+        const conn = document.getElementById('claude_max_status_conn');
+        if (conn) conn.hidden = proxyState !== 'offline';
         const title = document.getElementById('claude_max_status_title');
         if (title && proxyState === 'online') title.textContent = statusTitleOnline();
     }
 
-    /** Tab 推理: effort, one-shot effort, thinking mode, reasoning display. */
+    /** Tab 推理: one row — how hard to think (or not at all) — plus「仅下一轮」.
+     *  Everything else about thinking follows the preset or SillyTavern. */
     function buildReasonTab(pane, settings, save) {
         pane.append(segmented({
             label: '思考深度',
-            options: EFFORT_OPTIONS,
-            current: settings.effort,
-            onChange: (v) => { settings.effort = VALID_EFFORTS.includes(v) ? v : 'auto'; save(); renderGlance(); },
+            options: [...EFFORT_OPTIONS, { value: 'off', label: '不思考', hint: '不思考，回得最快。Fable、Opus 4.7 及以上（含 Opus 5 / 5.5）总会思考，对它们无效。' }],
+            current: settings.thinking === 'off' ? 'off' : settings.effort,
+            onChange: (v) => {
+                if (v === 'off') settings.thinking = 'off';
+                else {
+                    settings.effort = VALID_EFFORTS.includes(v) ? v : 'auto';
+                    if (settings.thinking === 'off') settings.thinking = 'adaptive';
+                }
+                save();
+                renderGlance();
+            },
         }));
         pane.append(oneShotEffortRow(settings));
-        pane.append(segmented({
-            label: '思考模式',
-            options: THINKING_OPTIONS,
-            current: settings.thinking,
-            onChange: (v) => { settings.thinking = VALID_THINKING.includes(v) ? v : 'adaptive'; save(); },
-        }));
-        pane.append(segmented({
-            label: '后台请求的思考深度',
-            options: [
-                { value: 'low', label: '低', hint: '其他插件在后台发的请求（柏宝绘写生图 tag、总结等）用「低」，快、省额度。不影响聊天回复。' },
-                { value: 'follow', label: '跟随上面', hint: '后台请求也用上面的思考深度（「仅下一轮」不会用到后台请求上）。' },
-            ],
-            current: settings.quietEffort === 'follow' ? 'follow' : 'low',
-            onChange: (v) => { settings.quietEffort = v === 'follow' ? 'follow' : 'low'; save(); },
-        }));
-        pane.append(toggleRow({
-            id: 'claudeMaxShowReasoning',
-            title: '显示思考过程',
-            desc: '在回复上方的折叠框里显示思考摘要。',
-            more: '需要同时开启酒馆的「显示模型思维」。只影响显示，思考内容不会进入聊天记录，也不会再发给模型。',
-            checked: settings.showReasoning,
-            onChange: (v) => { settings.showReasoning = v; save(); },
-        }));
         const cotTip = el('div', 'cm-last-error cm-tip');
         cotTip.id = 'claude_max_cot_tip';
         cotTip.hidden = true;
@@ -1297,25 +1368,20 @@
         });
         leakField.append(leakInput, el('small', 'cm-hint', '剧情揭示前不该出现的词，正文里出现时提醒。'));
         pane.append(leakField);
-        pane.append(toggleRow({
-            id: 'claudeMaxCheckupToast',
-            title: '发现问题时弹出提示',
-            desc: '关闭后只在这里显示结果。',
-            checked: settings.checkupToast,
-            onChange: (v) => { settings.checkupToast = v; save(); },
-        }));
+        const muted = Object.entries(settings.checkupMuted ?? {}).filter(([, n]) => n >= 2);
+        if (muted.length) {
+            const unmute = el('a', 'cm-more', `恢复 ${muted.length} 类已静音的体检提示`);
+            unmute.href = '#';
+            unmute.addEventListener('click', (e) => { e.preventDefault(); settings.checkupMuted = {}; save(); unmute.remove(); });
+            pane.append(el('small', 'cm-hint', '同一类问题的提示点掉两次就不再弹出。'), unmute);
+        }
 
         const perfTools = el('div', 'cm-section-tools');
         perfTools.append(iconButton('fa-gauge-high', '测一次（约 4 秒）', () => showPerfDiag()));
         pane.append(section('性能', perfTools));
-        pane.append(toggleRow({
-            id: 'claudeMaxQuietRender',
-            title: '省电显示',
-            desc: '最新一楼以外，美化界面的动画只播一遍、不做毛玻璃；聊天外的悬浮挂件也停下来。',
-            more: '状态栏、选项栏、摘要这类美化界面每一楼都在循环播放动画、做毛玻璃模糊，楼一多，手机的网页渲染会一直占满一个核、发烫。打开后旧楼层的界面还在，只是停下来不动；最新一楼和加载中的转圈不受影响。聊天外一直循环的悬浮挂件（比如睡觉的宠物球）会播完这一轮后停住。实测（安卓 TauriTavern，70 楼）：配合酒馆助手「渲染深度」3，渲染进程 101% → 17%。',
-            checked: settings.quietRender,
-            onChange: (v) => { settings.quietRender = v; applyQuietRender(); save(); },
-        }));
+        pane.append(el('small', 'cm-hint', quietOn()
+            ? '省电显示已开（手机上自动开）：最新一楼以外的美化动画只播一遍、不做毛玻璃，聊天外的悬浮挂件也停下来。'
+            : '省电显示没开（电脑上不需要，手机上自动开）。'));
         const perfBox = el('div', 'cm-stats');
         perfBox.id = 'claude_max_perf';
         pane.append(perfBox);
@@ -1327,8 +1393,14 @@
     // anything that looks like a loading indicator keep looping.
     const quieted = new Set();
     const QUIET_KEEP = /spin|load|typing|generat|progress/i;
+    const COARSE = window.matchMedia?.('(pointer: coarse)')?.matches ?? false;
+    /** 省电显示: on for phones and TauriTavern unless the debug switch says otherwise. */
+    function quietOn() {
+        const q = getSettings().quietRender;
+        return q === 'on' || (q !== 'off' && (IS_TAURI || COARSE));
+    }
     function quietSweep() {
-        if (!getSettings().quietRender || document.hidden) return;
+        if (!quietOn() || document.hidden) return;
         const docs = [document];
         for (const fr of document.querySelectorAll('iframe')) {
             try { if (fr.contentDocument && !fr.closest('#chat .last_mes')) docs.push(fr.contentDocument); } catch { /* cross-origin */ }
@@ -1337,7 +1409,7 @@
             for (const a of doc.getAnimations?.() ?? []) {
                 const t = a.effect?.target;
                 if (a.playState !== 'running' || a.effect?.getTiming?.().iterations !== Infinity || !t) continue;
-                if (doc === document && (t.closest?.('#chat .last_mes, #send_form, .claude-max') || !t.closest?.('body'))) continue;
+                if (doc === document && (t.closest?.('#chat .last_mes, #send_form, .claude-max, .cm-island') || !t.closest?.('body'))) continue;
                 if (QUIET_KEEP.test(`${a.animationName ?? ''} ${t.className?.baseVal ?? t.className ?? ''}`)) continue;
                 const done = Math.floor((a.currentTime ?? 0) / (a.effect.getTiming().duration || 1)) + 1;
                 a.effect.updateTiming({ iterations: done });
@@ -1346,7 +1418,7 @@
         }
     }
     function applyQuietRender() {
-        const on = !!getSettings().quietRender;
+        const on = quietOn();
         document.body.classList.toggle('cm-quiet', on);
         if (on) return quietSweep();
         for (const a of quieted) {
@@ -1369,13 +1441,12 @@
         for (const [f, , t] of floors) {
             card.append(el('small', 'cm-hint', `${f === 'page' ? '聊天之外' : `第 ${f} 楼`}：循环动画 ${t.infiniteAnimations ?? 0} · 内嵌窗口 ${t.iframes ?? 0} · 毛玻璃 ${t.backdropBlur ?? 0}`));
         }
-        if (!getSettings().quietRender && floors.length > 2) {
-            card.append(el('small', 'cm-hint cm-warn', '旧楼层还在播动画：打开下面的「省电显示」，并把酒馆助手的「渲染深度」设为 3 左右。'));
+        if (!quietOn() && floors.length > 2) {
+            card.append(el('small', 'cm-hint cm-warn', '旧楼层还在播动画：把酒馆助手的「渲染深度」设为 3 左右，或在「更多 → 调试选项」里把省电显示设为「开」。'));
         }
         box.replaceChildren(card);
     }
 
-    /** Tab 高级: grouped by what the switches affect. */
     // ── Mac（手机遥控）: the proxy's /v1/control routes (lib/control.js) ──
 
     async function controlFetch(path, body) {
@@ -1550,115 +1621,136 @@
         macBox.append(el('small', 'cm-hint', '正在读取…'));
         pane.append(macBox);
         setTimeout(refreshMac, 0);
-        pane.append(section('缓存与上下文'));
-        pane.append(toggleRow({
-            id: 'claudeMaxResume',
-            title: '会话续接',
-            desc: '聊天记录按真实多轮对话发送，能用上缓存。',
-            more: '角色区分更准，能用上提示缓存（更快、更省额度）。关闭后聊天记录会被压成一整段文字，只在排查问题时关闭。',
-            checked: settings.useResume,
-            onChange: (v) => { settings.useResume = v; save(); },
+
+        // Everything below decides itself (defaults, the preset's own
+        // recommendation, the proxy watching each chat). Kept for chasing
+        // problems, folded away so nobody has to think about it.
+        const dbg = el('details', 'cm-details cm-debug-box');
+        dbg.append(el('summary', null, '调试选项（排查问题时才需要）'));
+        dbg.append(el('small', 'cm-hint', '这些都会自动处理：缓存相关的默认开着，代理会按每个聊天的情况决定挪不挪；预设可以自带推荐值，切换预设时自动套用和恢复。'));
+        const add = (x) => dbg.append(x);
+
+        add(section('缓存与上下文'));
+        add(toggleRow({
+            id: 'claudeMaxResume', title: '会话续接', desc: '聊天记录按真实多轮对话发送，能用上缓存。',
+            more: '关闭后聊天记录会被压成一整段文字，只在排查问题时关闭。',
+            checked: settings.useResume, onChange: (v) => { settings.useResume = v; save(); },
         }));
-        pane.append(toggleRow({
-            id: 'claudeMaxInlineSystem',
-            title: '深度注入保持原位',
-            desc: '深度条目留在聊天记录里原来的位置。',
-            more: '预设里「深度 N」的条目、世界书深度条目、作者注释留在原位，和酒馆直连 Claude 的做法一致，靠近结尾的提醒才有效。关闭则全部提到系统提示词；那样只要其中一条变化（比如世界书被触发），整个系统提示词的缓存都会失效。',
-            checked: settings.inlineSystem,
-            onChange: (v) => { settings.inlineSystem = v; save(); },
+        add(toggleRow({
+            id: 'claudeMaxInlineSystem', title: '深度注入保持原位', desc: '深度条目留在聊天记录里原来的位置（预设可推荐）。',
+            more: '预设里「深度 N」的条目、世界书深度条目、作者注释留在原位，和酒馆直连 Claude 的做法一致。关闭则全部提到系统提示词；其中一条变化，整个系统提示词的缓存都会失效。',
+            checked: settings.inlineSystem, onChange: (v) => { settings.inlineSystem = v; save(); },
         }));
-        pane.append(toggleRow({
-            id: 'claudeMaxLoreTail',
-            title: '世界书变化部分移到末尾',
-            desc: '按关键词触发的世界书不再让整段聊天记录重写缓存。',
-            more: '代理会记住每个聊天里哪一块（如 <world_info>）每轮都在变，把它从系统提示词挪到本轮消息开头，原位留一句固定说明。系统提示词和之前的聊天记录每轮一字不差，能读缓存，只重写最近一轮。设定资料离本轮更近，但不再在系统提示词里。不想挪动就关掉，或用「统计」页把世界书设为常驻。',
-            checked: settings.loreTail,
-            onChange: (v) => { settings.loreTail = v; save(); },
+        add(toggleRow({
+            id: 'claudeMaxLoreTail', title: '世界书变化部分移到末尾', desc: '代理发现世界书每轮在变时，挪到本轮消息里。',
+            more: '系统提示词和之前的聊天记录每轮一字不差，能读缓存，只重写最近一轮。',
+            checked: settings.loreTail, onChange: (v) => { settings.loreTail = v; save(); },
         }));
-        pane.append(toggleRow({
-            id: 'claudeMaxFoldTail',
-            title: '发言后的注入并进发言',
-            desc: '角色卡排在你发言后面的条目不再让整段聊天记录重写缓存。',
-            more: '有些卡（如 MVU 变量卡）把变量状态、更新规则以「深度 0」放在你的发言后面，成为请求的最后一条；下一轮它就不在那里了，缓存永远对不上，每轮整段聊天记录都要重写。打开后，代理把这些条目接在你的发言末尾一起发，下一轮原样重放，只写最近一轮；和之前某轮一字不差的大段（固定规则）换成一句「同前」说明，变化的部分（变量状态）照发。内容和先后顺序不变。',
-            checked: settings.foldTail,
-            onChange: (v) => { settings.foldTail = v; save(); },
+        add(toggleRow({
+            id: 'claudeMaxFoldTail', title: '发言后的注入并进发言', desc: '代理发现卡在你发言后面放了条目时，并进发言里。',
+            more: 'MVU 这类变量卡把状态和规则以「深度 0」放在你的发言后面；并进发言后下一轮原样重放，缓存对得上。',
+            checked: settings.foldTail, onChange: (v) => { settings.foldTail = v; save(); },
         }));
-        pane.append(toggleRow({
-            id: 'claudeMaxTailBlock',
-            title: '实验：预设后置条目提前',
-            desc: '只对 Ny、图灵这类预设有用，默认关闭。',
-            more: '这类预设把大量规则放在聊天记录后面，每轮整段聊天记录都要重写缓存。打开后，代理把每轮一字不差的后置条目挪到对话最前面（内容和顺序不变，末尾的 AI 预填留在原位），旧楼层就能命中缓存。代价是规则离回复更远，效果可能不同。',
-            checked: settings.tailBlockFront,
-            onChange: (v) => { settings.tailBlockFront = v; save(); },
+        add(toggleRow({
+            id: 'claudeMaxTailBlock', title: '实验：预设后置条目提前', desc: '只对 Ny、图灵这类预设有用，默认关闭。',
+            more: '把每轮一字不差的后置条目挪到对话最前面，旧楼层就能命中缓存；代价是规则离回复更远。',
+            checked: settings.tailBlockFront, onChange: (v) => { settings.tailBlockFront = v; save(); },
         }));
 
-        pane.append(section('调试'));
-        pane.append(toggleRow({
-            id: 'claudeMaxDebugDump',
-            title: '保存最近一次完整请求',
-            desc: '排查预设、世界书、缓存问题时打开，平时关闭。',
-            more: '把最近一次发给 Claude 的系统提示词和聊天记录存到代理目录 data/debug/（只存本机，每次覆盖，上一份另存为 previous）。',
-            checked: settings.debugDump,
-            onChange: (v) => { settings.debugDump = v; save(); },
+        add(section('思考'));
+        add(segmented({
+            label: '思考模式',
+            options: THINKING_OPTIONS,
+            current: settings.thinking,
+            onChange: (v) => { settings.thinking = VALID_THINKING.includes(v) ? v : 'adaptive'; save(); },
+        }));
+        add(segmented({
+            label: '后台请求的思考深度',
+            options: [
+                { value: 'low', label: '低', hint: '其他插件在后台发的请求（生图 tag、总结等）用「低」，快、省额度。' },
+                { value: 'follow', label: '跟随', hint: '后台请求也用「推理」页的思考深度。' },
+            ],
+            current: settings.quietEffort === 'follow' ? 'follow' : 'low',
+            onChange: (v) => { settings.quietEffort = v === 'follow' ? 'follow' : 'low'; save(); },
+        }));
+        add(toggleRow({
+            id: 'claudeMaxShowReasoning', title: '显示思考过程', desc: '默认跟随酒馆的「显示模型思维」；关掉则总是不显示。',
+            checked: settings.showReasoning, onChange: (v) => { settings.showReasoning = v; save(); },
+        }));
+        add(toggleRow({
+            id: 'claudeMaxIdentity', title: '身份模式', desc: '角色扮演建议关闭（预设可推荐）。',
+            more: '在角色卡前加上 Claude Code 官方前言，模型能说出自己的型号，但多耗 token，带点编程助手的味道。',
+            checked: settings.identityMode, onChange: (v) => { settings.identityMode = v; save(); },
+        }));
+
+        add(section('显示'));
+        add(segmented({
+            label: '省电显示',
+            options: [
+                { value: 'auto', label: '自动', hint: '手机和 TauriTavern 上开，电脑上关。' },
+                { value: 'on', label: '开', hint: '最新一楼以外的美化动画只播一遍、不做毛玻璃，聊天外的悬浮挂件也停下来。' },
+                { value: 'off', label: '关', hint: '动画照常循环。' },
+            ],
+            current: ['on', 'off'].includes(settings.quietRender) ? settings.quietRender : 'auto',
+            onChange: (v) => { settings.quietRender = v; applyQuietRender(); save(); },
+        }));
+        add(toggleRow({
+            id: 'claudeMaxCheckupToast', title: '体检发现问题时提示', desc: '同一类问题点掉两次后自动不再提示。',
+            checked: settings.checkupToast, onChange: (v) => { settings.checkupToast = v; save(); },
+        }));
+        add(toggleRow({
+            id: 'claudeMaxCompactButtons', title: '输入栏脚本按钮并排', desc: '酒馆助手的脚本按钮排成一行。',
+            checked: settings.compactScriptButtons, onChange: (v) => { settings.compactScriptButtons = v; save(); applyCompactButtons(); },
+        }));
+
+        add(section('请求'));
+        add(toggleRow({
+            id: 'claudeMaxDebugDump', title: '保存最近一次完整请求', desc: '存到代理目录 data/debug/（只存本机，每次覆盖）。',
+            checked: settings.debugDump, onChange: (v) => { settings.debugDump = v; save(); },
         }));
         const debugBtn = el('div', 'menu_button cm-connect cm-connect-quiet');
         debugBtn.append(el('i', 'fa-solid fa-magnifying-glass'), document.createTextNode(' 查看实际发给模型的内容'));
         debugBtn.addEventListener('click', showDebugRequest);
-        pane.append(debugBtn);
+        add(debugBtn);
 
-        pane.append(section('连接'));
+        add(section('连接'));
         const info = el('small', 'cm-hint');
         info.id = 'claude_max_proxy_info';
-        pane.append(info);
+        add(info);
+        add(connectionFields(settings, save));
+        pane.append(dbg);
+        pane.append(usageNotes());
+    }
+
+    /** Proxy address + access key. Shown in the status card while the proxy
+     *  can't be reached, and in the debug options. */
+    function connectionFields(settings, save) {
+        const box = el('div', 'cm-conn-fields');
         const endpointField = el('div', 'cm-field');
         endpointField.append(el('div', 'cm-field-label', '代理地址'));
         const endpointInput = el('input', 'text_pole');
         endpointInput.type = 'text';
         endpointInput.value = settings.endpoint;
         endpointInput.placeholder = DEFAULT_ENDPOINT;
-        endpointInput.addEventListener('input', () => {
-            settings.endpoint = endpointInput.value || DEFAULT_ENDPOINT;
-            save();
-        });
-        endpointField.append(endpointInput, el('small', 'cm-hint', `默认 ${DEFAULT_ENDPOINT}。改了代理端口时同步改这里，再点下面的重新连接。`));
-        pane.append(endpointField);
-        const keyFieldBox = el('div', 'cm-field');
-        keyFieldBox.append(el('div', 'cm-field-label', '访问密码（手机连 Mac 时填）'));
+        endpointInput.addEventListener('input', () => { settings.endpoint = endpointInput.value || DEFAULT_ENDPOINT; save(); });
+        endpointField.append(endpointInput, el('small', 'cm-hint', `默认 ${DEFAULT_ENDPOINT}。手机连 Mac：填 Mac「手机连接」窗口显示的地址（手机同步会自动填好）。`));
+        const keyField = el('div', 'cm-field');
+        keyField.append(el('div', 'cm-field-label', '访问密码'));
         const keyInput = el('input', 'text_pole');
         keyInput.type = 'password';
         keyInput.autocomplete = 'off';
         keyInput.value = settings.accessKey ?? '';
         keyInput.placeholder = '在本机用时留空';
-        keyInput.addEventListener('input', () => {
-            settings.accessKey = keyInput.value.trim();
-            save();
-        });
-        keyFieldBox.append(keyInput, el('small', 'cm-hint', '手机上的 TauriTavern 连 Mac 上的代理时：代理地址填 Mac「手机连接」窗口显示的地址，这里填它显示的密码，再点重新连接。'));
-        pane.append(keyFieldBox);
+        keyInput.addEventListener('input', () => { settings.accessKey = keyInput.value.trim(); save(); });
+        keyField.append(keyInput);
         const reconnect = el('div', 'menu_button cm-connect cm-connect-quiet');
         reconnect.append(el('i', 'fa-solid fa-plug'), document.createTextNode(' 重新连接'));
         reconnect.addEventListener('click', () => connect(getSettings()));
-        pane.append(reconnect);
-        pane.append(section('其他'));
-        pane.append(toggleRow({
-            id: 'claudeMaxCompactButtons',
-            title: '输入栏脚本按钮并排',
-            desc: '酒馆助手的脚本按钮（如「角色图鉴」）排成一行，不再各占一行。',
-            checked: settings.compactScriptButtons,
-            onChange: (v) => { settings.compactScriptButtons = v; save(); applyCompactButtons(); },
-        }));
-        pane.append(toggleRow({
-            id: 'claudeMaxIdentity',
-            title: '身份模式',
-            desc: '角色扮演建议关闭。',
-            more: '在角色卡前加上 Claude Code 官方前言，模型能正确说出自己是哪个型号，但会多耗 token，并带点编程助手的味道。',
-            checked: settings.identityMode,
-            onChange: (v) => { settings.identityMode = v; save(); },
-        }));
-        pane.append(usageNotes());
+        box.append(endpointField, keyField, reconnect);
+        return box;
     }
 
-    const TABS = [['reason', '推理'], ['stats', '统计'], ['check', '体检'], ['adv', '高级']];
+    const TABS = [['reason', '推理'], ['stats', '统计'], ['check', '体检'], ['adv', '更多']];
 
     function addExtensionSettings(settings) {
         const container = document.getElementById('extensions_settings') ?? document.body;
@@ -1749,7 +1841,7 @@
                     if (m.is_user || m.is_system) continue;
                     m.extra = { ...(m.extra ?? {}), cm_img_score: n };
                     await c.saveChat?.();
-                    toastr?.success?.(`第 ${i} 楼的图：${n} 分`, 'Claude Max · 图分', { timeOut: 3000 });
+                    notify('ok', `第 ${i} 楼的图：${n} 分`, '', { ms: 2500 });
                     return String(n);
                 }
                 toastr?.warning?.('还没有 AI 回复', 'Claude Max');
@@ -1782,6 +1874,8 @@
     const settings = getSettings();
     // v2.10 dropped the「附加到请求」switch; nobody should be stuck with it off.
     settings.enabled = true;
+    // v2.23: 省电显示 decides itself; the old on/off switch becomes「自动」.
+    if (typeof settings.quietRender === 'boolean') settings.quietRender = 'auto';
     applyCompactButtons();
     addExtensionSettings(settings);
     refreshProxyStatus();
@@ -1812,6 +1906,11 @@
     eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED ?? eventTypes.MESSAGE_RECEIVED, () => setTimeout(noticeLastTurn, 400));
     eventSource.on(eventTypes.CHAT_CHANGED, refreshIfOpen);
     eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, applyPresetRecommendation);
+    if (eventTypes.GENERATION_STARTED) eventSource.on(eventTypes.GENERATION_STARTED, islandGenStart);
+    if (eventTypes.STREAM_TOKEN_RECEIVED) eventSource.on(eventTypes.STREAM_TOKEN_RECEIVED, islandToken);
+    eventSource.on(eventTypes.MESSAGE_RECEIVED, () => setTimeout(islandGenEnd, 50));
+    if (eventTypes.GENERATION_STOPPED) eventSource.on(eventTypes.GENERATION_STOPPED, islandStopped);
+    if (eventTypes.GENERATION_ENDED) eventSource.on(eventTypes.GENERATION_ENDED, () => setTimeout(islandGenEnd, 100));
     if (eventTypes.APP_READY) eventSource.on(eventTypes.APP_READY, adoptUnrecordedReco);
     registerImageScore();
     applyQuietRender();

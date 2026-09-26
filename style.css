@@ -667,3 +667,49 @@ body.cm-quiet #chat > .mes:not(.last_mes) *,
 body.cm-quiet #chat > .mes:not(.last_mes) *::before,
 body.cm-quiet #chat > .mes:not(.last_mes) *::after { animation-iteration-count: 1 !important; }
 body.cm-quiet #chat > .mes:not(.last_mes) * { backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+
+/* ── 灵动岛 (lib/island.js) ── */
+.cm-island {
+    position: fixed;
+    left: 50%;
+    bottom: 84px;
+    transform: translateX(-50%);
+    z-index: 3000;
+    overflow: hidden;
+    background: #0d0d0d;
+    color: #f4f4f2;
+    font: 500 13px/1.3 -apple-system, BlinkMacSystemFont, "Geist", "PingFang SC", "Noto Sans SC", sans-serif;
+    box-shadow: 0 6px 24px rgba(0, 0, 0, .28);
+    pointer-events: none;
+    user-select: none;
+    -webkit-user-select: none;
+    contain: layout paint;
+}
+.cm-island[data-shape="dot"] { border-radius: 99px; box-shadow: none; background: transparent; }
+.cm-island[data-shape="pill"] { border-radius: 99px; }
+.cm-island[data-shape="card"] { border-radius: 20px; max-width: min(92vw, 380px); }
+.cm-island.cm-isl-tappable { pointer-events: auto; cursor: pointer; }
+.cm-island-body { position: relative; }
+.cm-isl-ghost { position: absolute; inset: 0; pointer-events: none; }
+.cm-isl-content { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.cm-isl-dot { width: 8px; height: 8px; margin: 3px; border-radius: 50%; background: #3ecf6e; opacity: .45; }
+.cm-island[data-online="false"] .cm-isl-dot { background: #ff5a4e; opacity: .85; }
+.cm-island[data-online="null"] .cm-isl-dot { opacity: 0; }
+.cm-isl-live, .cm-isl-done { height: 32px; padding: 0 14px 0 12px; }
+.cm-isl-num { font-variant-numeric: tabular-nums; opacity: .7; }
+.cm-isl-pulse { width: 8px; height: 8px; border-radius: 50%; background: #f4f4f2; animation: cm-isl-pulse 1.1s ease-in-out infinite; }
+@keyframes cm-isl-pulse { 50% { opacity: .25; transform: scale(.7); } }
+.cm-isl-done .cm-isl-icon { color: #3ecf6e; }
+.cm-isl-notice { padding: 10px 16px 10px 14px; white-space: normal; align-items: flex-start; }
+.cm-isl-notice .cm-isl-icon { margin-top: 2px; }
+.cm-isl-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cm-isl-text small { opacity: .72; font-size: 12px; font-weight: 400; }
+.cm-isl-ok .cm-isl-icon { color: #3ecf6e; }
+.cm-isl-info .cm-isl-icon { color: #8ab4ff; }
+.cm-isl-warn .cm-isl-icon { color: #ffc24a; }
+.cm-isl-bad .cm-isl-icon { color: #ff5a4e; }
+@media (prefers-reduced-motion: reduce) { .cm-isl-pulse { animation: none; } }
+
+/* 调试选项 */
+.cm-debug-box > summary { cursor: pointer; opacity: .75; }
+.cm-isl-text small { white-space: pre-line; }
