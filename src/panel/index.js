@@ -164,6 +164,7 @@
         compactScriptButtons: true, // 输入栏上方的脚本按钮并排显示
         quietRender: 'auto',     // 省电显示：'auto'（手机 / TauriTavern 上开）| 'on' | 'off'
         checkupMuted: {},        // 体检提示被点掉的次数（按问题类型）；两次后不再弹
+        cardAudit: false,        // 切卡时检查角色卡（未成年相关内容）；默认关，体检页可开
     };
 
     function getSettings() {
@@ -722,20 +723,36 @@
         }
         const ctx = SillyTavern.getContext();
         const ch = ctx.groupId ? null : ctx.characters?.[ctx.characterId];
-        const name = ch?.data?.extensions?.world;
         if (!ch) { box.replaceChildren(el('small', 'cm-hint', '打开角色卡聊天后可用。')); return; }
-        if (!name) { box.replaceChildren(el('small', 'cm-hint', `「${ch.name}」没绑世界书。`)); return; }
+        // Every book that feeds this chat, not just the card's own: global
+        // (selected) books and the chat's bound book cost cache the same way.
+        const names = [ch.data?.extensions?.world, ctx.chatMetadata?.world_info];
+        try {
+            const wi = await import('/scripts/world-info.js');
+            names.push(...(wi.selected_world_info ?? []));
+        } catch { /* global lorebooks unknown in this frontend */ }
+        const books = [...new Set(names.filter(Boolean))];
+        if (!books.length) { box.replaceChildren(el('small', 'cm-hint', '这个聊天没用世界书。')); return; }
         const charKey = currentCharKey();
-        let book;
-        try { book = await ctx.loadWorldInfo(name); } catch { book = null; }
+        const parts = [];
+        for (const name of books) {
+            let book;
+            try { book = await ctx.loadWorldInfo(name); } catch { book = null; }
+            parts.push(loreRow(ctx, name, book));
+        }
         // The panel may have been rebuilt or the character switched meanwhile.
         box = document.getElementById('claude_max_lore');
         if (!box || currentCharKey() !== charKey) return;
-        if (!book) { box.replaceChildren(el('small', 'cm-hint', `读不到世界书「${name}」。`)); return; }
+        box.replaceChildren(...parts);
+    }
+
+    function loreRow(ctx, name, book) {
+        const box = el('div', 'cm-field');
+        if (!book) { box.append(el('small', 'cm-hint', `读不到世界书「${name}」。`)); return box; }
         const sum = loreConst.summarizeLore(book);
         const backup = loreConst.backupName(name);
         const hasBackup = (ctx.getWorldInfoNames?.() ?? []).includes(backup);
-        box.replaceChildren(el('small', 'cm-hint', sum.keyword
+        box.append(el('small', 'cm-hint', sum.keyword
             ? `「${name}」有 ${sum.keyword} 条关键词条目（约 ${sum.keywordChars.toLocaleString()} 字），聊天记录每轮重写缓存。`
             : `「${name}」已全部常驻，不影响缓存。`));
         if (sum.keyword) {
@@ -756,6 +773,7 @@
             row.append(r);
         }
         if (row.childElementCount) box.append(row);
+        return box;
     }
 
     /** Popup text as DOM nodes: names come from the card and must not be parsed as HTML. */
@@ -869,10 +887,14 @@
 
     const auditedCards = new Set(); // warned once per card per page load
 
-    async function runCardAudit({ toast = false } = {}) {
+    async function runCardAudit({ toast = false, force = false } = {}) {
         let box = document.getElementById('claude_max_card_audit');
         if (!cardAudit) {
             box?.replaceChildren(el('small', 'cm-hint', '没加载（扩展文件不完整），重装扩展即可。'));
+            return;
+        }
+        if (!force && !getSettings().cardAudit) {
+            box?.replaceChildren(el('small', 'cm-hint', '已关闭。打开上面的开关，或点右上角按钮查一次。'));
             return;
         }
         const ctx = SillyTavern.getContext();
@@ -1813,8 +1835,13 @@
         pane.append(el('small', 'cm-hint', '查字数、禁词、破折号、「不是A，是B」、人称、重复段落等；范围和禁词读自当前预设。'));
 
         const auditTools = el('div', 'cm-section-tools');
-        auditTools.append(iconButton('fa-user-shield', '重新检查当前角色卡', () => runCardAudit()));
+        auditTools.append(iconButton('fa-user-shield', '检查当前角色卡', () => runCardAudit({ force: true })));
         pane.append(section('角色卡检查', auditTools));
+        pane.append(toggleRow({
+            id: 'claude_max_card_audit_on', title: '切卡时自动检查', desc: '查未成年人物和幼态化描写。',
+            checked: !!settings.cardAudit,
+            onChange: (on) => { settings.cardAudit = on; save(); runCardAudit(); },
+        }));
         const auditBox = el('div', 'cm-stats');
         auditBox.id = 'claude_max_card_audit';
         pane.append(auditBox);

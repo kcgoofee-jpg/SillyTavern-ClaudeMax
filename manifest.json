@@ -6,7 +6,7 @@
     "js": "src/panel/index.js",
     "css": "src/panel/style.css",
     "author": "LukaTheHero, kcgoofee-jpg",
-    "version": "3.1.0",
+    "version": "3.1.1",
     "homePage": "https://github.com/kcgoofee-jpg/CCST",
     "auto_update": false
 }
