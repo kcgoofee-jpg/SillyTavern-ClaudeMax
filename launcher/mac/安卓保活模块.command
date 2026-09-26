@@ -1,15 +1,22 @@
 #!/bin/zsh
 # 手机 TauriTavern 后台保活（KernelSU / Magisk 模块）：打包 → 放进手机「下载」→ 你在 KernelSU 管理器里装；
-# 装好后在这里看它的状态（只读）。模块本身的说明和安全自查见 launcher/android/README.md
+# 装好后在这里看它的状态（只读）。
+# 模块在单独的仓库里开发（默认和本仓库同级的 tt-root-module，可在 launcher/config.local 里写
+# TT_MODULE_DIR="目录" 改），说明和安全自查见那里的 README.md；这里只负责打包、推送和看状态。
 source "${0:A:h}/lib.zsh"
 banner "安卓保活模块"
-ANDROID="$LAUNCHER_DIR/../android"
+MODULE_REPO=${TT_MODULE_DIR:-${PROXY_DIR:h}/tt-root-module}
 MOD_ID=claudemax_tt_keepalive
 
 step "打包"
-zip_path=$(/bin/zsh "$ANDROID/build-ksu-module.sh" 2>&1 | tail -1)
+[[ -f "$MODULE_REPO/build-ksu-module.sh" ]] || {
+    fail "找不到模块仓库：$MODULE_REPO"
+    fix "把 tt-root-module 放在酒馆扩展的同级目录，或在 launcher/config.local 里写 TT_MODULE_DIR=\"模块仓库目录\"。"
+    summary; pause_end 1
+}
+zip_path=$(/bin/zsh "$MODULE_REPO/build-ksu-module.sh" 2>&1 | tail -1)
 [[ -f "$zip_path" ]] || { fail "没打包成：$zip_path"; summary; pause_end 1; }
-ver=$(sed -n 's/^version=//p' "$ANDROID/ksu-tt-keepalive/module.prop")
+ver=$(sed -n 's/^version=//p' "$MODULE_REPO/ksu-tt-keepalive/module.prop")
 ok "${zip_path:t}（版本 $ver，只有几个文本脚本，不联网、不含程序）"
 
 step "找手机"

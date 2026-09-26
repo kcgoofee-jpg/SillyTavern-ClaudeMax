@@ -54,10 +54,11 @@
                   电量、时长可在 launcher/config.local 改：LID_BATTERY_FLOOR=25
                   LID_IDLE_HOURS=3；LID_AWAKE=0 临时停用。
 
-  9  安卓保活模块  手机 TauriTavern 后台保活（KernelSU / Magisk 模块）：后台时晚一点被杀、不被系统
-                  冻结，白名单和后台权限丢了自动补。选这一项：打包 → 放进手机「下载」→ 显示
-                  手机上模块的状态；安装要你在 KernelSU 管理器里点「从本地安装」再重启。
-                  已是最新版本时只显示状态。详见 launcher/android/README.md。
+  9  安卓保活模块  手机 TauriTavern 后台保活（KernelSU / Magisk 模块）：白名单和后台权限丢了自动补，
+                  记下 TT 被冻结、退出的原因，生成回复中被冻结或被杀时发通知。选这一项：打包
+                  → 放进手机「下载」→ 显示手机上模块的状态；安装要你在 KernelSU 管理器里点
+                  「从本地安装」再重启。已是最新版本时只显示状态。模块在同级目录的
+                  tt-root-module 仓库里开发（config.local 里 TT_MODULE_DIR 可改），详见那里的 README.md。
 
 生图
  10  启动生图      启动本地 ComfyUI（端口 8188）。用 NovelAI 出图时不需要。

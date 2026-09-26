@@ -9,4 +9,3 @@ package-lock.json
 data/
 launcher/*.local
 launcher/*.local.*
-launcher/android/dist/
