@@ -38,9 +38,12 @@ test('separate chats do not interfere', () => {
     assert.equal(diagnoseCache('sys B', [A('greeting B'), U('y')]).firstTurn, true);
 });
 
-test('nearestLabel falls back to a heading', () => {
+test('nearestLabel names tags, but never quotes a heading (prompt text) — only its kind', () => {
     const t = '# 世界设定\n北境很冷';
-    assert.equal(nearestLabel(t, t.length - 1), '# 世界设定');
+    assert.equal(nearestLabel(t, t.length - 1), '世界书标题段落');
+    const u = '## 小美的秘密日记\n内容';
+    assert.equal(nearestLabel(u, u.length - 1), '某个标题段落');
+    assert.equal(nearestLabel('<rules>abc', 8), '<rules>');
 });
 
 test('split point settles at the start of the enclosing tag and only moves earlier', () => {

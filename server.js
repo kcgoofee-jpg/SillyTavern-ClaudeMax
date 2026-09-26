@@ -16,10 +16,21 @@ import { startStandaloneListener, stopStandaloneListener, portInUseMessage } fro
 import { networkInterfaces } from 'node:os';
 
 import { credentialSummary } from './lib/oauth.js';
+import { markStandalone } from './lib/control.js';
+import { flushSweeps, sweepLeftovers } from './lib/session-store.js';
 
 const TAG = '[claude-subscription]';
 const port = parseInt(process.env.CLAUDE_SUBSCRIPTION_PORT, 10) || 8901;
 const host = process.env.CLAUDE_SUBSCRIPTION_HOST || '127.0.0.1';
+
+// A stray rejected promise must not take the proxy (and every reply being
+// written) down: log it and keep serving.
+process.on('unhandledRejection', (reason) => {
+    console.error(`${TAG} 未处理的异步错误（代理继续运行）：`, reason instanceof Error ? reason.stack ?? reason.message : reason);
+});
+
+// This process owns the port: the phone's「重启代理」may stop and restart it.
+markStandalone();
 
 try {
     await startStandaloneListener({ port, host });
@@ -45,12 +56,22 @@ if (host === '0.0.0.0' || host === '::') {
     console.log(`${TAG} 在酒馆里把 Custom (OpenAI-compatible) 端点设为 http://${host}:${port}/v1，或使用 Claude Max 面板一键连接。Ctrl+C 退出。`);
 }
 
+// Roleplay transcripts a crash or kill left on disk (see lib/session-store.js).
+try {
+    const swept = sweepLeftovers();
+    if (swept.transcripts || swept.tempDirs) console.log(`${TAG} 清理了上次遗留的 ${swept.transcripts} 份会话记录、${swept.tempDirs} 个临时目录`);
+} catch { /* best effort */ }
+
 let stopping = false;
 async function shutdown(signal) {
     if (stopping) return;
     stopping = true;
     console.log(`${TAG} ${signal} — shutting down`);
+    // Delete this run's last transcripts before exiting (their timers would never fire).
+    const flush = () => Promise.race([flushSweeps(), new Promise((r) => setTimeout(r, 5000).unref())]);
+    await flush();
     await stopStandaloneListener();
+    await flush(); // replies that were still running when the signal came
     process.exit(0);
 }
 process.on('SIGINT', () => shutdown('SIGINT'));

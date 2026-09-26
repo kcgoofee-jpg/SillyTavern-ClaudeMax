@@ -10,13 +10,19 @@ step "打包"
 zip_path=$(/bin/zsh "$ANDROID/build-ksu-module.sh" 2>&1 | tail -1)
 [[ -f "$zip_path" ]] || { fail "没打包成：$zip_path"; summary; pause_end 1; }
 ver=$(sed -n 's/^version=//p' "$ANDROID/ksu-tt-keepalive/module.prop")
-ok "${zip_path:t}（版本 $ver，只有 4 个文本文件，不联网、不含程序）"
+ok "${zip_path:t}（版本 $ver，只有几个文本脚本，不联网、不含程序）"
 
 step "找手机"
-adb=$(find_adb) || { fail "没找到 adb"; fix "先用「手机同步」把手机连上一次。"; summary; pause_end 1; }
+adb=$(find_adb) || {
+    fail "没找到 adb（安卓调试工具）"
+    fix "终端运行 brew install --cask android-platform-tools，或把 platform-tools 放到 ${PROXY_DIR:h}/tools/ 下。"
+    summary; pause_end 1
+}
 serial=$(phone_serial)
-if [[ -z "$serial" && -s "$PROXY_DIR/launcher/phone.local" ]]; then
-    "$adb" connect "$(<"$PROXY_DIR/launcher/phone.local")" >/dev/null 2>&1; sleep 1; serial=$(phone_serial)
+if [[ -z "$serial" && -s "$PHONE_FILE" ]]; then
+    adb_reconnect "$adb"
+    (( $? == 2 )) && explain "adb 报 No route to host：先选一次「手机同步」（它会从终端重启 adb），再来这里。"
+    sleep 1; serial=$(phone_serial)
 fi
 [[ -n "$serial" ]] || { fail "没连上手机"; fix "插上 USB 线（或先用「手机同步」开无线调试），再选一次这一项。"; summary; pause_end 1; }
 ok "已连接：$serial"

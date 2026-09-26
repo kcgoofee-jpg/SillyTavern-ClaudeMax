@@ -9,7 +9,7 @@ ITEMS=(
     "日常|启动酒馆|启动代理和酒馆，打开浏览器"
     "日常|关闭酒馆|关闭酒馆和代理"
     "日常|重启酒馆|更新代码、改设置、一直出错时用"
-    "日常|检查状态|只检查不改动：运行、登录、日志错误"
+    "日常|检查状态|体检：运行、登录、日志错误（不启动也不关闭）"
     "手机|手机模式|电脑模式 ↔ 手机模式（防睡眠、掉线重启、通知）"
     "手机|手机同步|电脑 ↔ 手机双向同步聊天、角色、世界书、预设"
     "手机|本机TT导入|电脑酒馆 → 这台 Mac 的 TauriTavern（内容、扩展、设置）"
@@ -17,13 +17,17 @@ ITEMS=(
     "手机|安卓保活模块|手机 TT 后台不被杀、不被冻结（KernelSU 模块，看状态 / 更新）"
     "生图|启动生图|本地 ComfyUI（用 NovelAI 时不需要）"
     "生图|关闭生图|关闭本地 ComfyUI"
-    "生图|提示词拆分|读 NAI 原图，拆成柏宝绘的画师串和质量词"
-    "生图|导入柏宝绘配方|把拆分工具导出的配方写进柏宝绘"
     "维护|登录 Claude|打开浏览器登录 Claude 订阅"
     "维护|修复依赖|启动报「缺少依赖」时重装程序库"
     "维护|打开日志|打开日志文件夹"
     "维护|开机自动启动|开 / 关：登录 Mac 时自动在后台启动"
 )
+
+# 去掉首尾空白（[[:space:]]# 这种写法要 extendedglob，只在这个函数里打开）
+trim() {
+    setopt localoptions extendedglob
+    print -r -- "${${1##[[:space:]]#}%%[[:space:]]#}"
+}
 
 running() { [[ -n "$(our_pids $1)" ]] && print -n "${C_GREEN}运行中${C_RESET}" || print -n "${C_DIM}未运行${C_RESET}"; }
 
@@ -86,7 +90,7 @@ while true; do
     print
     print -n -- "输入编号回车："
     read -r choice || { print; close_terminal_window; exit 0; }   # 输入结束（Ctrl-D）
-    choice=${${choice##[[:space:]]#}%%[[:space:]]#}
+    choice=$(trim "$choice")
     case "$choice" in
         '') continue ;;                      # 误按回车：只刷新，不退出
         q|Q) close_terminal_window; exit 0 ;;

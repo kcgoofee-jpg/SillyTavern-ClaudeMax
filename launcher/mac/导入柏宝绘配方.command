@@ -10,7 +10,7 @@ preset=( ~/Downloads/柏宝绘配方-*.json(N.om[1]) )
 if [[ -z "$preset" ]]; then
     fail "下载文件夹里没有「柏宝绘配方-*.json」"
     fix "先在「提示词拆分」里点「导出柏宝绘配方」。"
-    summary; pause_end; exit 1
+    summary; pause_end 1
 fi
 ok "${preset:t}"
 
@@ -24,10 +24,14 @@ targets=()
 [[ -n "$ST_DIR" ]] && targets+=( "$ST_DIR/data/default-user/settings.json" )
 tt="$HOME/Library/Application Support/com.tauritavern.client/data/default-user/settings.json"
 [[ -f "$tt" ]] && targets+=( "$tt" )
+if (( ${#targets} == 0 )); then
+    fail "没找到要写入的设置文件（电脑酒馆和本机 TauriTavern 都没有）"
+    summary; pause_end 1
+fi
 if python3 "${0:A:h}/../baibai_import.py" "$preset" "${targets[@]}"; then
     ok "完成。打开酒馆 → 柏宝绘 → 渠道 → NovelAI，画师串已选中「${${preset:t:r}#柏宝绘配方-}」。"
+    summary; pause_end 0
 else
     fail "写入失败，上面有原因。"
+    summary; pause_end 1
 fi
-summary
-pause_end

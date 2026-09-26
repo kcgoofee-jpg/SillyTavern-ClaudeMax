@@ -13,7 +13,7 @@ if (( FAIL_COUNT > 0 )); then
     if ! ask_yes "仍然尝试启动吗？"; then
         summary; pause_end 1
     fi
-    FAIL_COUNT=0
+    # 不清零：选了「仍然启动」的问题照样算进最后的结果里
 fi
 
 start_proxy

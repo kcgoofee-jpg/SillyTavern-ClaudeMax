@@ -6,15 +6,17 @@
 source "${0:A:h}/lib.zsh"
 banner "手机模式 / 电脑模式"
 
+# 让代理按新的模式重新监听：0 = 已按新模式在运行；1 = 代理在忙，这次没重启；2 = 启动失败
 restart_proxy_if_idle() {
     if [[ -z "$(our_pids $PROXY_PORT)" ]]; then
-        start_proxy
+        start_proxy || return 2
     elif proxy_busy; then
-        warn "代理正在生成回复，这次先不重启。等这一轮写完再双击一次「手机模式」，或双击「重启酒馆」。"
+        return 1
     else
         stop_one $PROXY_PORT "Claude 代理"
-        start_proxy
+        start_proxy || return 2
     fi
+    return 0
 }
 
 show_phone_setup() {
@@ -32,19 +34,33 @@ show_phone_setup() {
 
 if [[ -s "$LAN_KEY_FILE" ]]; then
     step "现在是：手机模式"
-    watchdog_running && ok "守护在运行：防睡眠、掉线自动重启、地址变化通知" || {
+    if watchdog_running; then
+        ok "守护在运行：防睡眠、掉线自动重启、地址变化通知"
+    else
         warn "守护没在运行，现在启动"
-        watchdog_start && ok "守护已启动"
-    }
+        if watchdog_start; then ok "守护已启动"; else fail "守护没有启动成功"; fix "看日志文件夹里的 watchdog.log。"; fi
+    fi
     if lid_awake_on; then ok "合盖不睡：开着"
-    elif lid_supported; then explain "合盖不睡：已安装，现在放开着（电量低 / 低电量模式 / 长时间没请求），条件恢复后自动打开"
+    elif lid_supported; then
+        why=$(lid_release_reason); [[ "$why" == off ]] && why="config.local 里写了 LID_AWAKE=0"
+        watchdog_running || why="守护没在运行"
+        explain "合盖不睡：已安装，现在放开着（${why:-条件刚恢复}），条件恢复后守护会自动打开"
+        explain "  （会放开的情况：电量低、低电量模式、合盖长时间没请求、手机上暂停了、LID_AWAKE=0、守护没在运行）"
     else explain "合盖仍会睡。想合盖也能用：酒馆工具 →「合盖不睡」安装一次。"; fi
+    mismatch=$(proxy_mode_mismatch)
+    [[ -n "$mismatch" ]] && { warn "$mismatch"; explain "  守护会在代理空闲时自动重启它。"; }
     show_phone_setup
     if ask_yes "要切回电脑模式吗？（手机连不上，Mac 恢复正常睡眠）"; then
         mv "$LAN_KEY_FILE" "$LAN_KEY_FILE.off"
         watchdog_stop
         restart_proxy_if_idle
-        ok "已切到电脑模式。"
+        case $? in
+            0) ok "已切到电脑模式：代理只接受本机连接，Mac 恢复正常睡眠。" ;;
+            1) warn "已切到电脑模式（守护已停、Mac 恢复正常睡眠），但代理正在生成回复，这次没重启："
+               explain "  在它重启之前，同一 Wi-Fi 下带访问密码的手机仍然能连这个代理。"
+               fix "等这条回复写完，在菜单里选「重启酒馆」；「检查状态」会一直提醒，直到重启。" ;;
+            *) warn "已切到电脑模式，但代理没能重新启动：看上面的原因，处理后选「启动酒馆」。" ;;
+        esac
     fi
     summary; pause_end; exit 0
 fi
@@ -66,7 +82,15 @@ else
 fi
 chmod 600 "$LAN_KEY_FILE"
 restart_proxy_if_idle
-watchdog_start && ok "守护已启动：防睡眠、掉线自动重启、地址变化通知" || warn "守护没有启动成功，看日志文件夹里的 watchdog.log"
+rc=$?
+if watchdog_start; then ok "守护已启动：防睡眠、掉线自动重启、地址变化通知"
+else fail "守护没有启动成功"; fix "看日志文件夹里的 watchdog.log，处理后再选一次「手机模式」。"; fi
+case $rc in
+    0) ok "已切到手机模式。" ;;
+    1) warn "已切到手机模式，但代理正在生成回复，这次没重启：手机暂时还连不上。"
+       explain "  守护会在代理空闲时自动重启它（一般 30 秒内），之后手机就能连；不用再选一次「手机模式」。" ;;
+    *) warn "已切到手机模式，但代理没能启动：看上面的原因。" ;;
+esac
 show_phone_setup
 explain "如果 Mac 弹出「是否允许 node 接受传入的网络连接」，点「允许」。"
 summary

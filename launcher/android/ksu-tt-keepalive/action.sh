@@ -13,8 +13,11 @@ for pid in $(pidof "$PKG"); do
     fz="没冻结"
     grep -q '^frozen 1' "/sys/fs/cgroup/apps/uid_$uid/pid_$pid/cgroup.events" 2>/dev/null && fz="被 Android 冻结"
     grep -qx "$pid" /dev/freezer/frozen/cgroup.procs 2>/dev/null && fz="被 ColorOS 冻结"
-    echo "进程 $pid：回收优先级 $(cat /proc/$pid/oom_score_adj 2>/dev/null)（越小越晚被杀，900 以上会被冻结），$fz"
+    echo "进程 $pid：$fz；/proc 里的回收优先级 $(cat /proc/$pid/oom_score_adj 2>/dev/null)"
 done
+# 系统自己记的优先级（冻结和查杀按这个判断：900 及以上会被冻结）
+dumpsys activity processes "$PKG" 2>/dev/null | awk -v p="$PKG" '/\*APP\*/{m=index($0, ":" p "/")>0} m&&/oom adj:/{sub(/^ */,""); print "系统记录的 " $0} m&&/isFrozen=/{match($0,/isFrozen=[a-z]*/); print "系统记录的 " substr($0,RSTART,RLENGTH); m=0}'
 [ -z "$(pidof "$PKG")" ] && echo "TT 没在运行"
+[ -f "$MODDIR/prior.txt" ] && { echo "== 装模块前的原值（卸载时还原）=="; grep -v '^#' "$MODDIR/prior.txt"; }
 echo "== 最近的日志 =="
 tail -n 10 "$MODDIR/service.log" 2>/dev/null

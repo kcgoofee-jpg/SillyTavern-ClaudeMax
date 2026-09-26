@@ -115,3 +115,11 @@ test('depth-0 injections after the player message are folded into it', () => {
     const lone = [{ role: 'user', content: '只有我' }];
     assert.equal(foldTrailingInjections(lone).history, lone);
 });
+
+test('lore memory is keyed by text AND the reply it answers', () => {
+    __resetInjected();
+    rememberInjected('继续', '<Lore>\n甲\n</Lore>\n\n继续', '回复一');
+    assert.equal(injectedTextFor('继续', '回复一'), '<Lore>\n甲\n</Lore>\n\n继续');
+    assert.equal(injectedTextFor('继续', '回复二'), null, 'a later 「继续」 in the same chat');
+    assert.equal(injectedTextFor('继续', '别的聊天的开场'), null, 'the same text in another chat');
+});

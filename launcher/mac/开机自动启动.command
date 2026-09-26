@@ -15,6 +15,7 @@ if autostart_enabled; then
     fi
 else
     explain "· 开机自动启动：未开启"
+    explain "开启时会马上在后台启动一次（和登录时一样；已经在运行的跳过）。"
     if ask_yes "要开启开机自动启动吗？"; then
         autostart_enable
         explain "开机后的启动记录在日志文件夹的 autostart.log 里。"

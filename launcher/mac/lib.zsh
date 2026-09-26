@@ -220,21 +220,35 @@ foreign_owner() {
     local pid
     for pid in $(port_pids $1); do
         [[ -n "$(our_pids $1 | grep -x $pid)" ]] && continue
-        ps -o comm= -p $pid 2>/dev/null | xargs basename
+        local comm=$(ps -o comm= -p $pid 2>/dev/null)
+        print -r -- "${comm:t}"   # 程序名可能带空格（如 Google Chrome Helper），不能交给 xargs
         return
     done
 }
 
 port_busy() { [[ -n "$(port_pids $1)" ]]; }
 
+# 等到端口上出现「我们自己的」进程（别的程序占着端口不算启动成功）
 wait_port() {
     local port=$1 secs=$2 i
     for ((i = 0; i < secs; i++)); do
-        port_busy $port && return 0
+        [[ -n "$(our_pids $port)" ]] && return 0
         sleep 1
         (( i > 0 && i % 10 == 0 )) && explain "已等待 ${i} 秒…"
     done
     return 1
+}
+
+# 在自己的会话 / 进程组里后台运行长期程序（代理、酒馆、生图、守护）。
+# 菜单窗口里按 Ctrl-C 会给整个前台进程组发 SIGINT；node 启动时会把信号处理恢复成默认，
+# nohup 只挡 SIGHUP，所以不单独分组的话，Ctrl-C 会把刚启动的代理 / 酒馆 / 守护一起杀掉。
+# 用法：( cd 目录 && detach 命令 参数… >>日志 2>&1 &! )
+detach() {
+    if [[ -x /usr/bin/perl ]]; then
+        /usr/bin/perl -MPOSIX -e 'POSIX::setsid(); exec @ARGV or die "exec $ARGV[0]: $!\n"' -- nohup "$@"
+    else
+        nohup "$@"
+    fi
 }
 
 # ── 自检 ─────────────────────────────────────
@@ -307,7 +321,8 @@ check_deps() {
     fail "$name 缺少依赖（没有 node_modules 文件夹）"
     if ask_yes "现在自动安装 $name 的依赖吗？需要联网，约 1 分钟"; then
         print -r -- "${C_DIM}"
-        if (cd "$dir" && npm install --no-audit --no-fund 2>&1 | tail -n 5); then
+        # 看 npm 自己的退出码，不是 tail 的
+        if (cd "$dir" || exit 1; npm install --no-audit --no-fund 2>&1 | tail -n 5; exit ${pipestatus[1]}); then
             print -r -- "${C_RESET}"
             ok "$name 依赖安装完成"
             (( FAIL_COUNT-- ))
@@ -355,19 +370,57 @@ check_port() {
 # ── 手机连接（局域网） ─────────────────────────
 
 lan_ip() {
-    local ip
-    for ifc in en0 en1 en2; do
-        ip=$(ipconfig getifaddr $ifc 2>/dev/null) && [[ -n "$ip" ]] && { print $ip; return; }
+    # 先看默认路由走的网卡（Wi-Fi 或有线，不一定是 en0–en2），再挨个试其他 en* 网卡。
+    # 默认路由是 VPN（utun）时不用它：手机在局域网里连不到 VPN 地址。
+    local ip ifc def
+    def=$(route -n get default 2>/dev/null | awk '/interface:/ {print $2; exit}')
+    for ifc in ${def:#utun*} ${(z)$(ifconfig -l 2>/dev/null)}; do
+        [[ "$ifc" == en<-> ]] || continue
+        ip=$(ipconfig getifaddr $ifc 2>/dev/null) && [[ -n "$ip" && "$ip" != 169.254.* ]] && { print $ip; return; }
     done
+}
+
+# 代理正在写的回复条数（代理自己数的，/v1/control/status 的 busy）；读不到就什么都不打印
+proxy_inflight() {
+    curl -s --max-time 5 "http://127.0.0.1:$PROXY_PORT/v1/control/status" 2>/dev/null |
+        sed -n 's/.*"busy":\([0-9][0-9]*\).*/\1/p'
 }
 
 # 代理在忙（正在生成回复）时不重启
 proxy_busy() {
-    local pid
-    for pid in $(our_pids $PROXY_PORT); do
+    local pid n pids
+    pids=($(our_pids $PROXY_PORT))
+    (( ${#pids} )) || return 1
+    n=$(proxy_inflight)
+    [[ -n "$n" ]] && { (( n > 0 )); return; }
+    # 读不到代理的计数（旧版本代理 / 代理卡住）：退回旧办法——代理下面有子进程（Claude 命令行）就算在忙
+    for pid in $pids; do
         [[ -n "$(pgrep -P $pid)" ]] && return 0
     done
     return 1
+}
+
+# 代理实际监听的范围：lan（*:端口，手机能连）/ local（只有本机）；没在运行就什么都不打印
+proxy_listen_scope() {
+    local pid name
+    pid=$(our_pids $PROXY_PORT | head -1)
+    [[ -n "$pid" ]] || return 1
+    name=$(lsof -nP -a -p $pid -iTCP:$PROXY_PORT -sTCP:LISTEN -Fn 2>/dev/null | sed -n 's/^n//p' | head -1)
+    case $name in
+        '') return 1 ;;
+        127.*|\[::1\]:*|localhost:*) print local ;;
+        *) print lan ;;
+    esac
+}
+
+# 手机模式开关和代理实际监听的不一致时，打印一句说明（一致或代理没在运行时什么都不打印）
+proxy_mode_mismatch() {
+    local scope=$(proxy_listen_scope)
+    if [[ -s "$LAN_KEY_FILE" && "$scope" == local ]]; then
+        print -r -- "手机模式开着，但代理还只接受本机连接（切换时代理在忙，没重启）：手机暂时连不上"
+    elif [[ ! -s "$LAN_KEY_FILE" && "$scope" == lan ]]; then
+        print -r -- "已经是电脑模式，但代理还在接受局域网连接（切换时代理在忙，没重启）：带访问密码的手机仍能连"
+    fi
 }
 
 # ── 通知 / 手机（adb） ─────────────────────────
@@ -409,70 +462,194 @@ notify() {
 
 WATCHDOG_PID_FILE="$PROXY_DIR/launcher/watchdog.pid.local"
 
-watchdog_running() {
-    [[ -s "$WATCHDOG_PID_FILE" ]] && kill -0 "$(<"$WATCHDOG_PID_FILE")" 2>/dev/null
+RESTART_MARK="$PROXY_DIR/launcher/restarting.local"   # 有且不到 60 秒 = 有人正在重启代理，守护别插手
+ADB_NOROUTE_FILE="$PROXY_DIR/launcher/adb-noroute.local"   # 有 = 守护的 adb 连手机报 No route to host
+
+# PID 文件里的进程真的是守护才算（死机重启后 PID 可能被别的程序用了）
+watchdog_pid() {
+    local pid
+    [[ -s "$WATCHDOG_PID_FILE" ]] || return 1
+    pid=$(<"$WATCHDOG_PID_FILE")
+    [[ "$pid" == <-> ]] || return 1
+    [[ "$(ps -o command= -p $pid 2>/dev/null)" == *watchdog.zsh* ]] || return 1
+    print $pid
 }
 
+watchdog_running() { watchdog_pid >/dev/null; }
+
 watchdog_start() {
+    local i
     watchdog_running && return 0
-    nohup /bin/zsh "$LAUNCHER_DIR/watchdog.zsh" >>"$LOG_DIR/watchdog.log" 2>&1 &!
-    sleep 1
-    watchdog_running
+    detach /bin/zsh "$LAUNCHER_DIR/watchdog.zsh" >>"$LOG_DIR/watchdog.log" 2>&1 &!
+    for i in {1..6}; do sleep 0.5; watchdog_running && return 0; done
+    return 1
 }
 
 watchdog_stop() {
     local pid i
-    if watchdog_running; then
-        pid=$(<"$WATCHDOG_PID_FILE")
+    if pid=$(watchdog_pid); then
         kill $pid 2>/dev/null
-        for i in {1..10}; do kill -0 $pid 2>/dev/null || break; sleep 0.3; done
+        # 守护可能正在跑一条命令（启动代理、adb connect），zsh 要等它结束才处理 TERM：多等一会儿
+        for i in {1..50}; do kill -0 $pid 2>/dev/null || break; sleep 0.3; done
+        if kill -0 $pid 2>/dev/null && [[ "$(ps -o command= -p $pid 2>/dev/null)" == *watchdog.zsh* ]]; then
+            kill -9 $pid 2>/dev/null   # 它自己的收尾没跑：下面的 lid_cleanup_stale 替它恢复合盖睡眠
+            sleep 0.5
+            log_event "[守护] 15 秒没退出，已强制结束（PID $pid）"
+        fi
     fi
-    rm -f "$WATCHDOG_PID_FILE"
+    # 只删还指着死进程 / 别的进程的 PID 文件；守护自己退出时也会删
+    watchdog_running || rm -f "$WATCHDOG_PID_FILE"
     lid_cleanup_stale
+}
+
+# 代理重启标记：stop_one 关代理前打上，start_proxy 成功后擦掉；守护看到新标记就不插手
+restart_mark_fresh() {
+    local mt
+    [[ -f "$RESTART_MARK" ]] || return 1
+    mt=$(stat -f %m "$RESTART_MARK" 2>/dev/null) || return 1
+    (( $(date +%s) - mt < 60 ))
 }
 
 # ── 合盖不睡（可选，手机模式下由守护开关） ─────────────
 # 合盖睡眠不受 caffeinate 管，只有 pmset 的 disablesleep 能挡。它要 root，
 # 所以「合盖不睡」工具装一条只允许这两条命令免密的 sudoers 规则；没装就不启用。
 # 守护在这些情况下自动放开（合盖就会睡）：用电池且电量低于 LID_BATTERY_FLOOR、
-# 低电量模式、合盖且代理 LID_IDLE_HOURS 小时没有请求、手机模式关闭、守护退出。
+# 低电量模式、合盖且代理 LID_IDLE_HOURS 小时没有请求、手机上按了暂停、config.local 里 LID_AWAKE=0、
+# 手机模式关闭、守护退出。
 LID_SUDOERS=/etc/sudoers.d/claudemax-lid
 LID_OWNED_FILE="$PROXY_DIR/launcher/lid-awake.local"   # 有 = 这个开关是我们打开的
 LID_PAUSE_FILE="$PROXY_DIR/launcher/lid-pause.local"   # 有 = 手机上按了「暂停合盖不睡」
 : ${LID_BATTERY_FLOOR:=25}
 : ${LID_IDLE_HOURS:=3}
 
-lid_supported() { sudo -n -l /usr/bin/pmset -a disablesleep 1 >/dev/null 2>&1; }
+# 装了规则才算：-k 让 sudo 不拿刚输过密码的缓存凭据当「免密」
+lid_supported() { [[ -e "$LID_SUDOERS" ]] && sudo -k -n -l /usr/bin/pmset -a disablesleep 1 >/dev/null 2>&1; }
 lid_awake_on()  { [[ "$(pmset -g | awk '/SleepDisabled/ {print $2}')" == 1 ]]; }
 lid_closed()    { ioreg -r -k AppleClamshellState -d 1 | grep -q '"AppleClamshellState" = Yes'; }
 on_battery()    { pmset -g batt | head -1 | grep -q "Battery Power"; }
 battery_pct()   { pmset -g batt | grep -o '[0-9]*%' | head -1 | tr -d %; }
 low_power()     { [[ "$(pmset -g | awk '/lowpowermode/ {print $2}')" == 1 ]]; }
 
+# 合盖不睡现在该不该放开：该放开就打印原因（off = config.local 里 LID_AWAKE=0），不该就什么都不打印。
+# 守护和「检查状态」共用同一套规则
+lid_release_reason() {
+    local pct mt
+    if [[ "$LID_AWAKE" == 0 ]]; then
+        print off; return
+    elif [[ -f "$LID_PAUSE_FILE" ]]; then
+        print "手机上暂停了合盖不睡"; return
+    elif on_battery; then
+        pct=$(battery_pct)
+        if [[ -n "$pct" ]] && (( pct < LID_BATTERY_FLOOR )); then   # 读不到电量不当成电量低
+            print "电池只剩 ${pct}%（低于 ${LID_BATTERY_FLOOR}%）"; return
+        elif low_power; then
+            print "开了低电量模式"; return
+        fi
+    fi
+    # 日志可能刚好被归档（改名）：读不到修改时间就不算「没请求」
+    if lid_closed && mt=$(stat -f %m "$PROXY_LOG" 2>/dev/null) && [[ -n "$mt" ]] &&
+       (( $(date +%s) - mt > LID_IDLE_HOURS * 3600 )) && ! proxy_busy; then
+        print "合盖后 ${LID_IDLE_HOURS} 小时没有请求"
+    fi
+}
+
 lid_set() {   # lid_set 1|0
     sudo -n /usr/bin/pmset -a disablesleep $1 >/dev/null 2>&1 || return 1
     if (( $1 )); then : >"$LID_OWNED_FILE"; else rm -f "$LID_OWNED_FILE"; fi
 }
 
-# 手机遥控「同步」：不问问题直接双向同步（关掉手机上的 TT → 同步 → 再打开），结果发通知
+PHONE_FILE="$PROXY_DIR/launcher/phone.local"   # 无线调试时手机的地址（「手机同步」里开无线调试时写的）
+
+# 按上次的无线调试地址重连手机：0 = 连上了；2 = No route to host；1 = 其他原因没连上。
+# No route to host 多半是 macOS「本地网络」权限：后台（守护 / 开机启动）拉起的 adb 服务没有这个权限，
+# 连不了局域网；从终端（酒馆工具）启动的才有。留个标记，「检查状态」据此提示怎么修。
+adb_reconnect() {
+    local adb=$1 out
+    [[ -n "$adb" && -s "$PHONE_FILE" ]] || return 1
+    out=$("$adb" connect "$(<"$PHONE_FILE")" 2>&1)
+    if [[ "$out" == *"No route to host"* ]]; then
+        if [[ ! -f "$ADB_NOROUTE_FILE" ]]; then
+            : >"$ADB_NOROUTE_FILE"
+            log_event "[adb] 连手机报 No route to host（多半是 macOS 本地网络权限挡住了后台启动的 adb 服务）"
+        fi
+        return 2
+    fi
+    [[ "$out" == *"connected to"* ]] || return 1   # 包括 already connected to
+    rm -f "$ADB_NOROUTE_FILE"
+    return 0
+}
+
+# 手机上的 TT 现在能不能关（force-stop）：能关返回 0；不能关返回 1 并打印原因。判断不了也算不能关。
+# 用 scripts/apply_settings.py --why-busy（0 = 空闲；1 = 忙，打印原因；2 = 判断不了）；
+# 没有这个脚本（不是开发目录）就自己看：代理在写的回复条数 + TT 的窗口是否可见。
+phone_tt_busy_reason() {
+    local serial=$1 adb=$2 script="${PROXY_DIR:h}/scripts/apply_settings.py" out rc n tasks vis
+    if [[ -f "$script" ]]; then
+        out=$(python3 "$script" --why-busy --serial "$serial" --adb "$adb" 2>&1); rc=$?
+        (( rc == 0 )) && [[ -z "$out" ]] && return 0
+        print -r -- "${out:-判断不了手机是否在用（检查脚本退出码 $rc）}"
+        return 1
+    fi
+    n=$(proxy_inflight)
+    if tasks=$("$adb" -s "$serial" shell "dumpsys activity activities" 2>/dev/null) && [[ -n "$tasks" ]]; then
+        vis=$(print -r -- "$tasks" | grep -E 'visible=true' | grep -c com.tauritavern.client)
+        # 屏幕关着时「可见」的窗口没人在看（和 apply_settings.py 一样）；读不到亮屏状态就当亮着
+        local wake=$("$adb" -s "$serial" shell "dumpsys power 2>/dev/null | grep -m1 mWakefulness" 2>/dev/null)
+        [[ "$wake" == *mWakefulness=* && "$wake" != *Awake* ]] && vis=0
+    fi
+    if [[ -n "$n" ]] && (( n > 0 )); then
+        print -r -- "Mac 上的代理正在写回复"; return 1
+    elif [[ -n "$vis" ]] && (( vis > 0 )); then
+        print -r -- "TT 在屏幕上开着（全屏、小窗或分屏）"; return 1
+    elif [[ -z "$n" && -z "$vis" ]]; then
+        print -r -- "读不到代理状态，也读不到手机上的窗口，保险起见不动手机"; return 1
+    fi
+    return 0
+}
+
+# 手机遥控「同步」：不问问题直接双向同步（关掉手机上的 TT → 同步 → 再打开），结果发通知。
+# 同步前照样检查手机忙不忙；只有「TT 在屏幕上」这一条不算——按钮就是在 TT 里按的，
+# 这时再单独确认代理没在写回复（检查脚本看到 TT 在屏幕上就不往下查了）。
 phone_sync_auto() {
-    local adb serial args out
+    local adb serial args out busy rc n
     adb=$(find_adb) || { notify "手机同步没做成" "Mac 上找不到 adb"; return 1; }
     serial=$(phone_serial)
-    if [[ -z "$serial" && -s "$PROXY_DIR/launcher/phone.local" ]]; then
-        "$adb" connect "$(<"$PROXY_DIR/launcher/phone.local")" >/dev/null 2>&1; sleep 1; serial=$(phone_serial)
+    if [[ -z "$serial" ]]; then
+        adb_reconnect "$adb"; sleep 1; serial=$(phone_serial)
     fi
     [[ -n "$serial" ]] || { notify "手机同步没做成" "Mac 连不上手机的无线调试"; return 1; }
     has_st || { notify "手机同步没做成" "Mac 上没有酒馆数据"; return 1; }
+    if ! busy=$(phone_tt_busy_reason "$serial" "$adb"); then
+        if [[ "$busy" == *屏幕上* ]]; then
+            n=$(proxy_inflight)
+            if [[ -z "$n" ]] || (( n > 0 )); then
+                notify "手机同步没做成" "Mac 上的代理正在写回复（或读不到它的状态），写完再同步。"
+                log_event "[同步] 手机遥控触发：没做（代理在写回复或读不到状态）"
+                return 1
+            fi
+            log_event "[同步] 手机遥控触发：TT 在屏幕上（就是在 TT 里按的），代理空闲，照常同步"
+        else
+            notify "手机同步没做成" "手机现在不方便关 TT：$busy"
+            log_event "[同步] 手机遥控触发：没做（$busy）"
+            return 1
+        fi
+    fi
     "$adb" -s "$serial" shell am force-stop com.tauritavern.client >/dev/null 2>&1
     args=(--st "$ST_DIR/data/default-user" --adb "$adb" --serial "$serial"
           --state "$PROXY_DIR/launcher/phone-sync-state.local.json" --backups "${PROXY_DIR:h}/backups" --port $PROXY_PORT
           --ext-dir "$ST_DIR/public/scripts/extensions/third-party")
     [[ -s "$LAN_KEY_FILE" && -n "$(lan_ip)" ]] && args+=(--mac-ip "$(lan_ip)" --lan-key-file "$LAN_KEY_FILE")
-    out=$(python3 "$LAUNCHER_DIR/../phone_sync.py" "${args[@]}" 2>&1 | grep '✓ 同步完成\|✗' | head -2)
-    log_event "[同步] 手机遥控触发：${out//$'\n'/；}"
+    out=$(python3 "$LAUNCHER_DIR/../phone_sync.py" "${args[@]}" 2>&1)
+    rc=$?
+    out=$(print -r -- "$out" | grep '✓ 同步完成\|✗' | head -2)
+    log_event "[同步] 手机遥控触发（退出码 $rc）：${out//$'\n'/；}"
     "$adb" -s "$serial" shell monkey -p com.tauritavern.client -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
-    notify "手机同步完成" "${out:-已同步}"
+    if (( rc == 0 )); then
+        notify "手机同步完成" "${out:-已同步}"
+    else
+        notify "手机同步没有全部完成" "${out:-同步程序出错（退出码 $rc）}。在 Mac 上用酒馆工具「手机同步」再做一次可以看到详情。"
+        return 1
+    fi
 }
 
 # 守护被强杀、死机重启后，我们打开的开关可能还开着：没有守护在跑就关掉
@@ -486,23 +663,38 @@ lid_cleanup_stale() {
 # ── 启动 / 关闭 ───────────────────────────────
 
 start_proxy() {
+    local owner
     step "启动 Claude 代理（端口 $PROXY_PORT）"
     explain "代理负责把酒馆 / TauriTavern 的请求转给 Claude，走你的订阅额度。"
     if [[ -n "$(our_pids $PROXY_PORT)" ]]; then
+        rm -f "$RESTART_MARK"
         ok "代理已经在运行，跳过"
         return 0
+    fi
+    if owner=$(foreign_owner $PROXY_PORT) && [[ -n "$owner" ]]; then
+        fail "端口 $PROXY_PORT 被其他程序占着：$owner，代理启动不了"
+        fix "关闭「$owner」后再试，或重启电脑。"
+        return 1
     fi
     rotate_log "$PROXY_LOG"
     mark_log "$PROXY_LOG"
     if [[ -s "$LAN_KEY_FILE" ]]; then
         explain "手机连接已开启：同一 Wi-Fi 下的设备带访问密码可以连这个代理。"
-        (cd "$PROXY_DIR" && CLAUDE_SUBSCRIPTION_HOST=0.0.0.0 CLAUDE_SUBSCRIPTION_LAN_KEY="$(<"$LAN_KEY_FILE")" nohup node server.js >>"$PROXY_LOG" 2>&1 &!)
+        (cd "$PROXY_DIR" && export CLAUDE_SUBSCRIPTION_HOST=0.0.0.0 CLAUDE_SUBSCRIPTION_LAN_KEY="$(<"$LAN_KEY_FILE")" &&
+            detach node server.js >>"$PROXY_LOG" 2>&1 &!)
     else
-        (cd "$PROXY_DIR" && nohup node server.js >>"$PROXY_LOG" 2>&1 &!)
+        (cd "$PROXY_DIR" && detach node server.js >>"$PROXY_LOG" 2>&1 &!)
     fi
     if wait_port $PROXY_PORT 20; then
+        rm -f "$RESTART_MARK"
         ok "代理已启动：http://127.0.0.1:$PROXY_PORT/v1"
-        [[ -s "$LAN_KEY_FILE" ]] && watchdog_start && ok "手机模式守护在运行：防睡眠、掉线自动重启"
+        if [[ -s "$LAN_KEY_FILE" ]]; then
+            if watchdog_start; then
+                ok "手机模式守护在运行：防睡眠、掉线自动重启"
+            else
+                warn "手机模式守护没有启动成功：看日志文件夹里的 watchdog.log，或再选一次「手机模式」"
+            fi
+        fi
         return 0
     fi
     fail "代理 20 秒内没有启动成功"
@@ -520,7 +712,7 @@ start_st() {
     fi
     rotate_log "$ST_LOG"
     mark_log "$ST_LOG"
-    (cd "$ST_DIR" && nohup node server.js >>"$ST_LOG" 2>&1 &!)
+    (cd "$ST_DIR" && detach node server.js >>"$ST_LOG" 2>&1 &!)
     if wait_port $ST_PORT 120; then
         ok "酒馆已启动：http://127.0.0.1:$ST_PORT"
         return 0
@@ -537,6 +729,8 @@ stop_one() {
         ok "$name 本来就没有运行"
         return
     fi
+    # 关代理前打个标记：守护 60 秒内不去「自动重启」它（遥控重启、手机模式切换会马上自己启动）
+    [[ "$port" == "$PROXY_PORT" ]] && : >"$RESTART_MARK"
     kill $pids 2>/dev/null
     for ((i = 0; i < 10; i++)); do
         sleep 1
@@ -556,6 +750,15 @@ stop_one() {
     fi
 }
 
+# 代理正在写回复时，关掉 / 重启会把这条回复掐断：先问（没在写就直接返回 0）
+confirm_proxy_idle() {
+    local what=$1 n
+    proxy_busy || return 0
+    n=$(proxy_inflight)
+    warn "代理正在写${n:+ $n 条}回复，现在${what}会把它掐断（那条回复要重新生成）"
+    ask_yes "仍然现在${what}吗？（选 N 就等写完再来）"
+}
+
 stop_all() {
     step "关闭酒馆和 Claude 代理"
     explain "关闭后 TauriTavern 也会连不上代理，直到下次启动。"
@@ -566,6 +769,13 @@ stop_all() {
 
 # ── 启动后检查 ────────────────────────────────
 
+cred_source_name() {
+    case $1 in
+        keychain) print "钥匙串" ;; file) print "凭据文件" ;; env) print "环境变量" ;;
+        "") print "未知" ;; *) print -r -- "$1" ;;
+    esac
+}
+
 health_check() {
     step "启动后检查：确认服务真的能用"
     local body parsed code
@@ -575,13 +785,13 @@ health_check() {
         fail "代理没有响应"
         diagnose_log "$PROXY_LOG" "代理"
     else
-        parsed=$(print -r -- "$body" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);const c=j.credential||{};console.log([j.ok?'ok':'bad',j.version,c.present?'yes':'no',c.subscriptionType||'',c.source||''].join(' '))}catch{console.log('bad')}})")
-        local -a f=(${=parsed})
+        parsed=$(print -r -- "$body" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);const c=j.credential||{};console.log([j.ok?'ok':'bad',j.version,c.present?'yes':'no',c.subscriptionType||'',c.source||''].map(v=>String(v??'').replace(/[|\\n]/g,' ')).join('|'))}catch{console.log('bad')}})")
+        local -a f=("${(@s:|:)parsed}")   # 按 | 分，空字段（没有套餐类型等）也占位，后面的字段不会错位
         if [[ "${f[1]}" != ok ]]; then
             fail "代理有响应，但报告异常（SDK 未加载）"
             diagnose_log "$PROXY_LOG" "代理"
         elif [[ "${f[3]}" == yes ]]; then
-            ok "代理正常（v${f[2]}，$(plan_name "${f[4]}") 订阅，凭据来自${${f[5]/keychain/钥匙串}/file/凭据文件}）"
+            ok "代理正常（v${f[2]}，$(plan_name "${f[4]}") 订阅，凭据来自$(cred_source_name "${f[5]}")）"
             local repo_v=$(node -p "require('$PROXY_DIR/package.json').version" 2>/dev/null)
             if [[ -n "$repo_v" && "${f[2]}" != "$repo_v" ]]; then
                 warn "代理还在跑旧版本 v${f[2]}，程序已经更新到 v$repo_v"
@@ -614,13 +824,29 @@ show_running() {
     fi
     if [[ -n "$(our_pids $PROXY_PORT)" ]]; then ok "Claude 代理：运行中 → http://127.0.0.1:$PROXY_PORT/v1"
     else explain "· Claude 代理：未运行（TauriTavern 需要它才能对话）"; fi
+    local mismatch why
+    if mismatch=$(proxy_mode_mismatch) && [[ -n "$mismatch" ]]; then
+        warn "$mismatch"
+        if [[ -s "$LAN_KEY_FILE" ]]; then
+            fix "守护会在代理空闲时自动重启它；也可以没在生成回复时选「重启酒馆」。"
+        else
+            fix "没在生成回复时选「重启酒馆」，重启后手机就连不上了。"
+        fi
+    fi
     if [[ -s "$LAN_KEY_FILE" ]]; then
         if watchdog_running; then ok "手机模式守护：运行中"; else warn "手机模式开着，但守护没在运行：双击「手机模式」修复"; fi
         if lid_awake_on; then ok "合盖不睡：开着"
-        elif lid_supported; then explain "· 合盖不睡：已安装，暂时放开（电量低 / 低电量模式 / 长时间没请求）"
+        elif lid_supported; then
+            if ! watchdog_running; then why="守护没在运行"
+            else why=$(lid_release_reason); [[ "$why" == off ]] && why="config.local 里写了 LID_AWAKE=0"; fi
+            explain "· 合盖不睡：已安装，现在放开着（${why:-条件刚恢复，守护 30 秒内会打开}）"
         else explain "· 合盖不睡：未安装（合盖会睡，手机连不上）"; fi
     fi
     lid_awake_on && [[ ! -s "$LAN_KEY_FILE" ]] && warn "合盖不睡开着，但手机模式是关的：合盖不会睡，注意发热耗电"
+    if [[ -f "$ADB_NOROUTE_FILE" ]]; then
+        warn "后台连手机的无线调试时报「No route to host」：多半是 macOS 的「本地网络」权限挡住了后台启动的 adb"
+        fix "在「酒馆工具」里选一次「手机同步」：它从终端重新启动 adb，之后守护也能连上手机（Mac 重启后可能要再来一次）。"
+    fi
 }
 
 summary() {
@@ -642,9 +868,11 @@ summary() {
 
 reinstall_deps() {
     local dir=$1 name=$2
+    # 目录为空时 cd "" 会成功、npm 会装到当前目录（常常是家目录）：先确认是个真的程序目录
+    [[ -n "$dir" && -f "$dir/package.json" ]] || return 0
     step "重新安装$name的依赖"
     explain "目录：$dir"
-    if (cd "$dir" && npm install --no-audit --no-fund 2>&1 | tee -a "$LAUNCHER_LOG" | tail -n 6 | sed "s/^/    ${C_DIM}│${C_RESET} /"; exit ${pipestatus[1]}); then
+    if (cd "$dir" || exit 1; npm install --no-audit --no-fund 2>&1 | tee -a "$LAUNCHER_LOG" | tail -n 6 | sed "s/^/    ${C_DIM}│${C_RESET} /"; exit ${pipestatus[1]}); then
         ok "$name依赖安装完成"
     else
         fail "$name依赖安装失败"
@@ -683,6 +911,7 @@ PLIST
     launchctl bootout "gui/$UID/$AUTOSTART_LABEL" >/dev/null 2>&1
     if launchctl bootstrap "gui/$UID" "$AUTOSTART_PLIST" 2>/dev/null; then
         ok "已开启：以后登录 Mac 时会自动启动 Claude 代理${ST_DIR:+和酒馆}"
+        explain "现在也会马上在后台启动一次（已经在运行的跳过；手机模式开着的话守护也一起），几秒后菜单上就能看到。"
     else
         fail "写入了启动项，但系统没有接受"
         fix "打开「系统设置 → 通用 → 登录项」，确认允许 zsh 在后台运行。"
@@ -713,7 +942,7 @@ start_comfy() {
     rotate_log "$COMFY_LOG"
     mark_log "$COMFY_LOG"
     # --use-pytorch-cross-attention：M5 上实测 SDXL 832×1216 24 步 131s → 78s。只监听本机；柏宝绘在浏览器直连失败时会经由酒馆后端转发，不需要打开跨域
-    (cd "$COMFY_DIR" && PYTORCH_ENABLE_MPS_FALLBACK=1 nohup .venv/bin/python main.py --listen 127.0.0.1 --port $COMFY_PORT --use-pytorch-cross-attention >>"$COMFY_LOG" 2>&1 &!)
+    (cd "$COMFY_DIR" && export PYTORCH_ENABLE_MPS_FALLBACK=1 && detach .venv/bin/python main.py --listen 127.0.0.1 --port $COMFY_PORT --use-pytorch-cross-attention >>"$COMFY_LOG" 2>&1 &!)
     if wait_port $COMFY_PORT 90; then
         ok "ComfyUI 已启动：http://127.0.0.1:$COMFY_PORT"
         return 0

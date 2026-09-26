@@ -2,7 +2,9 @@
 # 电脑酒馆 → 这台 Mac 上的 TauriTavern：一键导入 / 更新
 #   内容：聊天、角色卡、世界书、预设、头像、背景、图片、主题、快速回复
 #   扩展：电脑酒馆里的第三方扩展（git 版本不同就更新）
-#   设置：柏宝绘、MVU、小白X、酒馆助手、正则、Claude Max 面板的设置，以及当前预设 / 模型 / 对话补全开关
+#   设置（可选，问你）：柏宝绘、MVU、小白X、酒馆助手、提示词模板（EJS）、正则（含预设 / 角色正则的允许名单）、
+#         Claude Max 面板的扩展设置，以及对话补全设置（当前预设、模型、各项开关）
+#         （以 launcher/phone_sync.py 的 EXT_SETTING_KEYS / copy_settings 为准）
 # 单向：TT 独有的文件留着，TT 上更新过的文件不覆盖；被覆盖的旧文件和旧设置先备份。
 source "${0:A:h}/lib.zsh"
 banner "本机 TT 导入"
@@ -28,7 +30,7 @@ args=(--st "$ST_DIR/data/default-user" --local-tt "$TT_USER" --push-only --port 
 step "预览"
 python3 "$LAUNCHER_DIR/../phone_sync.py" "${args[@]}" --dry-run || { fail "读取数据失败"; summary; pause_end 1; }
 settings=()
-ask_yes "扩展设置和当前预设也一起导入吗？（TT 上的旧设置会先备份）" && settings=(--settings)
+ask_yes "扩展设置和对话补全设置（当前预设、模型）也一起导入吗？（TT 上的旧设置会先备份）" && settings=(--settings)
 ask_yes "开始导入吗？（会先关掉 TauriTavern，导入完再打开）" || { warn "没有导入。"; summary; pause_end; }
 
 step "导入"

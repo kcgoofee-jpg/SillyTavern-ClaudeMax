@@ -40,3 +40,19 @@ test('card and world items cover greetings, scripts, regex and entries', () => {
     assert.deepEqual(auditTexts(cardItems(card)).map((f) => f.where), ['正则·开局']);
     assert.equal(worldItems({ entries: { 1: { comment: 'e', content: '年龄: 12岁', disable: true } } }, 'W')[0].disabled, true);
 });
+
+test('ages are whole numbers: 1000 / 120 are not 10 / 12', () => {
+    assert.deepEqual(codes([{ where: 'a', text: '年龄: 1000岁的龙' }]), []);
+    assert.deepEqual(codes([{ where: 'a', text: '{ age: 120 }' }]), []);
+    assert.deepEqual(codes([{ where: 'a', text: '女儿今年120岁' }]), []);
+    assert.deepEqual(codes([{ where: 'a', text: '女儿今年12岁' }]), ['minor-relative']);
+    assert.deepEqual(codes([{ where: 'a', text: '年龄：9' }]), ['minor-age']);
+});
+
+test('正太 inside 真正太 / 反正太累 / 正太阳 is not a finding', () => {
+    assert.deepEqual(codes([{ where: 'a', text: '他真正太在意这件事了' }]), []);
+    assert.deepEqual(codes([{ where: 'a', text: '反正太累了就睡吧' }]), []);
+    assert.deepEqual(codes([{ where: 'a', text: '站在正太阳底下' }]), []);
+    assert.deepEqual(codes([{ where: 'a', text: '正太，十岁' }]), ['minor-word']);
+    assert.deepEqual(codes([{ where: 'a', text: '一个可爱的正太' }]), ['minor-word']);
+});

@@ -37,3 +37,9 @@ test('a trailing assistant prefill stays last; swipes do nothing', () => {
     moveTailBlockToFront(turn([U('a'), A('x'), U('b')]));
     assert.equal(moveTailBlockToFront(turn([U('a'), A('x'), U('b')])).moved, 0);   // same length: swipe / regenerate
 });
+
+test('null / malformed entries do not crash it', () => {
+    __resetTailBlock();
+    assert.doesNotThrow(() => moveTailBlockToFront([null, { role: 'user' }, S('x')]));
+    assert.doesNotThrow(() => moveTailBlockToFront([S('main'), null, U('a')]));
+});

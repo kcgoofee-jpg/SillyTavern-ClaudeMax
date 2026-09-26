@@ -27,6 +27,13 @@ test('served-model guard ignores the CLI synthetic error message', () => {
 });
 
 test('usage stats record metadata only and aggregate today / week', async () => {
+    const { diagnoseCache, __resetCacheDiag } = await import('../lib/cache-diag.js');
+    __resetCacheDiag();
+    // A real diagnosis whose change sits under a heading: the heading is prompt text.
+    const sys = (x) => `${'规则'.repeat(900)}\n## 小美的秘密日记\n${x}`;
+    diagnoseCache(sys('甲'), [{ role: 'assistant', content: 'mes 开场' }, { role: 'user', content: 'content 一' }]);
+    const diag = diagnoseCache(sys('乙'), [{ role: 'assistant', content: 'mes 开场' }, { role: 'user', content: 'content 一' }, { role: 'assistant', content: '回' }, { role: 'user', content: '二' }]);
+    assert.equal(diag.systemChanged, true);
     const dir = mkdtempSync(join(tmpdir(), 'cm-stats-'));
     process.env.CLAUDE_SUBSCRIPTION_STATS_FILE = join(dir, 'usage.jsonl');
     const stats = await import('../lib/usage-stats.js');
@@ -36,7 +43,7 @@ test('usage stats record metadata only and aggregate today / week', async () => 
     try {
         const t0 = Date.now() - 10000;
         stats.recordRequest({
-            model: 'claude-opus-5', path: 'resume', stream: true, startedAt: t0, firstTokenAt: t0 + 2000,
+            model: 'claude-opus-5', path: 'resume', stream: true, startedAt: t0, firstTokenAt: t0 + 2000, cacheDiag: diag,
             usage: { input_tokens: 100, output_tokens: 900, cache_read_input_tokens: 800, cache_creation_input_tokens: 100 },
             textChars: 3000, reasoningChars: 50, finish: 'stop',
         });
@@ -58,7 +65,8 @@ test('usage stats record metadata only and aggregate today / week', async () => 
     assert.equal(s.lastRequest.model, 'claude-fable-5', 'the last-turn card ignores background calls');
     const file = readFileSync(process.env.CLAUDE_SUBSCRIPTION_STATS_FILE, 'utf8');
     assert.equal(file.trim().split('\n').length, 3);
-    assert.ok(!/mes|content/.test(file), 'no message content persisted');
+    assert.ok(!/mes|content|秘密日记|小美|规则|开场/.test(file), 'no message or prompt text persisted, cache diagnosis included');
+    assert.match(file, /"cacheDiag":\{/);
     delete process.env.CLAUDE_SUBSCRIPTION_STATS_FILE;
 });
 

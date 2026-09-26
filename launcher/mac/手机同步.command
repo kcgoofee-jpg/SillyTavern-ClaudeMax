@@ -1,10 +1,11 @@
 #!/bin/zsh
-# 电脑酒馆 ↔ 手机 TauriTavern 双向同步：聊天、角色卡、世界书、预设、图片等（不同步设置和密钥）
+# 电脑酒馆 ↔ 手机 TauriTavern 双向同步：聊天、角色卡、世界书、预设、图片等；扩展只从电脑推到手机。
+# 其他设置和 API 密钥不同步；只改手机设置里的一处：Claude Max 的代理地址对准这台 Mac 的 IP，
+# 手机模式开着时顺便填上 Mac 的访问密码（lan-key.local）。
 # 手机用 USB 线连着（开了 USB 调试），或者之前在这里开过无线调试
 source "${0:A:h}/lib.zsh"
 banner "手机同步"
-PHONE_FILE="$PROXY_DIR/launcher/phone.local"   # 无线调试时手机的地址
-TT_PKG=com.tauritavern.client
+TT_PKG=com.tauritavern.client   # 无线调试时手机的地址在 $PHONE_FILE（lib.zsh）
 
 step "找手机"
 adb=$(find_adb) || {
@@ -15,7 +16,16 @@ adb=$(find_adb) || {
 serial=$(phone_serial)
 if [[ -z "$serial" && -s "$PHONE_FILE" ]]; then
     explain "没插线，试无线调试：$(<"$PHONE_FILE")"
-    "$adb" connect "$(<"$PHONE_FILE")" >/dev/null 2>&1
+    adb_reconnect "$adb"
+    if (( $? == 2 )); then
+        # 后台（守护 / 开机启动）拉起的 adb 服务没有 macOS「本地网络」权限，连不了局域网；
+        # 从这个终端窗口重新启动它就有了，之后守护也用这个服务
+        explain "adb 报 No route to host：从终端重新启动 adb 服务再试（macOS 本地网络权限）"
+        "$adb" kill-server >/dev/null 2>&1
+        "$adb" start-server >/dev/null 2>&1
+        adb_reconnect "$adb"
+        (( $? == 2 )) && warn "还是 No route to host：确认手机和 Mac 在同一个 Wi-Fi；「系统设置 → 隐私与安全性 → 本地网络」里允许「终端」。"
+    fi
     sleep 1
     serial=$(phone_serial)
 fi
@@ -40,8 +50,18 @@ if [[ "$serial" != *:* ]] && ask_yes "要开启无线调试吗？（以后不插
     if [[ -n "$pip" ]] && "$adb" -s "$serial" tcpip 5555 >/dev/null 2>&1; then
         sleep 2
         "$adb" connect "$pip:5555" >/dev/null 2>&1
-        print -r -- "$pip:5555" >"$PHONE_FILE"
-        ok "无线调试已开启：$pip:5555（下次没插线会自动连这个地址）"
+        # 真的连上了（adb devices 里这个地址是 device）才记下地址、才算开启
+        for i in {1..5}; do
+            "$adb" devices 2>/dev/null | awk -v a="$pip:5555" '$1==a && $2=="device" {f=1} END {exit !f}' && break
+            sleep 1
+        done
+        if "$adb" devices 2>/dev/null | awk -v a="$pip:5555" '$1==a && $2=="device" {f=1} END {exit !f}'; then
+            print -r -- "$pip:5555" >"$PHONE_FILE"
+            rm -f "$ADB_NOROUTE_FILE"
+            ok "无线调试已开启：$pip:5555（下次没插线会自动连这个地址）"
+        else
+            warn "手机那边打开了无线调试，但 Mac 连不上 $pip:5555：确认手机和 Mac 在同一个 Wi-Fi。这次先用 USB 线同步。"
+        fi
     else
         warn "没开成：确认手机连着 Wi-Fi。"
     fi
@@ -61,8 +81,8 @@ args=(--st "$ST_DIR/data/default-user" --adb "$adb" --serial "$serial"
 python3 "$LAUNCHER_DIR/../phone_sync.py" "${args[@]}" --dry-run || { fail "读取手机数据失败"; summary; pause_end 1; }
 if ask_yes "开始同步吗？（会先关掉手机上的 TauriTavern，同步完可以再打开）"; then
     # 同步要先关掉手机上的 TT：它正在用、或者有一条回复还没存盘（在后台）时，关掉会丢内容
-    busy=$(python3 "${PROXY_DIR:h}/scripts/apply_settings.py" --why-busy 2>/dev/null)
-    if [[ -n "$busy" ]]; then
+    # 判断不了（检查脚本不在、出错、读不到状态）也按「忙」处理：宁可多问一句
+    if ! busy=$(phone_tt_busy_reason "$serial" "$adb"); then
         warn "手机现在不方便关 TT：$busy"
         explain "先在手机上打开 TT，等最新一楼显示完整（有回复、有图），再回来同步。"
         ask_yes "仍然要现在同步吗？（可能丢掉还没存盘的回复）" || { warn "没有同步，手机上的 TT 没动。"; summary; pause_end; }

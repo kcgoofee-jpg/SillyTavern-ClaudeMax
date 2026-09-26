@@ -68,12 +68,17 @@ def main():
     print(f"配方「{preset.get('name')}」：画师串 {tag_count(preset.get('prompt'))} 个 tag，"
           f"质量词 {tag_count(preset.get('quality'))} 个，负面 {tag_count(preset.get('negative'))} 个")
     print('参数：' + ('、'.join(PARAM_LABELS[k] for k in params) if params else '无（沿用柏宝绘现有设置）'))
+    written = 0
     for path in sys.argv[2:]:
         if not os.path.exists(path):
             print(f'跳过（没有 {path}）')
             continue
         backup = apply(path, preset, params)
         print(f'已写入 {path}（原文件备份为 {os.path.basename(backup)}）')
+        written += 1
+    if not written:
+        print('一个设置文件都没写入（上面列出的都不存在）。')
+        return 1
     return 0
 
 

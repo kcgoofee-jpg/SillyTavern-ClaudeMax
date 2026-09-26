@@ -50,3 +50,13 @@ test('LAN access: loopback needs no key, others must match it exactly', () => {
     assert.equal(keyMatches('abc', ''), false);
     assert.equal(keyMatches(null, 'abc'), false);
 });
+
+import { presentedKey } from '../lib/listener.js';
+
+test('access key: X-Claude-Max-Key is trimmed; a blank one does not hide a valid Bearer', () => {
+    assert.equal(presentedKey({ headers: { 'x-claude-max-key': ' k1 ' } }), 'k1');
+    assert.equal(presentedKey({ headers: { 'x-claude-max-key': '', authorization: 'Bearer k2' } }), 'k2');
+    assert.equal(presentedKey({ headers: { 'x-claude-max-key': '   ', authorization: 'Bearer  k3 ' } }), 'k3');
+    assert.equal(presentedKey({ headers: { 'x-claude-max-key': 'k4', authorization: 'Bearer k5' } }), 'k4');
+    assert.equal(presentedKey({ headers: {} }), null);
+});

@@ -1,2 +1,3 @@
 #!/bin/sh
-exec zsh "$(git rev-parse --show-toplevel)/scripts/gate.sh" --push
+# git 给 pre-push 传 <远端名> <地址>，stdin 里是要推的 ref 列表；exec 原样交给 gate.sh
+exec zsh "$(git rev-parse --show-toplevel)/scripts/gate.sh" --push "$@"

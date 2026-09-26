@@ -106,3 +106,10 @@ test('paragraph plan and scene card come from the preset; the reply is checked a
     assert.ok(!ok.issues.some((i) => i.code === 'paragraphs' || i.code === 'scenecard'));
     assert.equal(paragraphCount('短\n' + para), 1);
 });
+
+test('paragraphCount: blank-line blocks are paragraphs, dialogue lines inside them are not', () => {
+    const p = '她把地图放到矮桌上，摊平在旅人手边，伸出一根手指点在那个红圈上。';
+    const d = '"你记得它画在哪里吗？"她问，声音压得很低，像怕惊动外面的东西。';
+    assert.equal(paragraphCount([p + '\n' + d, p, p + '\n' + d + '\n' + d].join('\n\n')), 3);
+    assert.equal(paragraphCount([p, d, p].join('\n')), 3); // no blank lines: one per line
+});

@@ -29,3 +29,14 @@ test('refusal fallback to another model is off unless asked for (a streamed part
     assert.equal(buildSubprocessEnv({ envPins: {}, maxTokens: undefined, apiKey: null }).CLAUDE_CODE_DISABLE_REFUSAL_FALLBACK, undefined);
     if (saved === undefined) delete process.env.CLAUDE_SUBSCRIPTION_REFUSAL_FALLBACK; else process.env.CLAUDE_SUBSCRIPTION_REFUSAL_FALLBACK = saved;
 });
+
+test('the proxy\'s own CLAUDE_SUBSCRIPTION_* settings never reach the CLI', () => {
+    process.env.CLAUDE_SUBSCRIPTION_LAN_KEY = 'secret-lan-key';
+    try {
+        const env = buildSubprocessEnv({ envPins: {}, maxTokens: undefined, apiKey: null });
+        assert.deepEqual(Object.keys(env).filter((k) => k.startsWith('CLAUDE_SUBSCRIPTION_')), []);
+        assert.equal(process.env.CLAUDE_SUBSCRIPTION_LAN_KEY, 'secret-lan-key', 'the proxy keeps its own copy');
+    } finally {
+        delete process.env.CLAUDE_SUBSCRIPTION_LAN_KEY;
+    }
+});

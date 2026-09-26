@@ -23,6 +23,8 @@
 //   CLAUDE_SUBSCRIPTION_MAX_TURNS=N     SDK maxTurns override (default 1)
 //   CLAUDE_SUBSCRIPTION_CLAUDE_PATH=…   explicit claude executable
 //   CLAUDE_SUBSCRIPTION_NO_UI_INSTALL=1 skip the UI-extension auto-install
+//   CLAUDE_SUBSCRIPTION_DEBUG_DIR=…     where debug dumps go (default data/debug)
+//   CLAUDE_SUBSCRIPTION_CONTEXT_PIN_FILE=…|off  CLI context pin file (off = memory only)
 
 import express from 'express';
 import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
@@ -33,8 +35,8 @@ import { handleStatus } from './lib/status.js';
 import { handleQuota } from './lib/oauth.js';
 import { handleStats } from './lib/usage-stats.js';
 import { handleDebugLast } from './lib/debug-dump.js';
-import { handleKeptReply } from './lib/reply-keeper.js';
-import { startStandaloneListener, stopStandaloneListener, probeExistingProxy, portInUseMessage } from './lib/listener.js';
+import { handleCancelReply, handleKeptReply } from './lib/reply-keeper.js';
+import { asyncRoute, startStandaloneListener, stopStandaloneListener, probeExistingProxy, portInUseMessage } from './lib/listener.js';
 
 const DEFAULT_PORT = 8901;
 const DEFAULT_HOST = '127.0.0.1';
@@ -64,8 +66,10 @@ function isNewerVersion(a, b) {
 // The UI extension lives at the REPO ROOT (manifest.json + index.js +
 // style.css) so the repo can ALSO be installed directly through
 // SillyTavern's "Install extension" dialog, which requires a root
-// manifest.json. Only these files make up the extension.
-const UI_EXTENSION_FILES = ['manifest.json', 'index.js', 'style.css', 'lib/chat-check.js', 'lib/preset-reco.js', 'lib/lore-constant.js', 'lib/card-audit.js'];
+// manifest.json. Only these files make up the extension: the manifest,
+// index.js + style.css, and the browser modules index.js imports from lib/
+// (keep this list in step with index.js's imports).
+const UI_EXTENSION_FILES = ['manifest.json', 'index.js', 'style.css', 'lib/chat-check.js', 'lib/preset-reco.js', 'lib/lore-constant.js', 'lib/card-audit.js', 'lib/island.js'];
 
 /**
  * Install or update the companion UI extension into SillyTavern's
@@ -143,11 +147,13 @@ export async function init(router) {
     // a direct browser fetch to 127.0.0.1:8901 resolves to the CLIENT device
     // and fails whenever SillyTavern is browsed from a phone/another PC.
     router.use(express.json({ limit: '50mb' }));
-    router.get('/status', handleStatus);
-    router.get('/quota', handleQuota);
+    router.get('/status', asyncRoute(handleStatus));
+    router.get('/quota', asyncRoute(handleQuota));
     router.get('/stats', handleStats);
     router.get('/debug', handleDebugLast);
     router.get('/reply/:slot', handleKeptReply);
+    // The panel's Stop button (POST: goes through SillyTavern's CSRF check).
+    router.post('/reply/:slot/cancel', handleCancelReply);
 
     installUiExtension();
 

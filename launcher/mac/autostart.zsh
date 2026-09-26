@@ -7,5 +7,7 @@ lid_cleanup_stale   # 上次守护没来得及收尾（强杀、死机）时恢�
 start_proxy
 start_st
 # 手机模式开着：把守护也拉起来（防睡眠、掉线自动重启）
-[[ -s "$LAN_KEY_FILE" ]] && watchdog_start && ok "手机模式守护已启动"
+if [[ -s "$LAN_KEY_FILE" ]]; then
+    if watchdog_start; then ok "手机模式守护已启动"; else fail "手机模式守护没有启动成功（看 watchdog.log）"; fi
+fi
 summary
