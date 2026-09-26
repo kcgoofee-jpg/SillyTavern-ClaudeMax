@@ -79,10 +79,17 @@ log_event() {
     print -r -- "$(date '+%Y-%m-%d %H:%M:%S') $*" >>"$LAUNCHER_LOG"
 }
 
+# 扩展版本号 + git 提交（标题栏显示，排查问题时一眼看出跑的是哪个版本）
+cm_version() {
+    local v=$(sed -n 's/.*"version": *"\([^"]*\)".*/\1/p' "$PROXY_DIR/manifest.json" 2>/dev/null | head -1)
+    local c=$(git -C "$PROXY_DIR" rev-parse --short HEAD 2>/dev/null)
+    print -r -- "v${v:-?}${c:+ · $c}"
+}
+
 banner() {
     print
     print -r -- "${C_BOLD}${C_CYAN}════════════════════════════════════════════${C_RESET}"
-    print -r -- "${C_BOLD}  $1${C_RESET}"
+    print -r -- "${C_BOLD}  $1${C_RESET}  ${C_DIM}Claude Max $(cm_version)${C_RESET}"
     print -r -- "${C_BOLD}${C_CYAN}════════════════════════════════════════════${C_RESET}"
     log_event "===== $1 ====="
 }
@@ -660,8 +667,14 @@ phone_handoff() {
     done
     (( secs > 0 )) || return 0
     "$adb" -s "$serial" shell "cmd notification post -S bigtext -t '请离开键盘：${secs} 秒后关闭 TauriTavern' claudemax 'Mac 要${action//\'/}。输入框里没发出去的字先复制；做完会重新打开。'" >/dev/null 2>&1
-    explain "已在手机上提醒，${secs} 秒后关闭 TT…"
-    sleep $secs
+    "$adb" -s "$serial" shell "cmd vibrator_manager synced -f oneshot 400; sleep 0.5; cmd vibrator_manager synced -f oneshot 400" >/dev/null 2>&1
+    explain "已在手机上提醒（通知栏 + 震动两下）。按 Ctrl-C 取消。"
+    local k
+    for (( k = secs; k > 0; k-- )); do
+        printf '\r  %2d 秒后关闭手机上的 TT…' $k
+        sleep 1
+    done
+    printf '\r  正在关闭手机上的 TT…      \n'
 }
 
 # ── 手机同步的「中心」 ─────────────────────────
