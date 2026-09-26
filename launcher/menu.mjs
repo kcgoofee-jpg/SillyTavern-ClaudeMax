@@ -168,9 +168,10 @@ export function statusLines(s, probs = problems(s)) {
         if (s.busy) facts.push(c.warn(`在写 ${s.busy} 条回复`));
     }
     const L = [`  ${pad(head, 11)}  ${facts.join(' · ')}`];
+    const w = Math.max(0, ...probs.map((p) => width(p.text))) + 2;
     probs.forEach((p, i) => {
         const act = p.fix || p.sub ? `→ ${p.fixLabel}` : c.dim(p.fixLabel);
-        L.push(`    ${c.key(String.fromCharCode(97 + i))}  ${pad(p.text, 28)}${act}`);
+        L.push(`    ${c.key(String.fromCharCode(97 + i))}  ${pad(p.text, w)}${act}`);
     });
     if (OS !== 'mac') { L.push(`  ${c.dim('手机功能只支持 Mac')}`); return L; }
     const tt = [s.hasTT ? `Mac TT ${s.macTTRunning ? '开着' : '没开'}` : null, phoneText(s),
