@@ -391,7 +391,10 @@ class PhoneSyncTests(unittest.TestCase):
         self.assertFalse(os.path.exists(f'{rext}/Ext/data/private.json'))
         self.assertFalse(os.path.exists(f'{rext}/Ext/stale.js'))
         self.assertTrue(os.path.exists(f'{rext}/Ext/node_modules/y/i.js'))   # 手机原有的依赖带过来
-        self.assertTrue(os.path.exists(os.path.join(e.phone_data, 'extensions', '.cm-previous', 'Ext', 'stale.js')))
+        # 换下来的旧文件夹不留在 extensions 里，收进 data/_cm_archive/<日期>-扩展旧副本/
+        self.assertFalse(os.path.exists(os.path.join(e.phone_data, 'extensions', '.cm-previous', 'Ext')))
+        arch = os.path.join(e.phone_data, '_cm_archive')
+        self.assertEqual([os.path.exists(os.path.join(arch, d, 'Ext', 'stale.js')) for d in os.listdir(arch)], [True])
         rev = ps.local_rev(src)
         self.assertEqual(read(f'{rext}/Ext/.git/cm-pushed').split(), [rev, ps.PACKER])
         # 第二次：一样，不推
@@ -409,6 +412,51 @@ class PhoneSyncTests(unittest.TestCase):
         rc, out = e.sync('--ext-dir', ext_dir)
         self.assertIn('扩展 → 手机：Ext', out)
         self.assertEqual(read(f'{rext}/Ext/index.js'), 'v2')
+        # 每个扩展只留最新的一份存档
+        found = [dp for dp, ds, _ in os.walk(arch) if os.path.basename(dp) == 'Ext']
+        self.assertEqual(len(found), 1, found)
+        self.assertEqual(read(os.path.join(found[0], 'index.js')), 'v1')
+
+    def test_leftover_previous_copy_is_archived(self):
+        e = self.e
+        src, env = self._git_ext('Ext')
+        e.sync('--ext-dir', os.path.dirname(src))
+        write(os.path.join(e.phone_data, 'extensions', '.cm-previous', 'Ext', 'old.js'), 'left by 3.3')
+        rc, out = e.sync('--ext-dir', os.path.dirname(src))
+        self.assertEqual(rc, 0, out)
+        self.assertFalse(os.path.exists(os.path.join(e.phone_data, 'extensions', '.cm-previous', 'Ext')))
+        self.assertIn('收进了存档', out)
+
+    def test_branch_without_upstream_is_reported_and_fixed_on_request(self):
+        e = self.e
+        src, env = self._git_ext('Ext')
+        g = lambda *a: subprocess.run(['git', '-C', src, *a], check=True, env=env, capture_output=True, text=True).stdout  # noqa: E731
+        g('remote', 'add', 'origin', 'https://example.invalid/ext.git')
+        g('update-ref', 'refs/remotes/origin/main', 'HEAD')
+        g('checkout', '-q', '-b', 'local/cache-friendly-order')
+        ext_dir = os.path.dirname(src)
+        self.assertEqual(ps.ext_upstream(None, ext_dir), [{'name': 'Ext', 'branch': 'local/cache-friendly-order', 'target': 'main'}])
+        f = os.path.join(e.root, 'plan.json')
+        rc, out = e.sync('--ext-dir', ext_dir, '--plan-json', f)
+        up = json.loads(read(f))['ask']['upstream']
+        self.assertEqual({u['side'] for u in up}, {'local'})   # 手机上还没有这个扩展
+        # 不问问题的同步：只推，不改上游；推过去的手机副本同样没上游
+        rc, out = e.sync('--ext-dir', ext_dir)
+        self.assertIn('没设上游', out)
+        rext = os.path.join(e.phone_data, 'extensions', 'third-party')
+        self.assertEqual([u['name'] for u in ps.ext_upstream(ps.Phone(e.adb, 'FAKE'), rext)], ['Ext'])
+        cf = os.path.join(e.root, 'c.json')
+        write(cf, json.dumps({'extUpstream': True}))
+        rc, out = e.sync('--ext-dir', ext_dir, '--choices', cf)
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(g('config', '--get', 'branch.local/cache-friendly-order.merge').strip(), 'refs/heads/main')
+        self.assertEqual(ps.ext_upstream(ps.Phone(e.adb, 'FAKE'), rext), [])
+        self.assertEqual(ps.ext_upstream(None, ext_dir), [])
+        self.assertEqual(g('rev-parse', 'HEAD'), g('rev-parse', 'origin/main'))   # 历史没动
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            ps.main(['--upstream-check', ext_dir])
+        self.assertEqual(json.loads(buf.getvalue()), {ext_dir: []})
 
     def test_extension_old_marker_repushed_once(self):
         e = self.e
@@ -534,15 +582,232 @@ class ChatConflictTests(unittest.TestCase):
 
 
 class SecretsMergeTests(unittest.TestCase):
-    def test_keeps_keys_from_both_sides_and_newer_active(self):
-        newer = {'api_key_custom': [{'id': 'a', 'value': 'K1', 'active': True}], 'api_key_nai': [{'id': 'n', 'value': 'N', 'active': True}]}
-        older = {'api_key_custom': [{'id': 'b', 'value': 'K2', 'active': True}, {'id': 'c', 'value': 'K1', 'active': False}],
-                 'api_key_deepseek': [{'id': 'd', 'value': 'D', 'active': True}]}
-        m = ps.merge_secrets(newer, older)
-        self.assertEqual([e['value'] for e in m['api_key_custom']], ['K1', 'K2'])
-        self.assertEqual([e['active'] for e in m['api_key_custom']], [True, False])
-        self.assertIn('api_key_nai', m)
-        self.assertIn('api_key_deepseek', m)
+    def test_only_adds_missing_entries_inactive_and_keeps_each_sides_active(self):
+        mac = {'api_key_custom': [{'id': 'a', 'value': 'GATEWAY', 'active': True}], 'api_key_nai': [{'id': 'n', 'value': 'N', 'active': True}]}
+        phone = {'api_key_custom': [{'id': 'b', 'value': 'LAN', 'active': True}, {'id': 'c', 'value': 'GATEWAY', 'active': False}],
+                 'api_key_deepseek': [{'id': 'd', 'value': 'D', 'active': True}], 'old_style': 'S'}
+        m, n = ps.add_missing_secrets(phone, mac)
+        self.assertEqual(n, 1)   # 只有 api_key_nai 是手机没有的（GATEWAY 按值已经有了）
+        self.assertEqual([(e['value'], e['active']) for e in m['api_key_custom']], [('LAN', True), ('GATEWAY', False)])
+        self.assertEqual(m['api_key_nai'], [{'id': 'n', 'value': 'N', 'active': False}])
+        self.assertEqual(m['old_style'], 'S')
+        m2, n2 = ps.add_missing_secrets(mac, phone)
+        self.assertEqual([(e['value'], e['active']) for e in m2['api_key_custom']], [('GATEWAY', True), ('LAN', False)])
+        self.assertNotIn('old_style', m2)   # 旧格式（字符串）不带过去
+        self.assertEqual(n2, 2)
+        self.assertEqual(mac['api_key_custom'][0]['active'], True)   # 不改原来的
+
+
+def presets(**oai):
+    return json.dumps({'oai_settings': oai}, ensure_ascii=False)
+
+
+def secrets_file(*entries, key='api_key_custom'):
+    return json.dumps({key: [{'id': f'id{i}', 'value': v, 'label': '', 'active': act} for i, (v, act) in enumerate(entries)]})
+
+
+class ChoiceTests(unittest.TestCase):
+    """菜单的「要你选」：--plan-json 分组、--choices 执行、没选时的安全默认。"""
+
+    def setUp(self):
+        self.e = Env()
+        self._guard = (ps.GUARD_MOD, ps.GUARD_DIR)
+        ps.GUARD_MOD = os.path.join(self.e.root, 'module')
+        ps.GUARD_DIR = os.path.join(self.e.root, 'guard')
+        os.makedirs(ps.GUARD_DIR)
+
+    def tearDown(self):
+        ps.GUARD_MOD, ps.GUARD_DIR = self._guard
+        self.e.close()
+
+    def plan(self, *extra):
+        f = os.path.join(self.e.root, 'plan.json')
+        rc, out = self.e.sync('--plan-json', f, *extra)
+        return rc, json.loads(read(f)), out
+
+    def run_choices(self, choices, *extra):
+        f = os.path.join(self.e.root, 'choices.json')
+        write(f, json.dumps(choices))
+        r = os.path.join(self.e.root, 'result.json')
+        rc, out = self.e.sync('--choices', f, '--result-json', r, *extra)
+        return rc, (json.loads(read(r)) if os.path.exists(r) else None), out
+
+    def diverged_chat(self):
+        e = self.e
+        base = [('d1', 'U', '你好'), ('d2', 'C', '欢迎')]
+        write(f'{e.st}/chats/C/c.jsonl', chat(*base), 1_700_000_000)
+        e.sync()   # 记下同步状态
+        write(f'{e.st}/chats/C/c.jsonl', chat(*base, ('d3', 'U', '电脑上聊的')), 1_700_000_100)
+        write(f'{e.phone}/chats/C/c.jsonl', chat(*base, ('d4', 'U', '手机上聊的'), ('d5', 'C', '回复')), 1_700_000_900)
+
+    def test_plan_groups_auto_ask_skip_and_changes_nothing(self):
+        e = self.e
+        self.diverged_chat()
+        write(f'{e.st}/worlds/mac.json', 'mac only', 1_700_000_000)
+        write(f'{e.phone}/worlds/phone.json', 'phone only', 1_700_000_000)
+        write(f'{e.st}/settings/presets.json', presets(model='a', custom_url='http://127.0.0.1:8901/v1'), 1_700_000_000)
+        write(f'{e.phone}/settings/presets.json', presets(model='b', custom_url='http://10.0.0.2:8901/v1'), 1_700_000_500)
+        write(f'{e.st}/secrets.json', secrets_file(('K1', True)))
+        write(f'{e.phone}/secrets.json', secrets_file(('K2', True)))
+        before = sorted(os.listdir(f'{e.st}/chats/C'))
+        rc, p, out = self.plan()
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(p['ok'])
+        self.assertEqual(p['auto']['push'], ['worlds/mac.json'])
+        self.assertEqual(p['auto']['pull'], ['worlds/phone.json'])
+        self.assertEqual([c['rel'] for c in p['ask']['chats']], ['chats/C/c.jsonl'])
+        self.assertEqual(p['ask']['chats'][0]['extra'], {'local': 1, 'remote': 2})
+        self.assertEqual(p['ask']['chats'][0]['newer'], 'remote')
+        self.assertEqual(p['ask']['api']['newer'], 'remote')
+        self.assertEqual(p['ask']['secrets'], {'local': 1, 'remote': 1})
+        self.assertFalse(p['nothing'])
+        self.assertEqual(p['guard'], {'module': False, 'restoring': False, 'pending': False})
+        self.assertNotIn('K1', read(os.path.join(e.root, 'plan.json')))
+        self.assertEqual(sorted(os.listdir(f'{e.st}/chats/C')), before)          # 什么都没写
+        self.assertFalse(os.path.exists(f'{e.phone}/worlds/mac.json'))
+
+    def test_no_choices_keeps_safe_defaults_and_defers_settings_and_keys(self):
+        e = self.e
+        self.diverged_chat()
+        write(f'{e.st}/settings/presets.json', presets(model='a'), 1_700_000_000)
+        write(f'{e.phone}/settings/presets.json', presets(model='b'), 1_700_000_500)
+        write(f'{e.st}/secrets.json', secrets_file(('K1', True)))
+        write(f'{e.phone}/secrets.json', secrets_file(('K2', True)))
+        rc, out = e.sync()
+        self.assertEqual(rc, 0, out)
+        self.assertIn('待你选：API 和预设设置两边不一样', out)
+        self.assertIn('待你选：API 密钥两边不一样', out)
+        self.assertEqual(json.loads(read(f'{e.phone}/settings/presets.json'))['oai_settings']['model'], 'b')
+        self.assertEqual(json.loads(read(f'{e.phone}/secrets.json')), json.loads(secrets_file(('K2', True))))
+        # 聊天冲突：较新的（手机）赢，电脑那份多出的楼另存冲突副本，两边都有
+        self.assertIn('手机上聊的', read(f'{e.st}/chats/C/c.jsonl'))
+        self.assertEqual(len([f for f in os.listdir(f'{e.phone}/chats/C') if '冲突副本' in f]), 1)
+
+    def test_chat_choice_local_remote_both(self):
+        e = self.e
+        self.diverged_chat()
+        rc, res, out = self.run_choices({'files': {'chats/C/c.jsonl': 'local'}})
+        self.assertEqual(rc, 0, out)
+        self.assertIn('电脑上聊的', read(f'{e.phone}/chats/C/c.jsonl'))
+        self.assertEqual([f for f in os.listdir(f'{e.phone}/chats/C') if '冲突副本' in f], [])
+        bk = [os.path.join(dp, f) for dp, _, fs in os.walk(e.backups) for f in fs]
+        self.assertTrue(any(p.endswith('手机/chats/C/c.jsonl') and '手机上聊的' in read(p) for p in bk), bk)
+        self.assertEqual(res['push']['done'], 1)
+
+        write(f'{e.phone}/chats/C/c.jsonl', chat(('d1', 'U', '你好'), ('d9', 'U', '手机又聊了')), 1_700_002_000)
+        write(f'{e.st}/chats/C/c.jsonl', chat(('d1', 'U', '你好'), ('d8', 'U', 'Mac 又聊了')), 1_700_001_000)
+        rc, res, out = self.run_choices({'files': {'chats/C/c.jsonl': 'remote'}})
+        self.assertIn('手机又聊了', read(f'{e.st}/chats/C/c.jsonl'))
+        self.assertEqual(res['copies'], [])
+
+        # 两份都留：没有多出的楼也另存一份
+        write(f'{e.phone}/chats/C/c.jsonl', chat(('d1', 'U', '你好'), ('d9', 'U', '手机又聊了'), ('d10', 'C', '续')), 1_700_004_000)
+        write(f'{e.st}/chats/C/c.jsonl', chat(('d1', 'U', '你好'), ('d9', 'U', '手机又聊了'), ('d10', 'C', '续'), ('d11', 'U', 'x')), 1_700_003_000)
+        os.utime(f'{e.st}/chats/C/c.jsonl', (1_700_003_000, 1_700_003_000))
+        rc, res, out = self.run_choices({'files': {'chats/C/c.jsonl': 'both'}})
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(len(res['copies']), 1, out)
+        self.assertIn('两份都留', out)
+
+    def test_api_choice_keeps_per_device_address(self):
+        e = self.e
+        write(f'{e.st}/settings/presets.json', presets(model='new', preset_settings_openai='P2', custom_url='http://127.0.0.1:8901/v1',
+                                                       reverse_proxy='https://mac.example'), 1_700_000_900)
+        write(f'{e.phone}/settings/presets.json', presets(model='old', preset_settings_openai='P1', custom_url='http://192.168.1.5:8901/v1',
+                                                          reverse_proxy=''), 1_700_000_000)
+        rc, res, out = self.run_choices({'api': 'local'})
+        self.assertEqual(rc, 0, out)
+        o = json.loads(read(f'{e.phone}/settings/presets.json'))['oai_settings']
+        self.assertEqual((o['model'], o['preset_settings_openai']), ('new', 'P2'))
+        self.assertEqual((o['custom_url'], o['reverse_proxy']), ('http://192.168.1.5:8901/v1', ''))
+        self.assertIn('P2', res['api'])
+        # 只差连哪个地址：不算不一样
+        rc, p, out = self.plan()
+        self.assertIsNone(p['ask']['api'])
+
+    def test_secrets_merge_choice_adds_inactive_only(self):
+        e = self.e
+        write(f'{e.st}/secrets.json', secrets_file(('GATEWAY', True)))
+        write(f'{e.phone}/secrets.json', secrets_file(('LAN', True)))
+        rc, res, out = self.run_choices({'secrets': 'merge'})
+        self.assertEqual(rc, 0, out)
+        ph = json.loads(read(f'{e.phone}/secrets.json'))['api_key_custom']
+        mac = json.loads(read(f'{e.st}/secrets.json'))['api_key_custom']
+        self.assertEqual([(x['value'], x['active']) for x in ph], [('LAN', True), ('GATEWAY', False)])
+        self.assertEqual([(x['value'], x['active']) for x in mac], [('GATEWAY', True), ('LAN', False)])
+        self.assertNotIn('GATEWAY', out)
+        self.assertNotIn('LAN\'', out)
+
+    def test_endpoint_makes_lan_key_the_active_custom_key(self):
+        e = self.e
+        write(f'{e.phone}/settings/presets.json', presets(custom_url='http://10.0.0.1:8901/v1'))
+        write(f'{e.phone}/secrets.json', secrets_file(('GATEWAY-SECRET', True)))
+        key = os.path.join(e.root, 'key')
+        write(key, 'LANKEY-12345')
+        rc, out = e.sync('--mac-ip', '192.168.1.5', '--lan-key-file', key)
+        self.assertEqual(rc, 0, out)
+        lst = json.loads(read(f'{e.phone}/secrets.json'))['api_key_custom']
+        self.assertEqual([(x['value'], x['active']) for x in lst], [('GATEWAY-SECRET', False), ('LANKEY-12345', True)])
+        self.assertEqual(lst[1]['label'], ps.LAN_KEY_LABEL)
+        self.assertNotIn('LANKEY', out)
+        self.assertNotIn('GATEWAY-SECRET', out)
+        bk = [os.path.join(dp, f) for dp, _, fs in os.walk(e.backups) for f in fs if f == 'secrets.json']
+        self.assertTrue(bk and stat.S_IMODE(os.stat(bk[0]).st_mode) == 0o600)
+        # 再来一次：已经对了，不改
+        rc, out = e.sync('--mac-ip', '192.168.1.5', '--lan-key-file', key)
+        self.assertEqual(json.loads(read(f'{e.phone}/secrets.json'))['api_key_custom'], lst)
+        # 手机不是连代理（自定义地址是别处）：不碰密钥
+        write(f'{e.phone}/settings/presets.json', presets(custom_url='https://gateway.example/v1'))
+        write(f'{e.phone}/secrets.json', secrets_file(('GATEWAY-SECRET', True)))
+        e.sync('--mac-ip', '192.168.1.5', '--lan-key-file', key)
+        self.assertEqual(len(json.loads(read(f'{e.phone}/secrets.json'))['api_key_custom']), 1)
+
+    def test_restore_lock_refuses_everything(self):
+        e = self.e
+        write(f'{e.st}/chats/A/x.jsonl', 'mac', 1_700_000_000)
+        os.makedirs(os.path.join(ps.GUARD_DIR, '.restore.lock'))
+        rc, p, out = self.plan()
+        self.assertEqual(rc, 2)
+        self.assertFalse(p['ok'])
+        self.assertIn('正在恢复', p['error'])
+        rc, out = e.sync()
+        self.assertEqual(rc, 2)
+        self.assertFalse(os.path.exists(f'{e.phone}/chats/A/x.jsonl'))
+
+    def test_restore_pending_needs_confirmation(self):
+        e = self.e
+        write(f'{e.st}/chats/A/x.jsonl', 'mac', 1_700_000_000)
+        write(os.path.join(ps.GUARD_DIR, 'restore.pending'), 'tt-x.tar.gz|safety')
+        rc, p, out = self.plan()
+        self.assertTrue(p['guard']['pending'])
+        rc, out = e.sync()   # 不问问题的同步：不做
+        self.assertEqual(rc, 2)
+        self.assertIn('没做完', out)
+        self.assertFalse(os.path.exists(f'{e.phone}/chats/A/x.jsonl'))
+        rc, res, out = self.run_choices({'pendingOk': True})
+        self.assertEqual(rc, 0, out)
+        self.assertTrue(os.path.exists(f'{e.phone}/chats/A/x.jsonl'))
+
+    def test_snapshot_before_writing_to_phone(self):
+        e = self.e
+        write(f'{e.st}/chats/A/x.jsonl', 'mac', 1_700_000_000)
+        rc, res, out = self.run_choices({})
+        self.assertIn('没装 TT 守护', out)
+        self.assertEqual(res['snapshot'], 'none')
+        calls = os.path.join(e.root, 'snap-calls')
+        write(os.path.join(ps.GUARD_MOD, 'ui.sh'),
+              f'echo "$@" >> {calls}; [ -f {e.phone}/chats/A/y.jsonl ] && echo WRITTEN_BEFORE >> {calls}; '
+              'echo \'{"ok":true,"names":["tt-default-user-1.tar.gz"]}\'\n')
+        write(f'{e.st}/chats/A/y.jsonl', 'mac2', 1_700_000_000)
+        rc, res, out = self.run_choices({})
+        self.assertEqual(rc, 0, out)
+        self.assertEqual(read(calls).split(), ['backup', 'tt'])   # 在写手机之前
+        self.assertEqual(res['snapshot'], 'ok tt-default-user-1.tar.gz')
+        self.assertIn('TT 守护先存了一份快照', out)
+        # 没有要写手机的：不做快照
+        os.unlink(calls)
+        rc, res, out = self.run_choices({})
+        self.assertFalse(os.path.exists(calls))
 
 
 class LocalTTTests(unittest.TestCase):

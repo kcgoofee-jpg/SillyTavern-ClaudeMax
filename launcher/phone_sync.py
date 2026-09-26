@@ -4,14 +4,16 @@
 
 同步：聊天、角色卡、世界书、预设、头像、背景、生图图片、主题、快速回复。
 扩展：只从电脑推到手机，而且只在手机上的版本是电脑版本的旧版时才推（手机上更新过、或两边分叉时不推，
-      说明原因）；推的是 git 管理的文件和 .git，整个换成新文件夹，旧文件夹留一份在 extensions/.cm-previous。
+      说明原因）；推的是 git 管理的文件和 .git，整个换成新文件夹，旧文件夹换下来进存档（见下）。
+      当前分支没设上游的扩展（TT 查更新会报错）列出来；你同意才设成跟 origin 的默认分支（只改 .git/config）。
 标签：角色卡上的标签（settings.json 的 tags / tag_map）按标签名合并，只加不删（一边删掉的标签会被另一边加回来）；
       --push-only 时只把电脑的标签加到对方。
-不同步：其他设置（两边的代理地址不同）和密钥。另外把手机上的代理地址对准这台 Mac 现在的 IP。
+不同步：其他设置。另外把手机上的代理地址对准这台 Mac 现在的 IP；带访问密码时，手机 api_key_custom 里
+      启用的那条设成 Mac 的访问密码（手机的自定义地址指着 CCST 代理，TT 把它当访问密码发给代理）。
 
 规则（按上次同步时记下的状态判断哪边改过）：
-  只有一边改过 → 用改过的那边；两边都改过（冲突），或者没有同步记录、两边又不一样 → 用较新的，
-  另一份存进备份，并且列出来。只有一边有的文件 → 复制到另一边。从不删除文件。
+  只有一边改过 → 用改过的那边（自动）；两边都改过（冲突），或者没有同步记录、两边又不一样 → 要你选
+  （以哪边为准 / 两份都留）；没选时用较新的，另一份存进备份，并且列出来。只有一边有的文件 → 复制到另一边。从不删除文件。
   聊天记录冲突时再按楼层比一次：输的那份里有赢的那份没有的楼层（两边各自往下聊过）→ 另存成
   「原名 [冲突副本·哪边 时间].jsonl」，两边的聊天列表里都能看到，不只是进备份。
   只差大小写的两个文件名（Mac 和手机都不分大小写，会互相覆盖）→ 不动，列出来。
@@ -19,9 +21,15 @@
   写入先写到临时文件 / 临时文件夹再换名，中途断开不会留下写了一半的文件。
 手机上的 TauriTavern 数据在 Android/data 里：需要 root（su），或 Android 10 及以下。
 
+API 设置（oai_settings，连哪个地址各边保留自己的）和 API 密钥（只互补、不改各自正在用的那条）也是
+要你选：菜单先 --plan-json 看计划，你选好后 --choices 执行；不给 --choices（手机遥控同步等）时不动它们，只列出来。
+手机上装了 TT 守护模块时：它正在恢复备份就不同步；上次恢复没做完要你确认；写手机之前先让它存一份快照。
+推扩展后换下来的旧文件夹收进存档（手机 data/_cm_archive/，Mac TT 的进 backups/），每个扩展只留最新一份。
+
 用法：phone_sync.py --st <SillyTavern/data/default-user> --adb <adb> --serial S [--dry-run]
-      [--mac-ip IP --port 8901 --lan-key-file F]
+      [--mac-ip IP --port 8901 --lan-key-file F] [--plan-json F | --choices F] [--result-json F]
       phone_sync.py --st <…> --local-tt <TT 的 data/default-user> [--dry-run] [--port 8901]
+      phone_sync.py --upstream-check <扩展目录> [--upstream-fix]
 """
 import argparse, hashlib, io, json, os, re, secrets, shlex, shutil, subprocess, sys, tarfile, tempfile, time, uuid
 
@@ -36,6 +44,11 @@ EXT_CARRY = ('node_modules', 'data')   # 扩展顶层里电脑不推、手机上
 SHRINK_LIMIT = 0.2    # 手机上少了超过这个比例的已同步文件：怀疑列表不完整，拒绝同步
 WARNINGS = []
 LOCAL = '电脑'   # 这一侧在输出里的叫法（--local-name；Mac TT 当中心时叫「Mac TT」）
+
+
+# 手机上的 TT 守护模块（tt-root-module）：恢复备份时有 .restore.lock，恢复中途断了留 restore.pending
+GUARD_MOD = '/data/adb/modules/claudemax_tt_keepalive'
+GUARD_DIR = '/data/adb/tt-guard'
 
 
 class SyncError(RuntimeError):
@@ -125,6 +138,30 @@ class LocalTT:
     def __init__(self, base):
         self.base = base if os.path.isdir(base) else None
         self.root = False
+
+
+# ── TT 守护 ──
+
+def guard_state(ph):
+    """→ None（不是手机）/ {'module': 装了没有, 'restoring': 正在恢复, 'pending': 上次恢复没做完}。"""
+    if isinstance(ph, LocalTT):
+        return None
+    m, g = shlex.quote(GUARD_MOD), shlex.quote(GUARD_DIR)
+    out = ph.rsh(f'[ -f {m}/ui.sh ] && echo CM_MOD; [ -e {g}/.restore.lock ] && echo CM_LOCK; '
+                 f'[ -e {g}/restore.pending ] && echo CM_PENDING; echo CM_END')
+    return {'module': 'CM_MOD' in out, 'restoring': 'CM_LOCK' in out, 'pending': 'CM_PENDING' in out}
+
+
+def guard_snapshot(ph):
+    """写手机之前让 TT 守护先存一份 TT 的快照（ui.sh backup tt）。→ (成功没有, 说明)。"""
+    out = ph.rsh(f'sh {shlex.quote(GUARD_MOD)}/ui.sh backup tt')
+    try:
+        d = json.loads(out.strip().splitlines()[-1])
+    except (ValueError, IndexError):
+        return False, '没有回应'
+    if d.get('ok'):
+        return True, '、'.join(d.get('names') or []) or '已保存'
+    return False, str(d.get('msg') or '失败')
 
 
 # ── 列文件 ──────────────────────────────────────
@@ -325,6 +362,20 @@ def atomic_write(path, data, mode=0o644, mtime=None):
         raise
 
 
+def _read_bytes(path):
+    with open(path, 'rb') as f:
+        return f.read()
+
+
+def backup_once(path, data, private=False):
+    """备份一份原文件：同一次同步里同一个文件只留第一份（后面的步骤看到的已经是改过的）。"""
+    if os.path.exists(path):
+        return
+    atomic_write(path, data)
+    if private:
+        os.chmod(path, 0o600)
+
+
 def extract(data, dest):
     """tar → dest，逐个文件原子替换。返回解出的文件名集合。"""
     done = set()
@@ -517,8 +568,9 @@ def remote_ext_dir(ph):
     return ph.base.rsplit('/default-user', 1)[0] + '/extensions/third-party'
 
 
-def plan_extensions(ph, ext_dir, force=False):
-    """→ [(name, src, rev)] 要推的扩展；同时打印每个扩展的决定。"""
+def plan_extensions(ph, ext_dir, force=False, report=None):
+    """→ [(name, src, rev)] 要推的扩展；同时打印每个扩展的决定。report（列表）另外收到
+    {'name', 'decision', 'side_rev', 'rev'}，给 --plan-json 用。"""
     side = ph.label
     rext = remote_ext_dir(ph)
     todo = []
@@ -532,11 +584,15 @@ def plan_extensions(ph, ext_dir, force=False):
         st = remote_ext_state(ph, f'{rext}/{name}')
         if st is None:
             print(f'  ! 扩展 {name}：读不到{side}上的版本，这次不推')
+            if report is not None:
+                report.append({'name': name, 'decision': 'unreadable', 'side_rev': '', 'rev': rev[:7]})
             continue
         d = ext_decision(rev, st,
                          known=lambda p, s=src: git(s, 'cat-file', '-e', p + '^{commit}').returncode == 0,
                          is_ancestor=lambda a, b, s=src: git(s, 'merge-base', '--is-ancestor', a, b).returncode == 0,
                          force=force)
+        if report is not None:
+            report.append({'name': name, 'decision': d, 'side_rev': (st['rev'] or '')[:7], 'rev': rev[:7]})
         if d == 'push':
             todo.append((name, src, rev))
             why = '' if st['rev'] != rev else '（同一版本，按新的打包方式补推一次）'
@@ -550,11 +606,12 @@ def plan_extensions(ph, ext_dir, force=False):
     return todo
 
 
-def push_extensions(ph, todo):
-    """推扩展：解到新文件夹，旧文件夹移到 extensions/.cm-previous/<名字>，再把新的换上。返回失败的名字。"""
+def push_extensions(ph, todo, backups=None):
+    """推扩展：解到新文件夹，旧文件夹移到 extensions/.cm-previous/<名字>，再把新的换上。
+    换好、核对过（新文件夹里的推送标记对得上）之后，把旧文件夹收进存档（见 archive_previous）。返回失败的名字。"""
     rext = remote_ext_dir(ph)
     prev = os.path.join(os.path.dirname(rext), '.cm-previous')
-    failed = []
+    failed, done = [], []
     for name, src, rev in todo:
         fd, tarpath = tempfile.mkstemp(suffix='.tar')
         os.close(fd)
@@ -564,12 +621,160 @@ def push_extensions(ph, todo):
                 _swap_local_ext(tarpath, rext, prev, name)
             else:
                 _swap_phone_ext(ph, tarpath, rext, prev, name)
+            st = remote_ext_state(ph, f'{rext}/{name}')
+            if st and st['marker'] == f'{rev} {PACKER}':
+                done.append(name)
         except (SyncError, OSError, tarfile.TarError) as e:
             print(f'  ✗ 扩展 {name} 没推成：{e}')
             failed.append(name)
         finally:
             os.unlink(tarpath)
+    archive_previous(ph, done, backups)
     return failed
+
+
+def archive_dir(ph, backups):
+    """旧扩展副本收到哪：手机上 data/_cm_archive/<日期>-扩展旧副本/，Mac TT 的收进 backups/<日期>/扩展旧副本/。"""
+    day = time.strftime('%Y-%m-%d')
+    if isinstance(ph, LocalTT):
+        return os.path.join(backups, day, '扩展旧副本') if backups else None
+    return f'{os.path.dirname(ph.base)}/_cm_archive/{day}-扩展旧副本'
+
+
+def previous_names(ph):
+    """extensions/.cm-previous 里留着的旧副本名字。"""
+    prev = os.path.join(os.path.dirname(remote_ext_dir(ph)), '.cm-previous')
+    if isinstance(ph, LocalTT):
+        try:
+            return sorted(n for n in os.listdir(prev) if not n.startswith('.'))
+        except OSError:
+            return []
+    out = ph.rsh(f'ls -1 {shlex.quote(prev)} 2>/dev/null; echo CM_END')
+    return [l.strip() for l in out.splitlines() if l.strip() and l.strip() != 'CM_END'] if 'CM_END' in out else []
+
+
+def archive_previous(ph, names, backups=None):
+    """已经换好的扩展：extensions/.cm-previous/<名字> 挪进存档（不删），同一个扩展只留最新的一份存档。
+    TT 会把 extensions 下的文件夹当扩展看，旧副本放在那里像垃圾。→ 挪了的名字。"""
+    dest = archive_dir(ph, backups)
+    prev = os.path.join(os.path.dirname(remote_ext_dir(ph)), '.cm-previous')
+    have = set(previous_names(ph)) if names else set()
+    moved = []
+    for name in names:
+        if name not in have or not dest:
+            continue
+        if isinstance(ph, LocalTT):
+            root = os.path.dirname(os.path.dirname(dest))   # backups/
+            for day in os.listdir(root) if os.path.isdir(root) else []:
+                old = os.path.join(root, day, '扩展旧副本', name)
+                if os.path.lexists(old):
+                    shutil.rmtree(old, ignore_errors=True)
+            os.makedirs(dest, exist_ok=True)
+            try:
+                os.rename(os.path.join(prev, name), os.path.join(dest, name))
+                moved.append(name)
+            except OSError as e:
+                print(f'  ! 扩展 {name} 的旧副本没收进存档：{e}')
+            continue
+        root = os.path.dirname(dest)
+        n, r, d, p = (shlex.quote(x) for x in (name, root, dest, f'{prev}/{name}'))
+        out = ph.rsh(f'mkdir -p {d} || exit 1; for o in {r}/*-扩展旧副本/{n}; do [ -e "$o" ] && rm -rf "$o"; done; '
+                     f'mv {p} {d}/{n} && echo CM_OK; rmdir {r}/*-扩展旧副本 2>/dev/null; '
+                     f'{ph.chown_cmd(ph.base, r)}')
+        if 'CM_OK' in out:
+            moved.append(name)
+        else:
+            print(f'  ! 扩展 {name} 的旧副本没收进存档（还在 extensions/.cm-previous）')
+    if moved:
+        print(f'  扩展旧副本收进了存档（{dest}）：{"、".join(moved)}')
+    return moved
+
+
+# ── 扩展的上游分支（TT 检查扩展更新要用）──
+
+def parse_upstream(txt):
+    """ext_upstream_script 一个扩展的输出 → None（有上游、或不是在分支上）/ {'branch', 'target'}（target 可能是 None）。"""
+    kv, cfg = {}, []
+    in_cfg = False
+    for line in txt.splitlines():
+        if line == 'CM_CFG':
+            in_cfg = True
+            continue
+        if in_cfg:
+            cfg.append(line)
+        elif ':' in line:
+            k, v = line.split(':', 1)
+            kv[k] = v.strip()
+    head = kv.get('H', '')
+    if not head.startswith('ref: refs/heads/'):
+        return None
+    branch = head[len('ref: refs/heads/'):]
+    sec, have, has_origin = None, set(), False
+    for line in cfg:
+        m = re.match(r'^\s*\[\s*([^\]"\s]+)(?:\s+"(.*)")?\s*\]', line)
+        if m:
+            sec = (m.group(1).lower(), m.group(2))
+            has_origin = has_origin or sec == ('remote', 'origin')
+            continue
+        m = re.match(r'^\s*(\w+)\s*=', line)
+        if m and sec == ('branch', branch):
+            have.add(m.group(1).lower())
+    if {'remote', 'merge'} <= have:
+        return None
+    refs = set(kv.get('R', '').split())
+    o = kv.get('O', '')
+    target = o[len('ref: refs/remotes/origin/'):] if o.startswith('ref: refs/remotes/origin/') else \
+        'main' if 'main' in refs else 'master' if 'master' in refs else None
+    return {'branch': branch, 'target': target if has_origin else None}
+
+
+def _upstream_script(root):
+    q = shlex.quote(root)
+    return (f'for d in {q}/*/; do d=${{d%/}}; [ -d "$d/.git" ] || continue; echo "CM_EXT:${{d##*/}}"; '
+            f'echo "H:$(head -1 "$d/.git/HEAD" 2>/dev/null)"; echo "O:$(head -1 "$d/.git/refs/remotes/origin/HEAD" 2>/dev/null)"; '
+            f'echo "R:$(ls "$d/.git/refs/remotes/origin" 2>/dev/null | tr "\n" " ") '
+            f'$(sed -n "s#.* refs/remotes/origin/##p" "$d/.git/packed-refs" 2>/dev/null | tr "\n" " ")"; '
+            f'echo CM_CFG; cat "$d/.git/config" 2>/dev/null; echo; done; echo CM_ALL_END')
+
+
+def ext_upstream(ph, root):
+    """root 下每个扩展：当前分支没设上游的 → [{'name', 'branch', 'target'}]。ph 为 None = 这台电脑上的目录。"""
+    if ph is None or isinstance(ph, LocalTT):
+        out = subprocess.run(['sh', '-c', _upstream_script(root)], capture_output=True, text=True).stdout
+    else:
+        out = ph.rsh(_upstream_script(root))
+    if 'CM_ALL_END' not in out:
+        return []
+    res = []
+    for part in out.split('CM_EXT:')[1:]:
+        name, _, rest = part.partition('\n')
+        u = parse_upstream(rest.replace('CM_ALL_END', ''))
+        if u:
+            res.append({'name': name.strip(), **u})
+    return res
+
+
+def fix_upstream(ph, root, items):
+    """把没设上游的分支设成跟 origin 的默认分支（只改 .git/config，加一段 [branch]，不动提交历史）。→ 改好的名字。"""
+    done = []
+    for it in items:
+        if not it.get('target'):
+            continue
+        cfg = f'{root}/{it["name"]}/.git/config'
+        section = f'[branch "{it["branch"]}"]\n\tremote = origin\n\tmerge = refs/heads/{it["target"]}\n'
+        if ph is None or isinstance(ph, LocalTT):
+            try:
+                with open(cfg, encoding='utf-8') as f:
+                    body = f.read()
+                atomic_write(cfg, (body + ('' if body.endswith('\n') or not body else '\n') + section).encode('utf-8'))
+                done.append(it['name'])
+            except OSError as e:
+                print(f'  ! 扩展 {it["name"]} 的上游没设成：{e}')
+            continue
+        out = ph.rsh(f'printf %s {shlex.quote(section)} >> {shlex.quote(cfg)} && echo CM_OK')
+        if 'CM_OK' in out:
+            done.append(it['name'])
+    return done
 
 
 def _swap_local_ext(tarpath, rext, prev, name):
@@ -650,7 +855,7 @@ def copy_settings(ph, st, bk):
         apply(d)
         if d == before:
             continue
-        atomic_write(os.path.join(bk, rel), raw.encode('utf-8'))
+        backup_once(os.path.join(bk, rel), raw.encode('utf-8'))
         atomic_write(path, json.dumps(d, ensure_ascii=False, indent=4 if rel == 'settings.json' else None).encode('utf-8'))
         changed.append(rel)
     return changed
@@ -698,6 +903,7 @@ def fix_endpoint(ph, ip, port, key, bk):
     new = f'http://{ip}:{port}'
     pat = re.compile(r'http://[0-9A-Za-z.\-]+:' + str(port) + r'(?![0-9])')
     changed, errors = [], []
+    uses_proxy = False
     for rel in ('settings.json', 'settings/presets.json'):
         path = f'{ph.base}/{rel}'
         raw, err = read_remote_text(ph, path)
@@ -713,31 +919,75 @@ def fix_endpoint(ph, ip, port, key, bk):
             errors.append(f'{rel} 不是合法 JSON（{e}），没改')
             continue
         d2 = json.loads(pat.sub(new, json.dumps(d, ensure_ascii=False)))
+        if str((d2.get('oai_settings') or {}).get('custom_url') or '').startswith(new):
+            uses_proxy = True
         cm = (d2.get('extension_settings') or {}).get('claude_max')
         if key and isinstance(cm, dict) and cm.get('accessKey') != key:
             cm['accessKey'] = key
         if d2 == d:   # 比较内容，不比较排版
             continue
         try:
-            atomic_write(os.path.join(bk, ph.label, rel), raw)
+            backup_once(os.path.join(bk, ph.label, rel), raw)
             write_remote_text(ph, path, json.dumps(d2, ensure_ascii=False, indent=4 if rel == 'settings.json' else None).encode('utf-8'))
             changed.append(rel)
         except (SyncError, OSError) as e:
             errors.append(f'{rel}：{e}')
+    if key and uses_proxy and not isinstance(ph, LocalTT):
+        try:
+            if ensure_lan_secret(ph, key, bk):
+                changed.append('secrets.json')
+        except (SyncError, OSError, ValueError) as e:
+            errors.append(f'secrets.json：{e}')
     return changed, errors
 
 
-def sync_api(ph, st, port, bk, dry=False):
-    """对话补全设置（API 来源、模型、当前预设、各项开关 = oai_settings）两边对齐，改得晚的一边为准。
-    代理地址（:port 的那种）各边保留自己的；密钥在 secrets.json，不同步。
-    → (方向说明 / None, 出错说明列表)。"""
-    pat = re.compile(r'http://[0-9A-Za-z.\-]+:' + str(port) + r'(?![0-9])')
+LAN_KEY_LABEL = 'CCST 代理（手机）'
+
+
+def ensure_lan_secret(ph, key, bk):
+    """手机的自定义地址指着 CCST 代理时，TT 把 api_key_custom 里启用的那条当访问密码发给代理：
+    保证有一条值是 Mac 的访问密码、并且是启用的那条（没有就加，标签 LAN_KEY_LABEL）；
+    同一项里别的条目只取消启用，不删。改之前备份（只给本人读）。不打印任何值。→ 改了没有。"""
+    rpath = f'{ph.base}/secrets.json'
+    raw, err = read_remote_text(ph, rpath)
+    if err and err != 'missing':
+        raise SyncError(err)
+    d = json.loads(raw) if raw else {}
+    if not isinstance(d, dict):
+        raise ValueError('格式不认识，没改')
+    lst = d.get('api_key_custom')
+    if isinstance(lst, str):   # 旧格式：原来的值留着（不启用）
+        lst = [{'id': str(uuid.uuid4()), 'value': lst, 'label': '', 'active': False}] if lst else []
+    elif not isinstance(lst, list):
+        lst = []
+    lst = [dict(e) for e in lst if isinstance(e, dict)]
+    mine = next((e for e in lst if e.get('value') == key), None)
+    if mine is None:
+        mine = {'id': str(uuid.uuid4()), 'value': key, 'label': LAN_KEY_LABEL, 'active': True}
+        lst.append(mine)
+    for e in lst:
+        e['active'] = e is mine
+    if d.get('api_key_custom') == lst:
+        return False
+    d['api_key_custom'] = lst
+    if raw is not None:
+        backup_once(os.path.join(bk, ph.label, 'secrets.json'), raw, private=True)
+    write_remote_text(ph, rpath, json.dumps(d, ensure_ascii=False, indent=4).encode('utf-8'))
+    return True
+
+
+# 对话补全设置里每台设备各用各的：连哪个地址（手机连 Mac 的局域网地址，Mac 连本机）
+PER_DEVICE_OAI = ('custom_url', 'reverse_proxy')
+
+
+def _read_api(ph, st, port):
+    """→ (信息 dict / None, 出错说明列表)。信息里有两边的原始数据，给 api_diff / sync_api 用。"""
     lrel = 'settings/presets.json' if os.path.exists(os.path.join(st, 'settings/presets.json')) else 'settings.json'
     lpath, rpath = os.path.join(st, lrel), f'{ph.base}/settings/presets.json'
     if not os.path.exists(lpath):
         return None, []
     try:
-        lraw = open(lpath, 'rb').read()
+        lraw = _read_bytes(lpath)
         ld = json.loads(lraw)
     except (OSError, ValueError) as e:
         return None, [f'{LOCAL}的 {lrel} 读不了（{e}）']
@@ -751,7 +1001,11 @@ def sync_api(ph, st, port, bk, dry=False):
     lo, ro = ld.get('oai_settings'), rd.get('oai_settings')
     if not isinstance(lo, dict) or not isinstance(ro, dict):
         return None, []
-    norm = lambda o: pat.sub('http://proxy:' + str(port), json.dumps(o, ensure_ascii=False, sort_keys=True))
+    pat = re.compile(r'http://[0-9A-Za-z.\-]+:' + str(port) + r'(?![0-9])')
+
+    def norm(o):
+        o = {k: v for k, v in o.items() if k not in PER_DEVICE_OAI}
+        return pat.sub('http://proxy:' + str(port), json.dumps(o, ensure_ascii=False, sort_keys=True))
     if norm(lo) == norm(ro):
         return None, []
     if isinstance(ph, LocalTT):
@@ -759,85 +1013,132 @@ def sync_api(ph, st, port, bk, dry=False):
     else:
         out = ph.rsh(f'stat -c %Y {shlex.quote(rpath)}').strip()
         rtime = float(out) if out.isdigit() else 0
-    to_phone = os.path.getmtime(lpath) >= rtime
-    src, dst = (lo, ro) if to_phone else (ro, lo)
+    return {'lrel': lrel, 'lpath': lpath, 'rpath': rpath, 'lraw': lraw, 'rraw': rraw, 'ld': ld, 'rd': rd,
+            'lo': lo, 'ro': ro, 'pat': pat, 'newer': 'local' if os.path.getmtime(lpath) >= rtime else 'remote'}, []
+
+
+def api_diff(ph, st, port):
+    """对话补全设置两边不一样时 → ({'newer', 'preset': {'local', 'remote'}}, 出错说明)；一样 → (None, [])。"""
+    info, errs = _read_api(ph, st, port)
+    if not info:
+        return None, errs
+    return {'newer': info['newer'], 'preset': {'local': info['lo'].get('preset_settings_openai'),
+                                               'remote': info['ro'].get('preset_settings_openai')}}, []
+
+
+def sync_api(ph, st, port, bk, direction):
+    """对话补全设置（API 来源、模型、当前预设、各项开关 = oai_settings）按 direction（'local' = 以这一侧为准，
+    'remote' = 以对方为准）对齐。连哪个地址（PER_DEVICE_OAI）各边保留自己的；:port 的代理地址也保留。
+    密钥在 secrets.json，不在这里。→ (方向说明 / None, 出错说明列表)。"""
+    info, errs = _read_api(ph, st, port)
+    if not info:
+        return None, errs
+    to_phone = direction == 'local'
+    src, dst = (info['lo'], info['ro']) if to_phone else (info['ro'], info['lo'])
+    pat = info['pat']
     keep = next(iter(pat.findall(json.dumps(dst, ensure_ascii=False))), None)
     text = json.dumps(src, ensure_ascii=False)
     new = json.loads(pat.sub(keep, text) if keep else text)
-    if dry:
-        return 'todo', []
+    for k in PER_DEVICE_OAI:
+        if k in dst:
+            new[k] = dst[k]
+        else:
+            new.pop(k, None)
     try:
         if to_phone:
-            atomic_write(os.path.join(bk, ph.label, 'settings/presets.json'), rraw)
-            rd['oai_settings'] = new
-            write_remote_text(ph, rpath, json.dumps(rd, ensure_ascii=False).encode('utf-8'))
+            backup_once(os.path.join(bk, ph.label, 'settings/presets.json'), info['rraw'])
+            info['rd']['oai_settings'] = new
+            write_remote_text(ph, info['rpath'], json.dumps(info['rd'], ensure_ascii=False).encode('utf-8'))
         else:
-            atomic_write(os.path.join(bk, LOCAL, lrel), lraw)
-            ld['oai_settings'] = new
-            atomic_write(lpath, json.dumps(ld, ensure_ascii=False, indent=4 if lrel == 'settings.json' else None).encode('utf-8'))
+            backup_once(os.path.join(bk, LOCAL, info['lrel']), info['lraw'])
+            info['ld']['oai_settings'] = new
+            atomic_write(info['lpath'], json.dumps(info['ld'], ensure_ascii=False,
+                                                   indent=4 if info['lrel'] == 'settings.json' else None).encode('utf-8'))
     except (SyncError, OSError) as e:
         return None, [str(e)]
     preset = new.get('preset_settings_openai') or '（未知）'
     return (f'→ {ph.label}' if to_phone else f'← {LOCAL}') + f'（当前预设「{preset}」）', []
 
 
-def merge_secrets(newer, older):
-    """两份 secrets.json 合并：两边的密钥都留下（按值去重），「当前用哪个」以 newer 为准。
-    旧格式（键 → 字符串）按 newer 覆盖、缺的补上。"""
-    out = {}
-    for k in {**older, **newer}:
-        a, b = newer.get(k), older.get(k)
-        if isinstance(a, list) and isinstance(b, list):
-            vals = {e.get('value') for e in a if isinstance(e, dict)}
-            extra = [dict(e, active=False) for e in b if isinstance(e, dict) and e.get('value') not in vals]
-            out[k] = a + extra
-        else:
-            out[k] = a if k in newer else b
-    return out
+def add_missing_secrets(mine, other):
+    """把 other 里有、mine 里没有的密钥（按值去重）加进 mine 的副本，一律不启用（active=False）。
+    「当前用哪个」是每台设备自己的：从不改 mine 里已有条目的 active，也不把对方的 active 带过来
+    （手机的自定义地址指着 CCST 代理，Mac 上启用的网关密钥带过去会被代理当成错的访问密码）。
+    旧格式（键 → 字符串）不动：那种写法本身就是「正在用的」。→ (新的 dict, 加了几条)。"""
+    out = json.loads(json.dumps(mine))
+    added = 0
+    for k, b in other.items():
+        if not isinstance(b, list):
+            continue
+        a = out.setdefault(k, [])
+        if not isinstance(a, list):
+            continue
+        have = {e.get('value') for e in a if isinstance(e, dict)}
+        for e in b:
+            if isinstance(e, dict) and e.get('value') and e.get('value') not in have:
+                a.append(dict(e, active=False))
+                have.add(e.get('value'))
+                added += 1
+    return out, added
 
 
-def sync_secrets(ph, st, bk, dry=False):
-    """API 密钥（secrets.json）两边合并，写回两边。不打印任何密钥。→ (说明 / None, 出错说明列表)"""
+def read_secrets(ph, st):
+    """→ (本地 dict, 本地原始字节, 对方 dict, 对方原始字节 / None, 出错说明 / None)。"""
     lpath, rpath = os.path.join(st, 'secrets.json'), f'{ph.base}/secrets.json'
     try:
-        lraw = open(lpath, 'rb').read() if os.path.exists(lpath) else b'{}'
+        lraw = _read_bytes(lpath) if os.path.exists(lpath) else b'{}'
         ld = json.loads(lraw)
     except (OSError, ValueError):
-        return None, [f'{LOCAL}的 secrets.json 读不了']
+        return None, None, None, None, f'{LOCAL}的 secrets.json 读不了'
     rraw, err = read_remote_text(ph, rpath)
     if err and err != 'missing':
-        return None, [f'{ph.label}的 secrets.json：{err}']
+        return None, None, None, None, f'{ph.label}的 secrets.json：{err}'
     try:
         rd = json.loads(rraw) if rraw else {}
     except ValueError:
-        return None, [f'{ph.label}的 secrets.json 不是合法 JSON']
-    if ld == rd:
+        return None, None, None, None, f'{ph.label}的 secrets.json 不是合法 JSON'
+    if not isinstance(ld, dict) or not isinstance(rd, dict):
+        return None, None, None, None, 'secrets.json 格式不认识'
+    return ld, lraw, rd, rraw, None
+
+
+def secrets_diff(ph, st):
+    """两边各缺几条密钥：→ ({'local': n, 'remote': n} / None, 出错说明列表)。不读出任何值。"""
+    ld, _, rd, _, err = read_secrets(ph, st)
+    if err:
+        return None, [err]
+    _, to_l = add_missing_secrets(ld, rd)
+    _, to_r = add_missing_secrets(rd, ld)
+    return ({'local': to_l, 'remote': to_r} if to_l or to_r else None), []
+
+
+def sync_secrets(ph, st, bk, dry=False):
+    """API 密钥（secrets.json）两边互补：只把对方有、这边没有的加进来（不启用），
+    不删、不改已有的，也不改哪个在用。不打印任何密钥。→ (说明 / None, 出错说明列表)"""
+    lpath, rpath = os.path.join(st, 'secrets.json'), f'{ph.base}/secrets.json'
+    ld, lraw, rd, rraw, err = read_secrets(ph, st)
+    if err:
+        return None, [err]
+    new_l, n_l = add_missing_secrets(ld, rd)
+    new_r, n_r = add_missing_secrets(rd, ld)
+    if not (n_l or n_r):
         return None, []
-    if isinstance(ph, LocalTT):
-        rtime = os.path.getmtime(rpath) if os.path.exists(rpath) else 0
-    else:
-        out = ph.rsh(f'stat -c %Y {shlex.quote(rpath)} 2>/dev/null').strip()
-        rtime = float(out) if out.isdigit() else 0
-    ltime = os.path.getmtime(lpath) if os.path.exists(lpath) else 0
-    merged = merge_secrets(ld, rd) if ltime >= rtime else merge_secrets(rd, ld)
     if dry:
         return 'todo', []
-    body = json.dumps(merged, ensure_ascii=False, indent=4).encode('utf-8')
     try:
         # 备份里有密钥：只给本人读
-        for side, raw, ok in ((LOCAL, lraw, os.path.exists(lpath)), (ph.label, rraw, rraw is not None)):
-            if ok and json.loads(raw or b'{}') != merged:
-                f = os.path.join(bk, side, 'secrets.json')
-                atomic_write(f, raw)
-                os.chmod(f, 0o600)
-        if merged != ld:
-            atomic_write(lpath, body)
+        if n_l and os.path.exists(lpath):
+            backup_once(os.path.join(bk, LOCAL, 'secrets.json'), lraw, private=True)
+        if n_r and rraw is not None:
+            backup_once(os.path.join(bk, ph.label, 'secrets.json'), rraw, private=True)
+        if n_l:
+            atomic_write(lpath, json.dumps(new_l, ensure_ascii=False, indent=4).encode('utf-8'))
             os.chmod(lpath, 0o600)
-        if merged != rd:
-            write_remote_text(ph, rpath, body)
+        if n_r:
+            write_remote_text(ph, rpath, json.dumps(new_r, ensure_ascii=False, indent=4).encode('utf-8'))
     except (SyncError, OSError) as e:
         return None, [str(e)]
-    return f'{len(merged)} 项已两边合并', []
+    return f'→ {ph.label} 加了 {n_r} 条，← {LOCAL} 加了 {n_l} 条（都不启用，各自正在用的不变）', []
 
 
 # ── 标签 ──────────────────────────────────────
@@ -905,7 +1206,7 @@ def sync_tags(ph, st, bk, loc_files, rem_files, push_only=False, dry=False):
     if not os.path.exists(lpath):
         return None, []   # 还没打开过一次的酒馆：没有标签可合并
     try:
-        lraw = open(lpath, 'rb').read()
+        lraw = _read_bytes(lpath)
         loc_d = json.loads(lraw.decode('utf-8'))
     except (OSError, ValueError) as e:
         return None, [f'{LOCAL}的 settings.json 读不了（{e}）']
@@ -926,14 +1227,14 @@ def sync_tags(ph, st, bk, loc_files, rem_files, push_only=False, dry=False):
     if n_rem:
         try:
             add_tags(rem_d, to_rem)
-            atomic_write(os.path.join(bk, side, 'settings.json'), rraw)
+            backup_once(os.path.join(bk, side, 'settings.json'), rraw)
             write_remote_text(ph, rpath, json.dumps(rem_d, ensure_ascii=False, indent=4).encode('utf-8'))
         except (SyncError, OSError) as e:
             errors.append(f'{side}的标签没写成：{e}')
     if n_loc:
         try:
             add_tags(loc_d, to_loc)
-            atomic_write(os.path.join(bk, LOCAL, 'settings.json'), lraw)
+            backup_once(os.path.join(bk, LOCAL, 'settings.json'), lraw)
             atomic_write(lpath, json.dumps(loc_d, ensure_ascii=False, indent=4).encode('utf-8'))
         except OSError as e:
             errors.append(f'{LOCAL}的标签没写成：{e}')
@@ -986,33 +1287,62 @@ def conflict_copy_name(rel, side, mtime):
     return f"{stem} [冲突副本·{side} {time.strftime('%m-%d %H%M', time.localtime(mtime))}]{ext}"
 
 
-def chat_conflict_copies(ph, st, conflicts, push, loc, rem, write=True):
+def is_chat(rel):
+    return rel.startswith(CHAT_DIRS) and rel.endswith('.jsonl')
+
+
+def _pull_chats(ph, chats):
+    """对方的这些聊天 → {rel: 字节}。"""
+    data, _ = pull_tar(ph, chats)
+    out = {}
+    if data:
+        with tempfile.TemporaryDirectory() as tmp:
+            for rel in extract(data, tmp):
+                with open(os.path.join(tmp, rel), 'rb') as f:
+                    out[rel] = f.read()
+    return out
+
+
+def chat_conflict_info(ph, st, chats):
+    """两边都改过的聊天：各自有几楼是对方没有的 → {rel: {'local': n, 'remote': n}}（预览用，不写）。"""
+    out = {}
+    if not chats:
+        return out
+    theirs = _pull_chats(ph, chats)
+    for rel in chats:
+        if rel not in theirs:
+            continue
+        with open(os.path.join(st, rel), 'rb') as f:
+            mine = f.read()
+        out[rel] = {'local': missing_floors(theirs[rel], mine), 'remote': missing_floors(mine, theirs[rel])}
+    return out
+
+
+def chat_conflict_copies(ph, st, conflicts, push, loc, rem, write=True, force=()):
     """聊天冲突里，输的一份有赢的一份没有的楼层 → 另存到这一侧（随后推到对方）。
+    force 里的（你选了「两份都留」）不管多不多楼都另存。
     → [(原文件, 副本相对路径, 多出的楼数)]。write=False 只算不写（预览）。"""
-    chats = [r for r in conflicts if r.startswith(CHAT_DIRS) and r.endswith('.jsonl')]
+    chats = [r for r in conflicts if is_chat(r)]
     if not chats:
         return []
-    data, _ = pull_tar(ph, chats)
+    theirs = _pull_chats(ph, chats)
     out = []
-    with tempfile.TemporaryDirectory() as tmp:
-        got = extract(data, tmp) if data else set()
-        for rel in chats:
-            if rel not in got:
-                continue
-            with open(os.path.join(st, rel), 'rb') as f:
-                l = f.read()
-            with open(os.path.join(tmp, rel), 'rb') as f:
-                r = f.read()
-            local_wins = rel in push
-            win, lose = (l, r) if local_wins else (r, l)
-            extra = missing_floors(win, lose)
-            if not extra:
-                continue   # 赢的那份包含输的那份的每一楼（只是更新过 / 重新生成过 / 聊得更多）：备份就够了
-            side, mt = (ph.label, rem[rel][0]) if local_wins else (LOCAL, loc[rel][0])
-            name = conflict_copy_name(rel, side, mt)
-            if write:
-                atomic_write(os.path.join(st, name), lose, mtime=mt)
-            out.append((rel, name, extra))
+    for rel in chats:
+        if rel not in theirs:
+            continue
+        with open(os.path.join(st, rel), 'rb') as f:
+            l = f.read()
+        r = theirs[rel]
+        local_wins = rel in push
+        win, lose = (l, r) if local_wins else (r, l)
+        extra = missing_floors(win, lose)
+        if not extra and rel not in force:
+            continue   # 赢的那份包含输的那份的每一楼（只是更新过 / 重新生成过 / 聊得更多）：备份就够了
+        side, mt = (ph.label, rem[rel][0]) if local_wins else (LOCAL, loc[rel][0])
+        name = conflict_copy_name(rel, side, mt)
+        if write:
+            atomic_write(os.path.join(st, name), lose, mtime=mt)
+        out.append((rel, name, extra))
     return out
 
 
@@ -1131,7 +1461,27 @@ def main(argv=None):
     ap.add_argument('--ext-force', action='store_true', help='对方的扩展比电脑新或分叉时也覆盖（旧的留在 .cm-previous）')
     ap.add_argument('--trust-listing', action='store_true',
                     help='手机上确实删掉了很多文件：不因为「列表比上次少很多」而拒绝同步')
+    ap.add_argument('--plan-json', metavar='FILE',
+                    help='只预览：把计划按「自动 / 要你选 / 跳过」写成 JSON 到 FILE（菜单用），什么都不改')
+    ap.add_argument('--choices', metavar='FILE',
+                    help='菜单里选好的：JSON {"files": {相对路径: local|remote|both|newer}, "api": local|remote|skip, '
+                         '"secrets": merge|skip}。不给时「要你选」的按安全默认：冲突用较新的并留冲突副本，'
+                         'API 设置和密钥不动（列出来）')
+    ap.add_argument('--result-json', metavar='FILE', help='同步结果写成 JSON 到 FILE（菜单用）')
+    ap.add_argument('--upstream-check', metavar='DIR', action='append',
+                    help='只看这台电脑上 DIR 里的扩展：当前分支没设上游的（TT 查扩展更新会报错）→ JSON 打到标准输出')
+    ap.add_argument('--upstream-fix', action='store_true', help='和 --upstream-check 一起：把它们设成跟 origin 的默认分支')
     a = ap.parse_args(argv)
+    if a.upstream_check:
+        res = {}
+        for d in a.upstream_check:
+            items = ext_upstream(None, d) if os.path.isdir(d) else []
+            if a.upstream_fix and items:
+                fixed = set(fix_upstream(None, d, items))
+                items = [dict(it, fixed=it['name'] in fixed) for it in items]
+            res[d] = items
+        print(json.dumps(res, ensure_ascii=False))
+        return 0
     global LOCAL
     LOCAL = a.local_name
     if not a.ext_only and not (a.st and a.state and a.backups):
@@ -1162,14 +1512,24 @@ def main(argv=None):
             print('  没有 root 时：用 TauriTavern 自带的「数据迁移」扩展导出 / 导入。')
         return 2
     print(f'  {side}：{a.local_tt or a.serial}{"（root）" if ph.root else ""}')
+    guard = guard_state(ph) if ph.root else None
+    if guard and guard['restoring']:
+        msg = '手机上的 TT 守护正在恢复备份，这次不同步（恢复完再来）'
+        print(f'✗ {msg}。什么都没改。')
+        if a.plan_json:
+            atomic_write(a.plan_json, json.dumps({'ok': False, 'error': msg}, ensure_ascii=False).encode('utf-8'))
+        return 2
     if a.ext_only:
-        todo = plan_extensions(ph, a.ext_dir, a.ext_force) if os.path.isdir(a.ext_dir) else []
+        report = []
+        todo = plan_extensions(ph, a.ext_dir, a.ext_force, report) if os.path.isdir(a.ext_dir) else []
+        if not a.dry_run:   # 以前推完留在 .cm-previous 的旧副本：收进存档
+            archive_previous(ph, [r['name'] for r in report if r['decision'] == 'same'], a.backups)
         if not todo:
             print('  扩展：没有要推的')
             return 0
         if a.dry_run:
             return 0
-        failed = push_extensions(ph, todo)
+        failed = push_extensions(ph, todo, a.backups)
         print(f'  ✓ 扩展已更新 {len(todo)} 个' if not failed else f'  ✗ {len(failed)} 个扩展没推成：{"、".join(failed)}')
         return 1 if failed else 0
     state = load_state(a.state)
@@ -1198,28 +1558,62 @@ def main(argv=None):
             print(f'  {side}独有、{LOCAL}上没有的 {len(only_there)} 个文件：保留在{side}，不拉回{LOCAL}')
         for rel in kept:
             print(f'  ! {side}上的比{LOCAL}新，没有覆盖：{rel}')
+    choices = {}
+    if a.choices:
+        try:
+            with open(a.choices, encoding='utf-8') as f:
+                choices = json.load(f)
+        except (OSError, ValueError) as e:
+            print(f'✗ 读不了选择文件（{e}）。什么都没改。')
+            return 2
+    fc = choices.get('files') or {}
+    newer = {r: ('local' if r in push else 'remote') for r in conflicts}
+    for rel in conflicts:   # 你选了以哪边为准：换方向
+        c = fc.get(rel)
+        if c == 'local' and rel in pull:
+            pull.remove(rel)
+            push.append(rel)
+        elif c == 'remote' and rel in push:
+            push.remove(rel)
+            pull.append(rel)
     print(f'  {LOCAL} {len(loc)} 个文件，{side} {len(rem)} 个文件')
     print(f'  → {side}：{len(push)} 个    ← {LOCAL}：{len(pull)} 个    两边都改过 / 没有记录：{len(conflicts)} 个')
     show(push, '→')
     show(pull, '←')
     for rel in conflicts[:20]:
-        print(f'  ! {"两边都改过" if rel in state else "没有同步记录、两边不一样"}，用较新的一份（{LOCAL if rel in push else side}），另一份进备份：{rel}')
+        c = fc.get(rel)
+        how = {'local': f'按你选的用{LOCAL}的', 'remote': f'按你选的用{side}的', 'both': '两份都留'}.get(c, '用较新的一份')
+        print(f'  ! {"两边都改过" if rel in state else "没有同步记录、两边不一样"}，{how}（{LOCAL if rel in push else side}），另一份进备份：{rel}')
     if len(conflicts) > 20:
         print(f'  ! … 另 {len(conflicts) - 20} 个同样处理')
     for rel in clashes:
         print(f'  ! 文件名只差大小写，两边会互相覆盖，没动（请改名）：{rel}')
-    ext_todo = []
+    ext_todo, ext_report = [], []
     if a.ext_dir and os.path.isdir(a.ext_dir):
-        ext_todo = plan_extensions(ph, a.ext_dir, a.ext_force)
+        ext_todo = plan_extensions(ph, a.ext_dir, a.ext_force, ext_report)
         if not ext_todo:
             print(f'  扩展：没有要推的')
+    upstream = []
+    if a.ext_dir and os.path.isdir(a.ext_dir) and not a.push_only:
+        upstream = [dict(u, side='local') for u in ext_upstream(None, a.ext_dir)] + \
+                   [dict(u, side='remote') for u in ext_upstream(ph, remote_ext_dir(ph))]
+        for u in upstream:
+            print(f'  ! 扩展 {u["name"]}（{LOCAL if u["side"] == "local" else side}）：分支 {u["branch"]} 没设上游，TT 查更新会报错'
+                  + (f'（可以设成跟 origin/{u["target"]}）' if u['target'] else '（没有 origin，没法自动设）'))
+
+    if a.plan_json:
+        return write_plan(a, ph, state, loc, rem, push, pull, conflicts, clashes, newer, ext_todo, ext_report, upstream, guard)
+
+    decided = {r for r in conflicts if fc.get(r) in ('local', 'remote')}
     try:
-        copies = chat_conflict_copies(ph, a.st, conflicts, push, loc, rem, write=not a.dry_run)
+        copies = chat_conflict_copies(ph, a.st, [r for r in conflicts if r not in decided], push, loc, rem,
+                                      write=not a.dry_run, force={r for r in conflicts if fc.get(r) == 'both'})
     except (SyncError, OSError) as e:
         print(f'✗ 比较冲突的聊天记录时出错（{e}）。什么都没改。')
         return 2
     for rel, name, n in copies:
-        print(f'  ! 两边各自往下聊过：{os.path.basename(rel)} 里输的那份多出 {n} 楼，'
+        more = f'输的那份多出 {n} 楼，' if n else '按你选的两份都留，'
+        print(f'  ! 两边各自改过：{os.path.basename(rel)} {more}'
               f'{"会" if a.dry_run else "已"}另存为「{os.path.basename(name)}」（两边都有）')
         if not a.dry_run:
             loc[name] = (int(os.stat(os.path.join(a.st, name)).st_mtime), os.path.getsize(os.path.join(a.st, name)))
@@ -1233,16 +1627,37 @@ def main(argv=None):
             print(f'  {text}')
         tags_todo = bool(re.search(r'[1-9]\d* 个', text or ''))
         # --exit-if-nothing：没有任何要做的（文件、扩展、标签）时退出码 3，给启动器判断要不要关 TT
-        api_todo = a.exit_if_nothing and not a.push_only and sync_api(ph, a.st, a.port, None, dry=True)[0] \
-            or a.exit_if_nothing and not a.push_only and sync_secrets(ph, a.st, None, dry=True)[0]
+        api_todo = a.exit_if_nothing and not a.push_only and api_diff(ph, a.st, a.port)[0] \
+            or a.exit_if_nothing and not a.push_only and secrets_diff(ph, a.st)[0]
         if a.exit_if_nothing and not (push or pull or conflicts or copies or ext_todo or tags_todo or api_todo):
             print('  两边已经一样，没有要同步的')
             return 3
         return 0
 
+    if guard and guard['pending'] and not choices.get('pendingOk'):
+        print('✗ 手机上次从备份恢复没做完（TT 守护留了 restore.pending）：数据可能不完整，这次不同步。')
+        print('  先在手机 KernelSU → 模块 → TT 守护 里重新恢复；确定没问题的话在酒馆工具「同步手机」里选继续。')
+        return 2
+    snapshot = 'none'
+    if guard is not None and (push or ext_todo or conflicts or choices.get('api') == 'local'
+                              or choices.get('secrets') == 'merge' or choices.get('extUpstream')):
+        if guard['module']:
+            ok, msg = guard_snapshot(ph)
+            snapshot = f'ok {msg}' if ok else f'failed {msg}'
+            print(f'  ✓ TT 守护先存了一份快照：{msg}' if ok else
+                  f'  ! TT 守护的快照没做成（{msg}），继续：被覆盖的文件照样先备份到电脑')
+        else:
+            print('  · 手机上没装 TT 守护，没做快照（被覆盖的文件照样先备份到电脑）')
     bk = os.path.join(a.backups, time.strftime('%Y-%m-%d'), f"{time.strftime('%H%M%S')}-{side}同步前")
+    fixed_up = []
+    if upstream and choices.get('extUpstream'):   # 先改电脑上的源：随后推过去的 .git 也是改好的
+        for sd, root, p_ in (('local', a.ext_dir, None), ('remote', remote_ext_dir(ph), ph)):
+            fixed_up += fix_upstream(p_, root, [u for u in upstream if u['side'] == sd])
+        if fixed_up:
+            print(f'  ✓ 扩展的上游设好了：{"、".join(sorted(set(fixed_up)))}')
     failed = run_sync(ph, a.st, push, pull, loc, rem, bk)
-    ext_failed = push_extensions(ph, ext_todo) if ext_todo else []
+    ext_failed = push_extensions(ph, ext_todo, a.backups) if ext_todo else []
+    archive_previous(ph, [r['name'] for r in ext_report if r['decision'] == 'same'], a.backups)
 
     # 核对：同步过的文件两边必须大小一致、时间对得上；对不上的不记进状态，下次重新同步
     touched = set(push) | set(pull)
@@ -1263,7 +1678,11 @@ def main(argv=None):
         missing |= {r for r in touched if r not in new_state or not same(loc2.get(r), rem2.get(r))}
         save_state(a.state, new_state)
 
-    notes = []
+    notes, deferred = [], []
+    res = {'push': {'total': len(push)}, 'pull': {'total': len(pull)}, 'copies': [n for _, n, _ in copies],
+           'ext': {'total': len(ext_todo), 'failed': ext_failed}, 'tags': None, 'api': None, 'secrets': None,
+           'endpoint': None, 'backups': bk, 'verified': rem2 is not None, 'upstreamFixed': sorted(set(fixed_up)),
+           'snapshot': snapshot}
     if rem2 is not None:
         text, errs = sync_tags(ph, a.st, bk, loc2, rem2, a.push_only)
         for e in errs:
@@ -1272,24 +1691,35 @@ def main(argv=None):
             notes.append('标签没同步成')
         elif text:
             print(f'  ✓ {text}')
+            res['tags'] = text
     if a.settings and isinstance(ph, LocalTT):
         ch = copy_settings(ph, a.st, bk)
         print(f'  ✓ 扩展设置和对话补全设置已复制到{side}（旧的备份在 {bk}）' if ch else f'  扩展设置：{side}上已是最新')
     if rem2 is not None and not a.push_only:
-        text, errs = sync_api(ph, a.st, a.port, bk)
-        for e in errs:
-            print(f'  ✗ API 和预设设置没同步：{e}')
-        if errs:
-            notes.append('API 设置没同步')
-        elif text:
-            print(f'  ✓ API 和预设设置 {text}')
-        text, errs = sync_secrets(ph, a.st, bk)
-        for e in errs:
-            print(f'  ✗ API 密钥没同步：{e}')
-        if errs:
-            notes.append('API 密钥没同步')
-        elif text:
-            print(f'  ✓ API 密钥：{text}（不显示内容）')
+        why = '你选了跳过' if a.choices else '要你选，在酒馆工具「同步手机」里选'
+        want = choices.get('api')
+        if want in ('local', 'remote'):
+            text, errs = sync_api(ph, a.st, a.port, bk, want)
+            for e in errs:
+                print(f'  ✗ API 和预设设置没同步：{e}')
+            if errs:
+                notes.append('API 设置没同步')
+            elif text:
+                print(f'  ✓ API 和预设设置 {text}')
+                res['api'] = text
+        elif api_diff(ph, a.st, a.port)[0]:
+            deferred.append(f'API 和预设设置两边不一样，没动（{why}）')
+        if choices.get('secrets') == 'merge':
+            text, errs = sync_secrets(ph, a.st, bk)
+            for e in errs:
+                print(f'  ✗ API 密钥没同步：{e}')
+            if errs:
+                notes.append('API 密钥没同步')
+            elif text:
+                print(f'  ✓ API 密钥：{text}（不显示内容）')
+                res['secrets'] = text
+        elif secrets_diff(ph, a.st)[0]:
+            deferred.append(f'API 密钥两边不一样，没动（{why}）')
     if a.mac_ip:
         key = None
         if a.lan_key_file and os.path.exists(a.lan_key_file) and not a.local_tt:
@@ -1302,6 +1732,11 @@ def main(argv=None):
             notes.append('代理地址没改成')
         else:
             print(f'  ✓ {side}的代理地址已对准 http://{a.mac_ip}:{a.port}/v1' + (f'（旧设置备份在 {bk}）' if ch else '（本来就是）'))
+            res['endpoint'] = f'http://{a.mac_ip}:{a.port}/v1'
+    if upstream and not choices.get('extUpstream'):
+        deferred.append(f'{len(upstream)} 个扩展的分支没设上游，没动（{"你选了跳过" if a.choices else "要你选"}）')
+    for d in deferred:
+        print(f'  · 待你选：{d}')
 
     n_push, n_pull = len([r for r in push if r not in missing]), len([r for r in pull if r not in missing])
     if ext_failed:
@@ -1319,7 +1754,56 @@ def main(argv=None):
         print(f'  ✗ 同步没全部完成：{counts}；' + '；'.join(notes))
     for rel in sorted(missing)[:10]:
         print(f'  ! 没同步成功：{rel}')
+    if a.result_json:
+        res['push']['done'], res['pull']['done'] = n_push, n_pull
+        res.update(missing=sorted(missing), notes=notes, deferred=deferred)
+        atomic_write(a.result_json, json.dumps(res, ensure_ascii=False).encode('utf-8'))
     return 1 if (missing or notes) else 0
+
+
+def write_plan(a, ph, state, loc, rem, push, pull, conflicts, clashes, newer, ext_todo, ext_report, upstream=(), guard=None):
+    """--plan-json：按「自动 / 要你选 / 跳过」分好组写成 JSON，什么都不改。"""
+    side = ph.label
+    try:
+        info = chat_conflict_info(ph, a.st, [r for r in conflicts if is_chat(r)])
+    except (SyncError, OSError) as e:
+        print(f'✗ 比较冲突的聊天记录时出错（{e}）。什么都没改。')
+        return 2
+    text, errs = sync_tags(ph, a.st, None, set(loc) | set(pull), set(rem) | set(push), a.push_only, dry=True)
+    tags_todo = bool(re.search(r'[1-9]\d* 个', text or ''))
+    api, api_errs = (None, []) if a.push_only else api_diff(ph, a.st, a.port)
+    sec, sec_errs = (None, []) if a.push_only else secrets_diff(ph, a.st)
+    conf = set(conflicts)
+    ask_chats, ask_files = [], []
+    for rel in conflicts:
+        item = {'rel': rel, 'newer': newer[rel], 'first': rel not in state,
+                'mtime': {'local': loc[rel][0], 'remote': rem[rel][0]}}
+        if is_chat(rel):
+            item['extra'] = info.get(rel, {'local': 0, 'remote': 0})
+            ask_chats.append(item)
+        else:
+            ask_files.append(item)
+    skip = [{'what': rel, 'why': '文件名只差大小写，两边会互相覆盖（请改名）'} for rel in clashes]
+    why_ext = {'newer': f'{side}上的版本比{LOCAL}新', 'unknown': f'{side}上的版本{LOCAL}没有（多半在{side}上更新过）',
+               'diverged': '两边版本分叉', 'unreadable': f'读不到{side}上的版本'}
+    skip += [{'what': f'扩展 {r["name"]}', 'why': why_ext[r['decision']]} for r in ext_report if r['decision'] in why_ext]
+    skip += [{'what': '（文件）', 'why': w} for w in WARNINGS]
+    skip += [{'what': f'扩展 {u["name"]}', 'why': f'分支 {u["branch"]} 没设上游，也没有 origin'} for u in upstream if not u['target']]
+    skip += [{'what': '标签', 'why': e} for e in errs] + [{'what': 'API 设置', 'why': e} for e in api_errs] \
+        + [{'what': 'API 密钥', 'why': e} for e in sec_errs]
+    out = {
+        'ok': True, 'local': LOCAL, 'remote': side, 'counts': {'local': len(loc), 'remote': len(rem)},
+        'firstSync': not state, 'guard': guard,
+        'auto': {'push': [r for r in push if r not in conf], 'pull': [r for r in pull if r not in conf],
+                 'ext': [n for n, _, _ in ext_todo], 'tags': text if tags_todo else None},
+        'ask': {'chats': ask_chats, 'files': ask_files, 'api': api, 'secrets': sec,
+                'upstream': [u for u in upstream if u['target']]},
+        'skip': skip,
+    }
+    out['nothing'] = not (out['auto']['push'] or out['auto']['pull'] or out['auto']['ext'] or tags_todo
+                          or conflicts or api or sec or out['ask']['upstream'])
+    atomic_write(a.plan_json, json.dumps(out, ensure_ascii=False).encode('utf-8'))
+    return 0
 
 
 if __name__ == '__main__':
