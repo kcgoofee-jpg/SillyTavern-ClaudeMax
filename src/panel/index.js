@@ -289,6 +289,48 @@
     };
 
     function applyPresetRecommendation() {
+        applyPresetRecoCore();
+        applyModelProfile(); // last: the model profile wins over the preset-wide thinking setting
+    }
+
+    // A preset can tune itself per model: extensions.claude_max.byModel =
+    //   { "claude-opus-4-6": { thinking: "off", prompts: { "<entry id>": true } }, "claude-opus-5-5": { … } }
+    // Applied on every model change and preset switch — e.g. on Opus 4.6 turn on an entry that writes
+    // the chain of thought into the reply and turn native thinking off; on Opus 5.5 (which refuses
+    // requests to write reasoning into the reply) turn that entry off again.
+    async function applyModelProfile() {
+        const ctx = SillyTavern.getContext();
+        const byModel = ctx.chatCompletionSettings?.extensions?.claude_max?.byModel;
+        const { connected, direct, model } = connectionInfo();
+        if (!byModel || typeof byModel !== 'object' || !model || !(connected || direct)) return;
+        const prof = byModel[modelBase(model)];
+        if (!prof || typeof prof !== 'object') return;
+        const done = [];
+        const settings = getSettings();
+        if (connected && VALID_THINKING.includes(prof.thinking) && settings.thinking !== prof.thinking) {
+            settings.thinking = prof.thinking;
+            saveSettingsDebounced();
+            syncThinkingControls();
+            done.push(`思考模式「${THINKING_OPTIONS.find((o) => o.value === prof.thinking)?.label ?? prof.thinking}」`);
+        }
+        if (prof.prompts && typeof prof.prompts === 'object') {
+            const pm = (await import('/scripts/openai.js').catch(() => null))?.promptManager;
+            if (pm?.activeCharacter) {
+                let changed = false;
+                for (const [id, on] of Object.entries(prof.prompts)) {
+                    const entry = pm.getPromptOrderEntry(pm.activeCharacter, id);
+                    if (!entry || entry.enabled === !!on) continue;
+                    entry.enabled = !!on;
+                    changed = true;
+                    done.push(`${on ? '开' : '关'}「${pm.getPromptById(id)?.name ?? id}」`);
+                }
+                if (changed) { pm.render(); pm.saveServiceSettings(); }
+            }
+        }
+        if (done.length) notify('info', `按 ${shortModel(model)} 调整预设`, done.join('；'), { ms: 5000 });
+    }
+
+    function applyPresetRecoCore() {
         const ctx = SillyTavern.getContext();
         const rec = ctx.chatCompletionSettings?.extensions?.claude_max;
         applyPresetModel(rec?.model);
@@ -1403,7 +1445,10 @@
         const chat = SillyTavern.getContext().chat ?? [];
         const last = [...chat].reverse().find((m) => !m.is_user && !m.is_system);
         const match = last?.mes?.match(/<(thinking|think|cot|analysis)\b[^>]*>/i);
-        if (!match || last.extra?.reasoning) {
+        // The preset tunes itself for this model (byModel): a written-out chain of thought is on purpose.
+        const byModel = SillyTavern.getContext().chatCompletionSettings?.extensions?.claude_max?.byModel;
+        const planned = !!byModel?.[modelBase(connectionInfo().model)];
+        if (!match || last.extra?.reasoning || planned) {
             tip.hidden = true;
             return;
         }
@@ -2392,6 +2437,7 @@
     eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED ?? eventTypes.MESSAGE_RECEIVED, onOwnReply(() => setTimeout(noticeLastTurn, 400)));
     eventSource.on(eventTypes.CHAT_CHANGED, refreshIfOpen);
     eventSource.on(eventTypes.OAI_PRESET_CHANGED_AFTER, applyPresetRecommendation);
+    if (eventTypes.CHATCOMPLETION_MODEL_CHANGED) eventSource.on(eventTypes.CHATCOMPLETION_MODEL_CHANGED, () => setTimeout(applyModelProfile, 150));
     const genStartEvent = eventTypes.GENERATION_AFTER_COMMANDS ?? eventTypes.GENERATION_STARTED;
     if (genStartEvent) eventSource.on(genStartEvent, islandGenStart);
     if (eventTypes.STREAM_TOKEN_RECEIVED) eventSource.on(eventTypes.STREAM_TOKEN_RECEIVED, islandToken);
