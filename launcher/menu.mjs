@@ -3,11 +3,12 @@
 // CCST 酒馆工具：菜单（Mac / Windows / Termux 共用一份）
 // ──────────────────────────────────────────────
 //
-// 各系统只留一个启动壳（mac/酒馆工具.command、windows/酒馆工具.bat、termux/claude-max.sh menu），
-// 菜单的分组、说明、问题判断都在这里。动作仍由各系统自己的脚本做：
-//   Mac      mac/actions/<id>.zsh（+ mac/menu-status.zsh 给手机、同步等本机状态）
-//   Windows  windows/claude-max.ps1 <动作>
-//   Termux   termux/claude-max.sh <动作>
+// 各系统只留一个启动壳（mac/酒馆工具.command、windows/酒馆工具.bat），
+// 菜单的分组、说明、问题判断都在这里；状态和不分系统的动作在 core.mjs（三个系统同一份）：
+//   检查状态                      三个系统都用 core.mjs
+//   启动 / 关闭 / 重启            Windows、Linux 用 core.mjs；Mac 用 mac/actions/*.zsh（要连带手机模式守护、合盖）、
+//                                 Termux 用 termux/claude-max.sh（代理在 Debian 子系统里）。重启前统一由 core.mjs 把关
+//   其余（手机、合盖、生图…）     Mac mac/actions/<id>.zsh；Windows windows/claude-max.ps1 <动作>
 // 不依赖任何 npm 包：依赖坏了的时候（菜单里正好有「修复依赖」）也要能打开。
 //
 // 按键：数字 / 字母直接执行；↑↓ 选、回车执行；0、Esc 返回；h 说明；q 退出。
@@ -15,14 +16,12 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { emitKeypressEvents } from 'node:readline';
-import { fileURLToPath } from 'node:url';
 
-const HERE = dirname(fileURLToPath(import.meta.url));
-const ROOT = join(HERE, '..');
-const OS = process.platform === 'darwin' ? 'mac' : process.platform === 'win32' ? 'win' : 'linux';
-const VERSION = (() => { try { return JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')).version; } catch { return '?'; } })();
+import { ACTIONS, HERE, IS_TERMUX, OS, VERSION, getJson, loadConfig, readState, restartRefusal } from './core.mjs';
+
+export { readState };
 
 // ── 显示宽度（中文两格）和颜色 ──
 
@@ -41,75 +40,6 @@ const COLOR = process.stdout.isTTY && !process.env.NO_COLOR;
 const paint = (code) => (s) => (COLOR ? `\x1b[${code}m${s}\x1b[0m` : s);
 const c = { dim: paint('2'), bold: paint('1'), ok: paint('32'), warn: paint('33'), bad: paint('31'), key: paint('36'), inv: paint('7') };
 const RULE = ' ' + '-'.repeat(58);
-
-// ── 配置和状态 ──
-
-function proxyPort() {
-    if (/^\d+$/.test(process.env.PROXY_PORT ?? '')) return Number(process.env.PROXY_PORT);
-    for (const f of ['config.local', 'config.local.ps1']) {
-        try {
-            const m = readFileSync(join(HERE, f), 'utf8').match(/^\s*\$?(?:export\s+)?PROXY_PORT\s*=\s*["']?(\d+)/m);
-            if (m) return Number(m[1]);
-        } catch { /* 没有这个文件 */ }
-    }
-    return 8901;
-}
-
-async function getJson(url) {
-    try {
-        const r = await fetch(url, { signal: AbortSignal.timeout(1500) });
-        return r.ok ? await r.json() : null;
-    } catch {
-        return null;
-    }
-}
-
-/** Mac：menu-status.zsh 的「键<TAB>值」；其他系统没有这些。 */
-function localStatus() {
-    if (OS !== 'mac') return {};
-    const r = spawnSync('/bin/zsh', [join(HERE, 'mac', 'menu-status.zsh')], { encoding: 'utf8', timeout: 15000 });
-    const out = {};
-    for (const line of (r.stdout ?? '').split('\n')) {
-        const i = line.indexOf('\t');
-        if (i > 0) out[line.slice(0, i)] = line.slice(i + 1);
-    }
-    return out;
-}
-
-export async function readState() {
-    const port = proxyPort();
-    const [status, control] = await Promise.all([
-        getJson(`http://127.0.0.1:${port}/status`),
-        getJson(`http://127.0.0.1:${port}/v1/control/status`),
-    ]);
-    const local = localStatus();
-    const on = (k) => local[k] === '1';
-    return {
-        port,
-        proxy: !!status?.ok,
-        proxyVersion: status?.version ?? null,
-        loggedIn: status ? !!status.credential?.present : null,
-        plan: { max: 'Max', pro: 'Pro', team: 'Team', enterprise: 'Enterprise' }[status?.credential?.subscriptionType] ?? status?.credential?.subscriptionType ?? null,
-        busy: control?.busy ?? 0,
-        phoneMode: on('phone_mode') || !!control?.phoneMode,
-        watchdog: on('watchdog'),
-        lidInstalled: on('lid_installed'),
-        lidOn: on('lid_on'),
-        ip: local.ip || control?.ip || '',
-        phone: local.phone ?? null, // usb | wifi | unauthorized | none | noadb
-        lastSync: local.last_sync ?? null,
-        hubLabel: local.hub_label ?? '',
-        stManaged: on('st_managed'),
-        stRunning: on('st_running'),
-        hasTT: on('has_tt'),
-        macTTRunning: on('mactt_running'),
-        hasComfy: on('has_comfy'),
-        comfyRunning: on('comfy_running'),
-        hasModule: on('has_module'),
-        canTTImport: on('can_tt_import'),
-        autostart: on('autostart'),
-    };
-}
 
 // ── 菜单内容：只描述「有什么、叫什么、什么时候能用」，怎么做交给 run() ──
 
@@ -191,10 +121,32 @@ function phoneText(p) {
 
 // ── 执行动作 ──
 
-const WIN_ACTIONS = { start: 'start', stop: 'stop', restart: 'restart', check: 'status', login: 'login', repair: 'repair', logs: 'logs', 'autostart-toggle': 'autostart' };
-const LINUX_ACTIONS = { start: 'start', stop: 'stop', restart: 'restart', check: 'status', login: 'login', logs: 'logs' };
+// 各系统还留在自己脚本里的动作
+const WIN_ACTIONS = { login: 'login', repair: 'repair', logs: 'logs', 'autostart-toggle': 'autostart' };
+const TERMUX_ACTIONS = { start: 'start', stop: 'stop', restart: 'restart', login: 'login', logs: 'logs' };
+const MAC_SHELL = new Set(['start', 'stop', 'restart']);
 
-function run(id) {
+/** 这个动作在这个系统上由 core.mjs 做（返回动作函数）还是交给系统脚本（返回 null）。 */
+export function nodeAction(id, os = OS, termux = IS_TERMUX) {
+    if (!ACTIONS[id]) return null;
+    if (id === 'check') return ACTIONS.check;
+    if (os === 'mac' && MAC_SHELL.has(id)) return null;
+    if (termux) return null;
+    return ACTIONS[id];
+}
+
+async function run(id, io) {
+    // 重启会掐断正在写的回复：哪个系统、谁来重启都先问代理
+    if (id === 'restart') {
+        const why = restartRefusal(await getJson(`http://127.0.0.1:${loadConfig().proxyPort}/v1/control/status`));
+        if (why) return why;
+    }
+    const fn = nodeAction(id);
+    if (fn) {
+        const code = await fn({ ask: io.ask });
+        await io.pause();
+        return code === 0 ? null : `结束（退出码 ${code}）`;
+    }
     const env = { ...process.env, CM_MENU: '1' };
     let r;
     if (OS === 'mac') {
@@ -205,8 +157,8 @@ function run(id) {
         if (!WIN_ACTIONS[id]) return `「${id}」目前只支持 Mac`;
         r = spawnSync('powershell', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', join(HERE, 'windows', 'claude-max.ps1'), WIN_ACTIONS[id]], { stdio: 'inherit', env });
     } else {
-        if (!LINUX_ACTIONS[id]) return `「${id}」目前只支持 Mac`;
-        r = spawnSync('bash', [join(HERE, 'termux', 'claude-max.sh'), LINUX_ACTIONS[id]], { stdio: 'inherit', env });
+        if (!TERMUX_ACTIONS[id] || !IS_TERMUX) return `「${id}」目前只支持 Mac`;
+        r = spawnSync('bash', [join(HERE, 'termux', 'claude-max.sh'), TERMUX_ACTIONS[id]], { stdio: 'inherit', env });
     }
     return r.status === 0 ? null : `结束（退出码 ${r.status ?? r.signal}）`;
 }
@@ -365,7 +317,10 @@ async function main() {
         if (item.why) { msg = `${item.label.replace(/ >$/, '')}：${item.why}`; continue; }
         if (item.sub) { screen = item.sub; sel = 0; continue; }
         if (!plain) process.stdout.write('\x1b[2J\x1b[H');
-        const err = run(item.id);
+        const err = await run(item.id, {
+            ask: async (q) => /^y/i.test((await readLine(`  ${q} (y/N) `)) ?? ''),
+            pause: async () => { if (!plain) await readLine('\n按回车回到菜单…'); },
+        });
         msg = err ? `${item.label}：${err}` : '';
         sel = screen === 'home' ? 0 : sel;
     }

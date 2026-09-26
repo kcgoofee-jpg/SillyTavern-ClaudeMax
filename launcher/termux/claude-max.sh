@@ -120,9 +120,11 @@ cmd_start() {
 cmd_stop() {
     step "关闭 Claude 代理"
     local pid
+    # 只按进程号关：启动时记下的，和代理自己在 /status 里报的；不按名字找（会误关别的 node 程序）
     pid=$(cat "$PID_FILE" 2>/dev/null)
     [[ -n "$pid" ]] && kill "$pid" 2>/dev/null
-    pkill -f "CCST/server.js" 2>/dev/null
+    pid=$(curl -s --max-time 3 "http://127.0.0.1:$PORT/status" 2>/dev/null | sed -n 's/.*"pid":\([0-9][0-9]*\).*/\1/p')
+    [[ -n "$pid" ]] && kill "$pid" 2>/dev/null
     sleep 1
     if proxy_up; then fail "代理还在运行，重启 Termux 即可"; else ok "已关闭"; fi
     rm -f "$PID_FILE"
@@ -158,7 +160,11 @@ case "${1:-status}" in
     login) cmd_login ;;
     start) cmd_start ;;
     stop) cmd_stop ;;
-    restart) cmd_stop; cmd_start ;;
+    restart)
+        # 代理在写回复时不重启（会把回复掐断）；和菜单的 core.mjs 同一条规则
+        busy=$(curl -s --max-time 3 "http://127.0.0.1:$PORT/v1/control/status" 2>/dev/null | sed -n 's/.*"busy":\([0-9][0-9]*\).*/\1/p')
+        if [[ -n "$busy" ]] && (( busy > 0 )); then warn "代理正在写 $busy 条回复，现在重启会把它掐断。等写完再来。"; exit 0; fi
+        cmd_stop; cmd_start ;;
     status) cmd_status ;;
     update) cmd_update ;;
     logs) tail -n 50 "$LOG" ;;

@@ -35,6 +35,8 @@ export async function handleStatus(_req, res) {
             ok: true,
             plugin: 'claude-subscription',
             version,
+            // 启动器按端口关代理时用来确认「这就是代理」（Termux 没有 lsof 时只能靠它）
+            pid: process.pid,
             sdk: 'loaded',
             sdkVersion: SDK_VERSION,
             credential: credentialSummary(),
