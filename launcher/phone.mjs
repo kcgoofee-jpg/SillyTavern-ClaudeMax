@@ -49,10 +49,12 @@ export function hubProblem(cfg, exists = existsSync) {
 const short = (rel) => basename(rel).replace(/\.jsonl$/, '');
 const list = (xs, n = 3) => xs.slice(0, n).map(short).join('、') + (xs.length > n ? ` 等 ${xs.length} 个` : '');
 const whose = (plan, side) => (side === 'local' ? plan.local : plan.remote);
+// 中文紧跟英文 / 数字时空一格（「Mac TT 的」「手机的」）
+const sp = (x) => (/[A-Za-z0-9]$/.test(x) ? `${x} ` : x);
 
 /**
  * 要你选的事，一条一个问题：{ key, text, question, options, def, apply(choices, i) }。
- * ctx：{ phone: { running, generating }, macRunning, macLabel }（要不要关 TT）。
+ * ctx：{ phone: { running, generating }, macRunning, busy }（要不要关 TT、默认等不等）。
  */
 export function questions(plan, ctx = {}) {
     const L = plan.local, R = plan.remote;
@@ -63,17 +65,17 @@ export function questions(plan, ctx = {}) {
         qs.push({
             text: `${chats.length} 个聊天两边都改过（${list(chats.map((c) => c.rel))}）`,
             question: `${chats.length} 个两边都改过的聊天怎么办？`,
-            options: ['每个都两份都留（较新的当正本）', `全部用 ${L} 的`, `全部用 ${R} 的`],
+            options: ['每个都两份都留（较新的当正本）', `全部用 ${sp(L)}的`, `全部用${sp(R)}的`.replace(/^全部用(?=[A-Za-z])/, '全部用 ')],
             def: 0,
             apply: (c, i) => { for (const x of chats) c.files[x.rel] = ['both', 'local', 'remote'][i]; },
         });
     } else {
         for (const x of chats) {
-            const more = [x.extra.local && `${L} 多 ${x.extra.local} 楼`, x.extra.remote && `${R} 多 ${x.extra.remote} 楼`].filter(Boolean).join('，') || '楼层一样、内容不同';
+            const more = [x.extra.local && `${sp(L)}多 ${x.extra.local} 楼`, x.extra.remote && `${sp(R)}多 ${x.extra.remote} 楼`].filter(Boolean).join('，') || '楼层一样、内容不同';
             qs.push({
-                text: `聊天「${short(x.rel)}」两边都改过（${more}；${whose(plan, x.newer)}的较新）`,
+                text: `聊天「${short(x.rel)}」两边都改过（${more}；${sp(whose(plan, x.newer))}的较新）`,
                 question: `聊天「${short(x.rel)}」用哪份？`,
-                options: [`${L} 的`, `${R} 的`, '两份都留'],
+                options: [`${sp(L)}的`, `${sp(R)}的`, '两份都留'],
                 def: 2,
                 apply: (c, i) => setFile(x.rel, ['local', 'remote', 'both'][i])(c),
             });
@@ -84,7 +86,7 @@ export function questions(plan, ctx = {}) {
         qs.push({
             text: `${files.length} 个别的文件两边都改过（${list(files.map((f) => f.rel))}）`,
             question: `这 ${files.length} 个文件用哪边的？（另一份都进备份）`,
-            options: ['各自用较新的', `全部用 ${L} 的`, `全部用 ${R} 的`],
+            options: ['各自用较新的', `全部用 ${sp(L)}的`, `全部用${sp(R)}的`.replace(/^全部用(?=[A-Za-z])/, '全部用 ')],
             def: 0,
             apply: (c, i) => { for (const f of files) c.files[f.rel] = ['newer', 'local', 'remote'][i]; },
         });
@@ -93,9 +95,9 @@ export function questions(plan, ctx = {}) {
     if (api) {
         const p = (s) => (api.preset?.[s] ? `「${api.preset[s]}」` : '');
         qs.push({
-            text: `API 和预设设置两边不一样（${L}${p('local')}，${R}${p('remote')}；${whose(plan, api.newer)}的较新）`,
+            text: `API 和预设设置两边不一样（${L}${p('local')}，${R}${p('remote')}；${sp(whose(plan, api.newer))}的较新）`,
             question: 'API 和预设设置用哪边的？（连哪个地址各自保留）',
-            options: [`${L} 的`, `${R} 的`, '跳过'],
+            options: [`${sp(L)}的`, `${sp(R)}的`, '跳过'],
             def: 2,
             apply: (c, i) => { c.api = ['local', 'remote', 'skip'][i]; },
         });
@@ -103,7 +105,7 @@ export function questions(plan, ctx = {}) {
     const sec = plan.ask.secrets;
     if (sec) {
         qs.push({
-            text: `API 密钥两边不一样（${L}缺 ${sec.local} 条，${R}缺 ${sec.remote} 条）`,
+            text: `API 密钥两边不一样（${sp(L)}缺 ${sec.local} 条，${sp(R)}缺 ${sec.remote} 条）`,
             question: 'API 密钥：',
             options: ['两边互补（只加缺的，不改各自正在用的）', '跳过'],
             def: 0,
@@ -131,7 +133,7 @@ export function questions(plan, ctx = {}) {
         });
     }
     if (!plan.nothing) {
-        const using = [ctx.phone?.running && `${R}上的 TT${ctx.phone.generating ? '（在生成回复）' : ''}`, ctx.macRunning && `${ctx.macLabel ?? 'Mac'} 上的 TT`].filter(Boolean);
+        const using = [ctx.phone?.running && `${R}上的 TT${ctx.phone.generating ? '（在生成回复）' : ''}`, ctx.macRunning && '这台 Mac 上的 TT'].filter(Boolean);
         if (using.length) {
             const gen = !!ctx.phone?.generating || !!ctx.busy;
             qs.push({
@@ -322,7 +324,7 @@ async function syncFlow(cfg, r, d, io) {
     const macExt = syncHub(cfg) === 'tt' ? d.macExtPreview() : [];
     const extras = macExt.length ? [`扩展 → Mac TT：${macExt.join('、')}`] : [];
     if (plan.firstSync) r.explain(`第一次按「${L} ↔ 手机」同步：两边不一样的文件都算「两边都改过」，要你选；以后只列真的两边都改过的。`);
-    const ctx = { phone: { running: probe.ttRunning, generating: probe.generating }, macRunning, macLabel: 'Mac', busy };
+    const ctx = { phone: { running: probe.ttRunning, generating: probe.generating }, macRunning, busy };
     if (plan.nothing) {
         r.ok('两边已经一样，什么都没关');
         if (macExt.length && !macRunning) { if (d.macExtUpdate()) r.ok(`Mac TT 的扩展更新了：${macExt.join('、')}`); }

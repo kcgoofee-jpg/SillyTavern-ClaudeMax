@@ -547,7 +547,7 @@ export async function actionCheck(io = {}) {
         }
         if (st.adbNoRoute) {
             r.warnLine('后台连手机的无线调试时报「No route to host」：多半是 macOS 的「本地网络」权限挡住了后台启动的 adb');
-            r.fix('在酒馆工具里选一次「手机同步」：它从终端重新启动 adb，之后守护也能连上手机。');
+            r.fix('插一次 USB 线，或在「系统设置 → 隐私与安全性 → 本地网络」里允许「终端」。');
         }
     }
     if (cfg.os === 'mac') await checkExtUpstream(cfg, r, io);

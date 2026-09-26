@@ -90,7 +90,7 @@ while [[ -s "$LAN_KEY_FILE" ]]; do
         if [[ -z "$ip" ]]; then
             notify "Mac 断开了 Wi-Fi" "手机暂时连不上代理，Mac 重新连上 Wi-Fi 后会再通知。"
         else
-            notify "Mac 的地址变了" "新的代理地址：http://$ip:$PROXY_PORT/v1 。手机上 CCST 面板顶部的状态卡（连不上时出现）里改成这个地址，或在 Mac 上跑一次「手机同步」自动改好。"
+            notify "Mac 的地址变了" "新的代理地址：http://$ip:$PROXY_PORT/v1 。手机上 CCST 面板顶部的状态卡（连不上时出现）里改成这个地址，或在 Mac 上跑一次「同步手机」自动改好。"
         fi
         last_ip=$ip
     fi

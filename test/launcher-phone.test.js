@@ -54,9 +54,9 @@ test('preview: auto / ask / skip groups', () => {
     const text = lines.join('\n');
     assert.match(text, /→ 手机 1 个：mac/);
     assert.match(text, /扩展 → Mac TT：CCST/);
-    assert.match(text, /a 聊天「c」两边都改过（Mac TT 多 1 楼，手机 多 2 楼；手机的较新）/);
+    assert.match(text, /a 聊天「c」两边都改过（Mac TT 多 1 楼，手机多 2 楼；手机的较新）/);
     assert.match(text, /API 和预设设置两边不一样/);
-    assert.match(text, /要关掉手机上的 TT（在生成回复）和Mac 上的 TT/);
+    assert.match(text, /要关掉手机上的 TT（在生成回复）和这台 Mac 上的 TT/);
     assert.match(text, /文件名只差大小写/);
     // generating: the close question defaults to waiting
     assert.deepEqual(qs.at(-1).options, ['现在关', '等生成完再关', '取消']);

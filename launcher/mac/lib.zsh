@@ -9,7 +9,7 @@
 # 想手动指定，在 launcher/config.local 里写（该文件不会被提交）：
 #   ST_DIR="/path/to/SillyTavern"   LOG_DIR="/path/to/logs"   ST_PORT=8000   PROXY_PORT=8901
 #   ST_AUTOSTART=0   启动 / 重启 / 开机启动时不启动酒馆（平时用 TauriTavern，酒馆只拿来测试）
-#   SYNC_HUB=tt      「手机同步」以这台 Mac 的 TauriTavern 为中心（Mac TT ↔ 手机）；st = 以电脑酒馆为中心
+#   SYNC_HUB=tt      「同步手机」以这台 Mac 的 TauriTavern 为中心（Mac TT ↔ 手机）；st = 以电脑酒馆为中心
 #                    不写时：有酒馆就是 st，没有就是 tt
 # ──────────────────────────────────────────────
 
@@ -635,7 +635,7 @@ lid_set() {   # lid_set 1|0
     if (( $1 )); then : >"$LID_OWNED_FILE"; else rm -f "$LID_OWNED_FILE"; fi
 }
 
-PHONE_FILE="$PROXY_DIR/launcher/phone.local"   # 无线调试时手机的地址（「手机同步」里开无线调试时写的）
+PHONE_FILE="$PROXY_DIR/launcher/phone.local"   # 无线调试时手机的地址（「同步手机」里开无线调试时写的）
 
 # 按上次的无线调试地址重连手机：0 = 连上了；2 = No route to host；1 = 其他原因没连上。
 # No route to host 多半是 macOS「本地网络」权限：后台（守护 / 开机启动）拉起的 adb 服务没有这个权限，
@@ -784,7 +784,7 @@ phone_sync_auto() {
     if (( rc == 0 )); then
         notify "手机同步完成" "${out:-已同步}"
     else
-        notify "手机同步没有全部完成" "${out:-同步程序出错（退出码 $rc）}。在 Mac 上用酒馆工具「手机同步」再做一次可以看到详情。"
+        notify "手机同步没有全部完成" "${out:-同步程序出错（退出码 $rc）}。在 Mac 上用酒馆工具「同步手机」再做一次可以看到详情。"
         return 1
     fi
 }
@@ -1015,7 +1015,7 @@ show_running() {
     lid_awake_on && [[ ! -s "$LAN_KEY_FILE" ]] && warn "合盖不睡开着，但手机模式是关的：合盖不会睡，注意发热耗电"
     if [[ -f "$ADB_NOROUTE_FILE" ]]; then
         warn "后台连手机的无线调试时报「No route to host」：多半是 macOS 的「本地网络」权限挡住了后台启动的 adb"
-        fix "在「酒馆工具」里选一次「手机同步」：它从终端重新启动 adb，之后守护也能连上手机（Mac 重启后可能要再来一次）。"
+        fix "插一次 USB 线，或在「系统设置 → 隐私与安全性 → 本地网络」里允许「终端」。"
     fi
 }
 
