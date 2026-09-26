@@ -66,6 +66,18 @@
     import(new URL('../shared/host.js', import.meta.url).href)
         .then((m) => { hostCheck = m; renderConnect(); })
         .catch(() => { /* no cloud note */ });
+    // Which sources reach Claude, their model names and caching (shared/sources.js).
+    // Without it the panel knows only the Claude source and OpenRouter, as before 3.2.
+    let sources = null;
+    import(new URL('../shared/sources.js', import.meta.url).href)
+        .then((m) => {
+            sources = m;
+            // The panel may be built already, knowing only two sources: rebuild so the model row shows.
+            if (document.querySelector('.inline-drawer.claude-max')) rebuildPanel();
+            refreshAll();
+            fillMissingClaudeModels();
+        })
+        .catch(() => { /* two sources only */ });
     // 灵动岛 (lib/island.js): one morphing pill at the top of the CCST
     // panel (never over the chat). It shows the reply being generated and,
     // while the panel is open, the notices; with the panel closed notices are
@@ -310,7 +322,7 @@
         const byModel = ctx.chatCompletionSettings?.extensions?.claude_max?.byModel;
         const { connected, direct, model } = connectionInfo();
         if (!byModel || typeof byModel !== 'object' || !model || !(connected || direct)) return;
-        const prof = byModel[modelBase(model)];
+        const prof = byModel[modelKey(model)];
         if (!prof || typeof prof !== 'object') return;
         const done = [];
         const settings = getSettings();
@@ -578,12 +590,15 @@
             if (!settings.enabled) return;
             if (!data) return;
             // Direct to Claude (no proxy): only the local pre-send check applies.
-            if (data.chat_completion_source === 'claude' || (data.chat_completion_source === 'openrouter' && /claude/i.test(String(data.model ?? '')))) {
+            const ours = data.chat_completion_source === 'custom' && isOurEndpoint(data.custom_url, settings);
+            const direct = !ours && (sources
+                ? !!sources.describeSource({ source: data.chat_completion_source, model: data.model })
+                : data.chat_completion_source === 'claude' || (data.chat_completion_source === 'openrouter' && /claude/i.test(String(data.model ?? ''))));
+            if (direct) {
                 preflightCheck(data);
                 return;
             }
-            if (data.chat_completion_source !== 'custom') return;
-            if (!isOurEndpoint(data.custom_url, settings)) return;
+            if (!ours) return;
 
             const existing = typeof data.custom_include_body === 'string' ? data.custom_include_body : '';
             const cleaned = existing
@@ -1475,7 +1490,7 @@
         const match = last?.mes?.match(/<(thinking|think|cot|analysis)\b[^>]*>/i);
         // The preset tunes itself for this model (byModel): a written-out chain of thought is on purpose.
         const byModel = SillyTavern.getContext().chatCompletionSettings?.extensions?.claude_max?.byModel;
-        const planned = !!byModel?.[modelBase(connectionInfo().model)];
+        const planned = !!byModel?.[modelKey(connectionInfo().model)];
         if (!match || last.extra?.reasoning || planned) {
             tip.hidden = true;
             return;
@@ -1493,6 +1508,7 @@
 
     function refreshAll() {
         renderConnect();
+        renderCacheCard();
         renderGlance();
         refreshProxyStatus();
         refreshStatsPage();
@@ -1530,12 +1546,12 @@
     ];
 
     function shortModel(id) {
-        const s = String(id ?? '');
+        const s = sources?.canonicalModel(id) ?? String(id ?? '');
         for (const [re, label] of MODEL_SHORT) {
             const m = s.match(re);
-            if (m) return label.replace('$1', m[1] ?? '') + (/\[1m\]|-1m/i.test(s) ? ' 1M' : '');
+            if (m) return label.replace('$1', m[1] ?? '') + (/\[1m\]|-1m/i.test(String(id ?? '')) ? ' 1M' : '');
         }
-        return s;
+        return String(id ?? '');
     }
 
     /** Where SillyTavern sends chat requests. `connected`: this proxy (everything works).
@@ -1549,16 +1565,23 @@
         return `${what}暂不可用（${msg}）`;
     }
 
+    /** `where` / `billing`: 走哪 · 按什么计费, for the status bar. */
     function connectionInfo() {
         const ctx = SillyTavern.getContext();
         const oai = ctx.chatCompletionSettings ?? {};
         const src = ctx.mainApi === 'openai' ? oai.chat_completion_source : null;
         if (src === 'custom' && isOurEndpoint(oai.custom_url, getSettings())) {
-            return { kind: 'ours', connected: true, direct: false, model: oai.custom_model };
+            return { kind: 'ours', connected: true, direct: false, model: oai.custom_model, where: '本机代理', billing: '订阅' };
         }
-        if (src === 'claude') return { kind: 'claude', connected: false, direct: true, model: oai.claude_model ?? null };
+        if (sources) {
+            const model = oai[sources.CLAUDE_SOURCES[src]?.modelKey] ?? null;
+            const d = sources.describeSource({ source: src, model, reverseProxy: src === 'claude' ? oai.reverse_proxy : '' });
+            if (d) return { kind: src, connected: false, direct: true, model, where: d.where, billing: d.billing };
+            return { kind: 'other', connected: false, direct: false, model: null };
+        }
+        if (src === 'claude') return { kind: 'claude', connected: false, direct: true, model: oai.claude_model ?? null, where: 'Claude 官方', billing: 'API 密钥' };
         if (src === 'openrouter' && /claude/i.test(oai.openrouter_model ?? '')) {
-            return { kind: 'openrouter', connected: false, direct: true, model: oai.openrouter_model };
+            return { kind: 'openrouter', connected: false, direct: true, model: oai.openrouter_model, where: 'OpenRouter', billing: 'OpenRouter 额度' };
         }
         return { kind: 'other', connected: false, direct: false, model: null };
     }
@@ -1566,7 +1589,7 @@
     /** The status bar (dot · model · effort · 5h quota) and the collapsed drawer's header say the same thing. */
     function renderGlance() {
         const settings = getSettings();
-        const { connected, direct, model } = connectionInfo();
+        const { connected, direct, model, where, billing } = connectionInfo();
         const linked = connected || direct;
         const effort = effectiveEffort(settings);
         const parts = [];
@@ -1581,9 +1604,19 @@
             const q = glance.quota;
             bar.replaceChildren(
                 el('b', 'cm-bar-model', linked ? (model ? shortModel(model) : '未选模型') : '未连接'),
-                el('span', 'cm-bar-effort', nextEffort ? `下一轮${EFFORT_LABEL[effort]}` : `思考 ${settings.thinking === 'off' ? '关' : EFFORT_LABEL[effort]}`),
             );
-            if (q != null) {
+            // 走哪 · 按什么计费
+            if (linked && where) {
+                const src = el('span', 'cm-bar-src', `${where} · ${billing}`);
+                src.title = '现在走哪 · 按什么计费';
+                bar.append(src);
+            }
+            // The panel's thinking settings reach Claude only through the proxy.
+            if (connected || nextEffort) {
+                bar.append(el('span', 'cm-bar-effort', nextEffort ? `下一轮${EFFORT_LABEL[effort]}` : `思考 ${settings.thinking === 'off' ? '关' : EFFORT_LABEL[effort]}`));
+            }
+            // The 5h window is the subscription's: beside an API key or OpenRouter it says nothing.
+            if (q != null && !direct) {
                 const quota = el('span', 'cm-bar-quota', `5h ${q}%`);
                 if (q >= 70) quota.dataset.tone = q >= 90 ? 'error' : 'warn';
                 bar.append(quota);
@@ -1647,7 +1680,7 @@
                 : `默认地址 ${DEFAULT_ENDPOINT} 时，其他设备打开的酒馆经酒馆服务器读额度和状态。`,
             '不支持温度、Top-P 等采样参数（Agent SDK 限制）。',
             '「(1M context)」模型有 100 万上下文；不可用时自动退回普通版一小时。',
-            '直连 Claude（官方源或 OpenRouter）也能用：模型切换、发送前检查、体检、角色卡检查、灵动岛照常；缓存排布、防丢回复、额度统计要走代理。',
+            '直连 Claude（官方源、OpenRouter、Electron Hub、NanoGPT、AI/ML API、CometAPI、自定义地址）也能用：模型切换、按模型调整预设、发送前检查、体检、灵动岛照常；缓存排布、防丢回复、额度统计要走代理。',
         ]) list.append(el('li', null, line));
         steps.append(list);
         return steps;
@@ -1692,22 +1725,42 @@
         { value: 'claude-opus-4-6', label: 'Opus 4.6', hint: '思考可关，思考过程完整可见。' },
     ];
     const modelBase = (id) => String(id ?? '').replace(/\[1m\]$/i, '');
+    /** The canonical id (claude-opus-4-6) behind any source's name: what MODEL_PICKS and byModel use. */
+    const modelKey = (id) => sources?.canonicalModel(id) ?? modelBase(id);
 
+    /** Add an option the dropdown lacks (ST's static Claude list lags new models). */
+    function addMissingOption(sel, id, label = id) {
+        if (sel.find('option').filter((_, o) => o.value === id).length) return false;
+        sel.append(new Option(label, id));
+        return true;
+    }
+
+    /** Switch SillyTavern's model on whatever source it is on. `id` is canonical (claude-opus-4-6),
+     *  optionally with [1m]; each source gets its own spelling. False when the source has no such model. */
     function setModel(id) {
         const ctx = SillyTavern.getContext();
         const $ = globalThis.jQuery;
-        if (connectionInfo().kind === 'claude') {
-            // SillyTavern's own Claude source: its dropdown can lag behind new models (1.19 has no
-            // Opus 5.5) — add the option so the dropdown and the setting agree, then pick it.
-            const sel = $?.('#model_claude_select');
+        const { kind } = connectionInfo();
+        const meta = kind === 'ours' ? null : sources?.CLAUDE_SOURCES[kind] ?? (kind === 'claude' ? { select: '#model_claude_select', modelKey: 'claude_model' } : null);
+        if (meta?.select) {
+            const sel = $?.(meta.select);
             if (sel?.length) {
-                if (!sel.find('option').filter((_, o) => o.value === id).length) sel.append(new Option(id, id));
-                sel.val(id).trigger('change');
+                const ids = sel.find('option').map((_, o) => o.value).get().filter(Boolean);
+                // Claude source: [1m] rides along as before; elsewhere ids are the source's own.
+                const target = kind === 'claude' ? id : (sources?.sourceModelId(kind, id, ids) ?? null);
+                if (!target) return false;
+                // The Claude source's dropdown can lag behind new models (1.19 has no Opus 5.5):
+                // add the option so the dropdown and the setting agree, then pick it.
+                if (kind === 'claude') addMissingOption(sel, target);
+                else if (!ids.includes(target)) return false;
+                sel.val(target).trigger('change');
             } else if (ctx.chatCompletionSettings) {
-                ctx.chatCompletionSettings.claude_model = id;
+                const target = kind === 'claude' ? id : sources?.sourceModelId(kind, id, []);
+                if (!target) return false;
+                ctx.chatCompletionSettings[meta.modelKey] = target;
                 ctx.saveSettingsDebounced?.();
             }
-            return;
+            return true;
         }
         const input = $?.('#custom_model_id');
         if (input?.length) input.val(id).trigger('input');
@@ -1718,12 +1771,37 @@
         // The Custom source's model field doesn't raise CHATCOMPLETION_MODEL_CHANGED: apply the
         // preset's per-model profile here too.
         setTimeout(applyModelProfile, 150);
+        return true;
+    }
+
+    // #7: ST's Claude source has a fixed dropdown and never asks Anthropic for its model list
+    // (that needs the key, which stays on ST's server). Fill it from this proxy's list when it is
+    // reachable, else from the few ids the panel knows are missing. Sources with a live list
+    // (OpenRouter and the aggregators) are filled by ST itself.
+    async function fillMissingClaudeModels() {
+        const sel = globalThis.jQuery?.('#model_claude_select');
+        if (!sources || !sel?.length) return;
+        const ids = new Set(sources.KNOWN_CLAUDE_MODELS);
+        try {
+            const settings = getSettings();
+            const res = await fetch(`${proxyBase(settings)}/v1/models`, {
+                signal: timeoutSignal(1500), headers: settings.accessKey ? { 'X-Claude-Max-Key': settings.accessKey } : {},
+            });
+            const data = res.ok ? await res.json() : null;
+            for (const m of data?.data ?? []) if (/^claude-[\w-]+$/.test(m?.id ?? '')) ids.add(m.id);
+        } catch { /* proxy not running: the known ids only */ }
+        const added = [...ids].filter((id) => addMissingOption(sel, id));
+        if (added.length) {
+            const cur = SillyTavern.getContext().chatCompletionSettings?.claude_model;
+            if (added.includes(cur)) sel.val(cur); // a saved model the dropdown didn't have
+            console.log(`[claude-max] added to the Claude model list: ${added.join(', ')}`);
+        }
     }
 
     function modelRow() {
-        const { connected, kind, model } = connectionInfo();
-        if (!connected && kind !== 'claude') return null;
-        const current = modelBase(model);
+        const { connected, direct, model } = connectionInfo();
+        if (!connected && !direct) return null;
+        const current = modelKey(model);
         const options = [...MODEL_PICKS];
         if (current && !options.some((o) => o.value === current)) {
             options.push({ value: current, label: shortModel(current), hint: '当前模型（在 API 连接里选的）。' });
@@ -1735,8 +1813,12 @@
             onChange: (v) => {
                 const cur = connectionInfo().model ?? '';
                 const id = v + (/\[1m\]$/i.test(cur) ? '[1m]' : '');
-                if (id === cur) return;
-                setModel(id);
+                if (id === cur || v === modelKey(cur)) return;
+                if (!setModel(id)) {
+                    syncModelControl();
+                    notify('warn', `${connectionInfo().where ?? '这个来源'}没有 ${shortModel(v)}`, '在「API 连接」里刷新模型列表，或换个来源。', { ms: 8000 });
+                    return;
+                }
                 renderGlance();
                 notify('info', `已切到 ${shortModel(id)}`, '到下次切换预设为止。', { ms: 6000 });
             },
@@ -1751,17 +1833,25 @@
     // is applied here. Presets without one keep whatever model is selected.
     function applyPresetModel(model) {
         if (typeof model !== 'string' || !/^claude-[\w.-]+$/i.test(model)) return;
-        const { connected, kind, model: cur } = connectionInfo();
-        if ((!connected && kind !== 'claude') || modelBase(cur) === modelBase(model)) return;
+        const { connected, direct, model: cur } = connectionInfo();
+        if ((!connected && !direct) || modelKey(cur) === modelKey(model)) return;
         const id = modelBase(model) + (/\[1m\]$/i.test(cur ?? '') ? '[1m]' : '');
-        setModel(id);
+        if (!setModel(id)) return;
         renderGlance();
         notify('info', `预设用 ${shortModel(id)}`, '临时换：在「推理」页点另一个。', { ms: 5000 });
     }
 
+    /** The model row exists only while ST is on a Claude source: rebuild when that flips. */
+    function modelRowFollowsSource() {
+        const { connected, direct } = connectionInfo();
+        const has = !!document.getElementById('claude_max_model');
+        if (has !== (connected || direct) && document.querySelector('.inline-drawer.claude-max')) rebuildPanel();
+        else syncModelControl();
+    }
+
     function syncModelControl() {
         const { model } = connectionInfo();
-        document.getElementById('claude_max_model')?.select?.(modelBase(model));
+        document.getElementById('claude_max_model')?.select?.(modelKey(model));
     }
 
     function buildReasonTab(pane, settings, save) {
@@ -1807,6 +1897,11 @@
         lastBox.id = 'claude_max_lastturn';
         pane.append(lastBox);
 
+        pane.append(section('缓存'));
+        const cacheBox = el('div', 'cm-field');
+        cacheBox.id = 'claude_max_cache';
+        pane.append(cacheBox);
+
         pane.append(section('订阅额度'));
         const quotaBox = el('div', 'cm-quota');
         quotaBox.id = 'claude_max_quota';
@@ -1823,6 +1918,47 @@
         const loreBox = el('div', 'cm-field');
         loreBox.id = 'claude_max_lore';
         pane.append(loreBox);
+    }
+
+    /** 状态 → 缓存: how this source caches. Direct sources: SillyTavern's own settings, which
+     *  live in its config.yaml (read at start-up) — shown with a copy button, not applied. */
+    function renderCacheCard() {
+        const box = document.getElementById('claude_max_cache');
+        if (!box) return;
+        const { connected, direct, kind, where } = connectionInfo();
+        if (connected) {
+            box.replaceChildren(el('small', 'cm-hint', '走本机代理：缓存由代理排布，命中情况看上面「上一轮」。'));
+            return;
+        }
+        if (!direct) {
+            box.replaceChildren(el('small', 'cm-hint', '酒馆现在没在用 Claude。'));
+            return;
+        }
+        if (!sources) {
+            box.replaceChildren(el('small', 'cm-hint', '没加载（扩展文件不完整），重装扩展即可。'));
+            return;
+        }
+        const advice = sources.cacheAdvice(kind);
+        const card = note(advice.tone, `${where} · 酒馆自带缓存`);
+        for (const line of advice.lines) card.append(el('small', 'cm-hint', line));
+        if (advice.yaml) {
+            card.append(el('pre', 'cm-log', advice.yaml));
+            const copy = el('div', 'menu_button', '复制这段');
+            copy.addEventListener('click', async () => {
+                try {
+                    await navigator.clipboard.writeText(advice.yaml);
+                    notify('ok', '已复制', '粘到酒馆目录的 config.yaml（替换原来的 claude: 段里对应几行），再重启酒馆。', { ms: 8000 });
+                } catch {
+                    notify('warn', '复制不了', '手动照着上面改 config.yaml。');
+                }
+            });
+            const row = el('div', 'cm-btn-row');
+            row.append(copy);
+            card.append(row);
+            if (IS_TAURI) card.append(el('small', 'cm-hint', 'TauriTavern 不是酒馆的 Node 服务器，config.yaml 这几项它认不认要看 TauriTavern 自己。'));
+        }
+        card.append(el('small', 'cm-hint', '上一轮命中没有：酒馆不把缓存用量传给页面，面板看不到；到 Anthropic / OpenRouter 后台的用量记录里看。'));
+        box.replaceChildren(card);
     }
 
     async function refreshStatsPage() {
@@ -2507,7 +2643,10 @@
     }, 200));
     // Model / API switches: keep the header summary and connect button current.
     for (const ev of [eventTypes.CHATCOMPLETION_MODEL_CHANGED, eventTypes.CHATCOMPLETION_SOURCE_CHANGED, eventTypes.MAIN_API_CHANGED, eventTypes.SETTINGS_UPDATED]) {
-        if (ev) eventSource.on(ev, () => setTimeout(() => { renderConnect(); renderGlance(); }, 100));
+        if (ev) eventSource.on(ev, () => setTimeout(() => { renderConnect(); renderGlance(); renderCacheCard(); modelRowFollowsSource(); }, 100));
+    }
+    for (const ev of [eventTypes.CHATCOMPLETION_SOURCE_CHANGED, eventTypes.APP_READY]) {
+        if (ev) eventSource.on(ev, () => setTimeout(fillMissingClaudeModels, 300));
     }
     eventSource.on(eventTypes.MESSAGE_RECEIVED, refreshIfOpen);
     eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED ?? eventTypes.MESSAGE_RECEIVED, onOwnReply(() => setTimeout(noticeLastTurn, 400)));

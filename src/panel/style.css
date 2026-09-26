@@ -114,6 +114,12 @@
     text-overflow: ellipsis;
 }
 
+.claude-max .cm-bar-src {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.claude-max .cm-bar-src,
 .claude-max .cm-bar-effort,
 .claude-max .cm-bar-quota {
     font-size: var(--cm-fs-sm);
