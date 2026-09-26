@@ -727,6 +727,60 @@ def fix_endpoint(ph, ip, port, key, bk):
     return changed, errors
 
 
+def sync_api(ph, st, port, bk, dry=False):
+    """对话补全设置（API 来源、模型、当前预设、各项开关 = oai_settings）两边对齐，改得晚的一边为准。
+    代理地址（:port 的那种）各边保留自己的；密钥在 secrets.json，不同步。
+    → (方向说明 / None, 出错说明列表)。"""
+    pat = re.compile(r'http://[0-9A-Za-z.\-]+:' + str(port) + r'(?![0-9])')
+    lrel = 'settings/presets.json' if os.path.exists(os.path.join(st, 'settings/presets.json')) else 'settings.json'
+    lpath, rpath = os.path.join(st, lrel), f'{ph.base}/settings/presets.json'
+    if not os.path.exists(lpath):
+        return None, []
+    try:
+        lraw = open(lpath, 'rb').read()
+        ld = json.loads(lraw)
+    except (OSError, ValueError) as e:
+        return None, [f'{LOCAL}的 {lrel} 读不了（{e}）']
+    rraw, err = read_remote_text(ph, rpath)
+    if err:
+        return None, [] if err == 'missing' else [f'{ph.label}的 settings/presets.json：{err}']
+    try:
+        rd = json.loads(rraw)
+    except ValueError as e:
+        return None, [f'{ph.label}的 settings/presets.json 不是合法 JSON（{e}）']
+    lo, ro = ld.get('oai_settings'), rd.get('oai_settings')
+    if not isinstance(lo, dict) or not isinstance(ro, dict):
+        return None, []
+    norm = lambda o: pat.sub('http://proxy:' + str(port), json.dumps(o, ensure_ascii=False, sort_keys=True))
+    if norm(lo) == norm(ro):
+        return None, []
+    if isinstance(ph, LocalTT):
+        rtime = os.path.getmtime(rpath)
+    else:
+        out = ph.rsh(f'stat -c %Y {shlex.quote(rpath)}').strip()
+        rtime = float(out) if out.isdigit() else 0
+    to_phone = os.path.getmtime(lpath) >= rtime
+    src, dst = (lo, ro) if to_phone else (ro, lo)
+    keep = next(iter(pat.findall(json.dumps(dst, ensure_ascii=False))), None)
+    text = json.dumps(src, ensure_ascii=False)
+    new = json.loads(pat.sub(keep, text) if keep else text)
+    if dry:
+        return 'todo', []
+    try:
+        if to_phone:
+            atomic_write(os.path.join(bk, ph.label, 'settings/presets.json'), rraw)
+            rd['oai_settings'] = new
+            write_remote_text(ph, rpath, json.dumps(rd, ensure_ascii=False).encode('utf-8'))
+        else:
+            atomic_write(os.path.join(bk, LOCAL, lrel), lraw)
+            ld['oai_settings'] = new
+            atomic_write(lpath, json.dumps(ld, ensure_ascii=False, indent=4 if lrel == 'settings.json' else None).encode('utf-8'))
+    except (SyncError, OSError) as e:
+        return None, [str(e)]
+    preset = new.get('preset_settings_openai') or '（未知）'
+    return (f'→ {ph.label}' if to_phone else f'← {LOCAL}') + f'（当前预设「{preset}」）', []
+
+
 # ── 标签 ──────────────────────────────────────
 # 标签存在 settings.json：tags = [{id, name, …}]，tag_map = {角色卡文件名: [标签 id]}。
 # 两边的 id 各是各的（都是随机生成），按标签名对应。
@@ -1120,7 +1174,8 @@ def main(argv=None):
             print(f'  {text}')
         tags_todo = bool(re.search(r'[1-9]\d* 个', text or ''))
         # --exit-if-nothing：没有任何要做的（文件、扩展、标签）时退出码 3，给启动器判断要不要关 TT
-        if a.exit_if_nothing and not (push or pull or conflicts or copies or ext_todo or tags_todo):
+        api_todo = a.exit_if_nothing and not a.push_only and sync_api(ph, a.st, a.port, None, dry=True)[0]
+        if a.exit_if_nothing and not (push or pull or conflicts or copies or ext_todo or tags_todo or api_todo):
             print('  两边已经一样，没有要同步的')
             return 3
         return 0
@@ -1160,6 +1215,14 @@ def main(argv=None):
     if a.settings and isinstance(ph, LocalTT):
         ch = copy_settings(ph, a.st, bk)
         print(f'  ✓ 扩展设置和对话补全设置已复制到{side}（旧的备份在 {bk}）' if ch else f'  扩展设置：{side}上已是最新')
+    if rem2 is not None and not a.push_only:
+        text, errs = sync_api(ph, a.st, a.port, bk)
+        for e in errs:
+            print(f'  ✗ API 和预设设置没同步：{e}')
+        if errs:
+            notes.append('API 设置没同步')
+        elif text:
+            print(f'  ✓ API 和预设设置 {text}；密钥不同步')
     if a.mac_ip:
         key = None
         if a.lan_key_file and os.path.exists(a.lan_key_file) and not a.local_tt:
