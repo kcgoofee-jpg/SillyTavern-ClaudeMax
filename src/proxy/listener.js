@@ -26,6 +26,7 @@ import { listModelsHandler } from './models.js';
 import { handleStatus } from './status.js';
 import { handleQuota } from './oauth.js';
 import { handleStats } from './usage-stats.js';
+import { handleBackendGet, handleBackendPost } from './backend-config.js';
 import { handleDebugLast } from './debug-dump.js';
 import { countInFlight, handleControlAction, handleControlLog, handleControlStatus, handleDiagRequest, handleDiagResult } from './control.js';
 import { handleCancelReply, handleKeptReply } from './reply-keeper.js';
@@ -185,6 +186,11 @@ export function startStandaloneListener({ port, host }) {
     app.post('/v1/control/diag', allowCors, guardPostOrigin, handleDiagResult);
     app.post('/v1/control/action', allowCors, guardPostOrigin, asyncRoute(handleControlAction));
     app.options(['/v1/control/status', '/v1/control/log', '/v1/control/action', '/v1/control/diag-request', '/v1/control/diag'], allowCors, (_req, res) => res.sendStatus(204));
+    // Backend choice (backend-config.js): secrets go in, never come back out.
+    // Remote callers need the access key like everything else (guardRemote).
+    app.get('/v1/backend', allowCors, handleBackendGet);
+    app.post('/v1/backend', allowCors, guardPostOrigin, handleBackendPost);
+    app.options('/v1/backend', allowCors, (_req, res) => res.sendStatus(204));
     app.post('/v1/embeddings', guardPostOrigin, rejectEmbeddings);
     app.use(handleRouteError);
 

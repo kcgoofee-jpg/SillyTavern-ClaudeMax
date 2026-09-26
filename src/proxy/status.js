@@ -13,6 +13,8 @@ import { join } from 'node:path';
 import { SDK_VERSION } from './jsonl-entries.js';
 import { credentialSummary } from './oauth.js';
 import { ROOT } from './paths.js';
+import { resolveBackendConfig } from './backend-config.js';
+import { BACKEND_LABELS } from '../shared/backends.js';
 
 let cachedPluginVersion = null;
 function getPluginVersion() {
@@ -40,6 +42,8 @@ export async function handleStatus(_req, res) {
             sdk: 'loaded',
             sdkVersion: SDK_VERSION,
             credential: credentialSummary(),
+            // Name only; fields and secrets are at /v1/backend.
+            backend: (({ backend }) => ({ id: backend, label: BACKEND_LABELS[backend] }))(resolveBackendConfig()),
             note: 'Credential expiry is advisory — the CLI can refresh a stale token on the next chat.',
             latencyMs: Date.now() - start,
         });

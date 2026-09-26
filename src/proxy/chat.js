@@ -36,6 +36,8 @@ import { renderTranscript } from './transcript.js';
 import { extractSettings } from './settings.js';
 import { parseModelRequest, isExtendedContextKnownUnavailable, recordExtendedContextUnavailable } from './models.js';
 import { buildSubprocessEnv, pickApiKeyFromAuthHeader } from './env.js';
+import { resolveBackendConfig } from './backend-config.js';
+import { BACKEND_LABELS, mapModelId } from '../shared/backends.js';
 import { buildSystemPrompt, extractSystemText } from './system-prompt.js';
 import { assembleEntries, splitHistoryForResume, currentToSdkUserMessage, singleMessageStream, SDK_VERSION } from './jsonl-entries.js';
 import { ResumeSessionStore, resumeScratchCwd, sweepSessionTranscript } from './session-store.js';
@@ -79,10 +81,34 @@ const envFlag = (name, fallback) => {
     return !/^(0|false|no|off)$/i.test(v);
 };
 
+/** Model ids for the chosen backend (Bedrock / Vertex / OpenRouter name
+ *  models differently). The first-party id stays in `baseId` for the cache
+ *  layout, stats and the panel; `callModel` and the tier pins carry the
+ *  backend's id. Null when the backend does not offer the model. */
+export function withBackendModels(modelInfo, backend) {
+    const b = backend?.backend ?? 'subscription';
+    if (b === 'subscription' || b === 'apikey' || b === 'gateway') return modelInfo;
+    const opts = { region: backend.fields?.bedrock?.region, prefix: backend.fields?.bedrock?.prefix };
+    const callModel = mapModelId(b, modelInfo.baseId, opts);
+    if (!callModel) return null;
+    const envPins = {};
+    for (const [k, v] of Object.entries(modelInfo.envPins)) {
+        const mapped = mapModelId(b, v, opts);
+        if (mapped) envPins[k] = mapped;
+    }
+    return { ...modelInfo, callModel, envPins };
+}
+
+/** How cache writes are billed (the proxy asks for 1h on the API key). */
+function env1hTtl(billedAs) {
+    if (billedAs !== 'apikey') return '5m';
+    return (process.env.CLAUDE_CODE_PROMPT_CACHE_TTL ?? '1h') === '1h' ? '1h' : '5m';
+}
+
 function buildSdkOptions({ modelInfo, oneMActive, settings, systemText, abortController, stream, env, resume, boundary }) {
     const options = {
         abortController,
-        model: oneMActive ? modelInfo.sdkModel : modelInfo.baseId,
+        model: oneMActive ? modelInfo.sdkModel : (modelInfo.callModel ?? modelInfo.baseId),
         systemPrompt: buildSystemPrompt(systemText, settings.identityMode, settings.systemSplitAt, boundary),
         includePartialMessages: stream,
         env,
@@ -497,8 +523,16 @@ async function completeChat(req, res, body, settings, conn) {
             console.log(`${PLUGIN_TAG} 预设后置条目提前：${moved} 条移到对话最前（每轮相同的后置块）`);
         }
     }
-    const apiKey = pickApiKeyFromAuthHeader(req);
-    const modelInfo = parseModelRequest(requestedModel);
+    // Resolved once per request: a switch in the panel applies from the next one.
+    const backend = resolveBackendConfig();
+    // A Bearer sk-ant key is an Anthropic key: only used on the subscription
+    // backend (the old API-billing opt-in), never forwarded to another service.
+    const apiKey = backend.backend === 'subscription' ? pickApiKeyFromAuthHeader(req) : null;
+    const billedAs = apiKey ? 'apikey' : backend.backend;
+    const modelInfo = withBackendModels(parseModelRequest(requestedModel), backend);
+    if (!modelInfo) {
+        return res.status(400).json({ error: { message: `${BACKEND_LABELS[backend.backend]} 上没有 ${requestedModel}，换个模型。`, type: 'invalid_request_error' } });
+    }
 
     let sdk;
     try {
@@ -627,7 +661,7 @@ async function completeChat(req, res, body, settings, conn) {
             const abortController = new AbortController();
             conn.controller = abortController;
             partialUsage = null;
-            const env = buildSubprocessEnv({ envPins: modelInfo.envPins, maxTokens: settings.maxTokens, apiKey });
+            const env = buildSubprocessEnv({ envPins: modelInfo.envPins, maxTokens: settings.maxTokens, apiKey, backend });
             const cfg = buildQueryConfig({
                 messages, modelInfo, oneMActive, settings,
                 abortController, stream: wantStream, env, sdk,
@@ -753,7 +787,7 @@ async function completeChat(req, res, body, settings, conn) {
                         oneMActive = false;
                         continue;
                     }
-                    if (isExpiredTokenError(errText) && !didTokenRefresh) {
+                    if (isExpiredTokenError(errText) && !didTokenRefresh && billedAs === 'subscription') {
                         didTokenRefresh = true;
                         console.warn(`${PLUGIN_TAG} auth expired — attempting OAuth refresh + one retry`);
                         await refreshOAuthToken();
@@ -789,7 +823,7 @@ async function completeChat(req, res, body, settings, conn) {
         const raw = err instanceof Error ? err.message : String(err);
         const described = err?.sdkErrorText === 'served-model-guard' ? `served-model guard: ${raw}` : raw;
         recordRequest({
-            model: modelInfo.requested, effort: settings.effort ?? null, placement: settings.systemPlacement, auxiliary: settings.auxiliary, purpose: settings.purpose, timing, path: lastPath, stream: wantStream, startedAt, firstTokenAt, shape, cacheDiag,
+            backend: billedAs, cacheTtl: env1hTtl(billedAs), model: modelInfo.requested, effort: settings.effort ?? null, placement: settings.systemPlacement, auxiliary: settings.auxiliary, purpose: settings.purpose, timing, path: lastPath, stream: wantStream, startedAt, firstTokenAt, shape, cacheDiag,
             usage: usage ?? partialUsage, textChars: collectedText.length,
             error: described,
         });
@@ -820,7 +854,7 @@ async function completeChat(req, res, body, settings, conn) {
     }
 
     recordRequest({
-        model: modelInfo.requested, effort: settings.effort ?? null, placement: settings.systemPlacement, auxiliary: settings.auxiliary, purpose: settings.purpose, timing, path: lastPath, stream: wantStream, startedAt, firstTokenAt, shape, cacheDiag,
+        backend: billedAs, cacheTtl: env1hTtl(billedAs), model: modelInfo.requested, effort: settings.effort ?? null, placement: settings.systemPlacement, auxiliary: settings.auxiliary, purpose: settings.purpose, timing, path: lastPath, stream: wantStream, startedAt, firstTokenAt, shape, cacheDiag,
         usage, textChars: collectedText.length,
         finish: finishReason, clientClosed: conn.aborted, notices,
     });

@@ -19,6 +19,8 @@ import { readFileSync, writeFileSync, renameSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
 
+import { resolveBackendConfig } from './backend-config.js';
+
 const PLUGIN_TAG = '[claude-subscription]';
 const TOKEN_URL = 'https://platform.claude.com/v1/oauth/token';
 const OAUTH_CLIENT_ID = '9d1c250a-e61b-44d9-88ed-5944d1962f5e';
@@ -276,6 +278,9 @@ export async function fetchQuota({ force = false, retried = false } = {}) {
 }
 
 export async function handleQuota(_req, res) {
+    // The 5h / 7d windows belong to the subscription; other backends bill per token.
+    const { backend } = resolveBackendConfig();
+    if (backend !== 'subscription') return res.json({ ok: true, backend, notSubscription: true, windows: [], extraUsage: null });
     const snapshot = await fetchQuota();
     if (!snapshot) {
         return res.status(503).json({ ok: false, message: 'Quota unavailable (no OAuth credentials or upstream error).' });

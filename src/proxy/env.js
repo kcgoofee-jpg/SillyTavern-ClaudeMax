@@ -28,21 +28,21 @@
 //     the CLI from injecting the cwd project's auto-memory index into the
 //     context (verified with a probe prompt); this does.
 
-const SCRUB_KEYS = [
-    'ANTHROPIC_API_KEY',
-    'ANTHROPIC_AUTH_TOKEN',
-    'ANTHROPIC_BASE_URL',
-    'ANTHROPIC_MODEL',
-];
+import { backendEnv, SCRUBBED_ENV } from './backend-config.js';
+
+// API credentials, base URLs and provider switches (Bedrock / Vertex / …):
+// see backend-config.js. The chosen backend adds back only its own.
+const SCRUB_KEYS = SCRUBBED_ENV;
 
 /**
  * @param {object} args
  * @param {Record<string,string>} args.envPins ANTHROPIC_DEFAULT_* pins from parseModelRequest
  * @param {number|undefined} args.maxTokens
  * @param {string|null} args.apiKey explicit sk-ant-* API-billing opt-in (or null for subscription)
+ * @param {{ backend: string, fields: object }|null} [args.backend] resolved backend config (backend-config.js); null = subscription
  * @returns {Record<string,string|undefined>}
  */
-export function buildSubprocessEnv({ envPins, maxTokens, apiKey }) {
+export function buildSubprocessEnv({ envPins, maxTokens, apiKey, backend = null }) {
     const env = { ...process.env };
     for (const key of SCRUB_KEYS) delete env[key];
     // The proxy's own settings (LAN access key, file paths, …) are none of
@@ -71,6 +71,15 @@ export function buildSubprocessEnv({ envPins, maxTokens, apiKey }) {
 
     if (maxTokens) {
         env.CLAUDE_CODE_MAX_OUTPUT_TOKENS = String(maxTokens);
+    }
+
+    const chosen = backend?.backend ?? 'subscription';
+    if (chosen !== 'subscription') {
+        const { set, unset } = backendEnv(chosen, backend.fields);
+        for (const key of unset) delete env[key];
+        Object.assign(env, set);
+        if (chosen === 'apikey') env.CLAUDE_CODE_PROMPT_CACHE_TTL ??= '1h'; // same reason as below
+        return env;
     }
 
     if (apiKey) {

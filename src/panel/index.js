@@ -643,7 +643,7 @@
     /** Call a proxy route: the proxy directly first, then (default endpoint
      *  only, not TauriTavern) ST's same-origin plugin route, which works when
      *  the ST UI is opened from another device. */
-    async function fetchProxy(pluginPath, directPath, { method = 'GET' } = {}) {
+    async function fetchProxy(pluginPath, directPath, { method = 'GET', body } = {}) {
         // The proxy itself first: it is the source of truth (the ST plugin
         // route can be an older copy until SillyTavern restarts). On another
         // device 127.0.0.1 is unreachable, so that fails fast and the
@@ -655,13 +655,16 @@
         const directOnly = IS_TAURI || normalizeEndpoint(settings.endpoint) !== normalizeEndpoint(DEFAULT_ENDPOINT);
         try {
             const key = settings.accessKey;
-            const direct = await fetch(`${proxyBase(settings)}${directPath}`, { method, signal: timeoutSignal(directOnly ? 12000 : 1500), headers: key ? { 'X-Claude-Max-Key': key } : {} });
+            const headers = key ? { 'X-Claude-Max-Key': key } : {};
+            if (body !== undefined) headers['Content-Type'] = 'application/json';
+            const direct = await fetch(`${proxyBase(settings)}${directPath}`, { method, signal: timeoutSignal(directOnly ? 12000 : 1500), headers, body: body !== undefined ? JSON.stringify(body) : undefined });
             if (direct.ok || directOnly) return direct;
         } catch (err) {
             if (directOnly) throw err;
         }
-        const headers = method === 'GET' ? {} : SillyTavern.getContext().getRequestHeaders?.() ?? {};
-        return fetch(`/api/plugins/claude-subscription${pluginPath}`, { method, headers, signal: timeoutSignal(12000) });
+        const headers = method === 'GET' ? {} : { ...(SillyTavern.getContext().getRequestHeaders?.() ?? {}) };
+        if (body !== undefined) headers['Content-Type'] = 'application/json';
+        return fetch(`/api/plugins/claude-subscription${pluginPath}`, { method, headers, body: body !== undefined ? JSON.stringify(body) : undefined, signal: timeoutSignal(12000) });
     }
 
     // ── Small DOM helpers ──
@@ -1244,6 +1247,11 @@
             box.classList.remove('cm-loading');
             box = document.getElementById('claude_max_quota') ?? box; // panel rebuilt meanwhile
             box.replaceChildren();
+            // API-type backends bill per token: no 5h / 7d windows to show.
+            const quotaSec = document.getElementById('claude_max_quota_sec');
+            if (quotaSec) quotaSec.hidden = !!data.notSubscription;
+            box.hidden = !!data.notSubscription;
+            if (data.notSubscription) { glance.quota = null; renderGlance(); return; }
             const five = data.windows?.find((w) => w.type === 'five_hour');
             glance.quota = five?.utilization != null ? Math.round(five.utilization * 100) : null;
             renderGlance();
@@ -1315,6 +1323,16 @@
             table.append(tr);
         }
         return table;
+    }
+
+    /** 近 7 天按后端：次数、token，API 类后端加估算花费。Only shown once
+     *  something other than the subscription was used. */
+    function backendUsageLine(backends, pricesAsOf) {
+        const list = Object.entries(backends ?? {});
+        if (!list.length || (list.length === 1 && list[0][0] === 'subscription')) return null;
+        const parts = list.map(([, b]) => `${b.label} ${b.requests} 次 · 输出 ${fmtK(b.outputTokens)}${b.costUsd != null ? ` · 约 $${b.costUsd.toFixed(2)}` : ''}`);
+        const hasCost = list.some(([, b]) => b.costUsd != null);
+        return el('small', 'cm-hint', `按后端（近 7 天）：${parts.join('；')}${hasCost ? `。花费为估算：token 数 × Anthropic 官方价（${pricesAsOf ?? ''}），以账单为准。` : ''}`);
     }
 
     /** The last turn: cache headline, why, where the first-token wait went. */
@@ -1453,6 +1471,8 @@
                 box.append(el('small', 'cm-hint', '还没有记录（只记耗时和 token，不记内容）。'));
             } else {
                 box.append(usageTable(data.today, data.week));
+                const byBackend = backendUsageLine(data.week.backends, data.pricesAsOf);
+                if (byBackend) box.append(byBackend);
             }
             const bg = data.background;
             if (bg?.week?.requests) {
@@ -1902,7 +1922,9 @@
         cacheBox.id = 'claude_max_cache';
         pane.append(cacheBox);
 
-        pane.append(section('订阅额度'));
+        const quotaHead = section('订阅额度');
+        quotaHead.id = 'claude_max_quota_sec';
+        pane.append(quotaHead);
         const quotaBox = el('div', 'cm-quota');
         quotaBox.id = 'claude_max_quota';
         quotaBox.append(el('small', 'cm-hint', '加载中…'));
@@ -2292,6 +2314,13 @@
         info.id = 'claude_max_proxy_info';
         pane.append(info, connectionFields(settings, save));
 
+        pane.append(section('代理后端'));
+        const backendBox = el('div', 'cm-conn-fields');
+        backendBox.id = 'claude_max_backend';
+        backendBox.append(el('small', 'cm-hint', '加载中…'));
+        pane.append(backendBox);
+        refreshBackend();
+
         // Everything below decides itself (defaults, the preset's own
         // recommendation, the proxy watching each chat). Kept for chasing
         // problems, folded away so nobody has to think about it.
@@ -2385,6 +2414,104 @@
         debugBtn.addEventListener('click', showDebugRequest);
         add(debugBtn);
         pane.append(dbg, usageNotes());
+    }
+
+    // ── 代理后端: which service the proxy runs chats on ──
+    // Values go only to the proxy (same machine, or the Mac with the access
+    // key) and are stored there (data/backend.json). Secrets never come back:
+    // the proxy says only whether each one is set.
+    const BACKEND_SHORT = { subscription: '订阅', apikey: 'API', bedrock: 'Bedrock', vertex: 'Vertex', gateway: '网关', openrouter: 'OR' };
+    const BACKEND_FORM = {
+        subscription: { note: '用本机 Claude 登录（Pro / Max），按订阅额度计。', fields: [] },
+        apikey: { note: '按 token 计费（Anthropic 控制台）。', fields: [['apiKey', 'API 密钥（sk-ant-…）', true]] },
+        bedrock: {
+            note: '需要 AWS 账号开通 Bedrock 的 Claude 模型。凭证三选一：Bedrock API 密钥、AWS 配置名（~/.aws），或访问密钥；都不填则用本机默认 AWS 凭证。',
+            fields: [['region', '区域（如 us-east-1）'], ['bearerToken', 'Bedrock API 密钥', true], ['profile', 'AWS 配置名（可选）'], ['accessKeyId', 'Access Key ID（可选）', true], ['secretAccessKey', 'Secret Access Key（可选）', true], ['sessionToken', 'Session Token（可选）', true], ['prefix', '跨区前缀 us / eu / apac / global（可选，默认按区域）']],
+        },
+        vertex: {
+            note: '需要在代理这台电脑上先执行 gcloud auth application-default login（或填服务账号 JSON 的路径）。',
+            fields: [['projectId', 'GCP 项目 ID'], ['region', '区域（如 global、us-east5）'], ['credentialsFile', '服务账号 JSON 路径（可选）']],
+        },
+        gateway: { note: '任何兼容 Anthropic Messages 接口的网关（Bearer 令牌）。模型名按官方 id 发送。', fields: [['baseUrl', '网关地址（https://…）'], ['authToken', '令牌', true]] },
+        openrouter: { note: '走 OpenRouter 的 Anthropic 兼容接口（https://openrouter.ai/api）。模型名自动换成 anthropic/claude-…。', fields: [['authToken', 'OpenRouter 密钥（sk-or-…）', true]] },
+    };
+
+    async function refreshBackend() {
+        let box = document.getElementById('claude_max_backend');
+        if (!box) return;
+        try {
+            const res = await fetchProxy('/backend', '/v1/backend');
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const view = await res.json();
+            box = document.getElementById('claude_max_backend') ?? box;
+            box.replaceChildren(backendForm(view));
+        } catch (err) {
+            box.replaceChildren(el('small', 'cm-hint', proxyErrorText('代理后端', err)));
+        }
+    }
+
+    function backendForm(view) {
+        const wrap = el('div');
+        let chosen = view.backend;
+        const status = el('small', 'cm-hint');
+        status.textContent = `现在：${view.label}${view.source === 'env' ? '（环境变量 CLAUDE_SUBSCRIPTION_BACKEND 指定，面板改不了）' : ''}${view.missing?.length ? ` · 还缺 ${view.missing.join('、')}` : ''}`;
+        const fieldsBox = el('div');
+        const inputs = {};
+        const renderFields = () => {
+            fieldsBox.replaceChildren();
+            for (const k of Object.keys(inputs)) delete inputs[k];
+            const form = BACKEND_FORM[chosen];
+            fieldsBox.append(el('small', 'cm-hint', form.note));
+            for (const [name, label, secret] of form.fields) {
+                const info = view.fields?.[chosen]?.[name] ?? {};
+                const f = el('div', 'cm-field');
+                f.append(el('div', 'cm-field-label', `${label}${info.fromEnv ? '（环境变量）' : ''}`));
+                const input = el('input', 'text_pole');
+                input.type = secret ? 'password' : 'text';
+                input.autocomplete = 'off';
+                if (secret) input.placeholder = info.set ? '已填（留空不改）' : '未填';
+                else input.value = info.value ?? '';
+                if (info.fromEnv) input.disabled = true;
+                inputs[name] = { input, secret, set: !!info.set };
+                f.append(input);
+                if (secret && info.set && !info.fromEnv) {
+                    const clear = el('small', 'cm-hint cm-link', '清除');
+                    clear.addEventListener('click', () => saveBackend({ clear: [`${chosen}.${name}`] }));
+                    f.append(clear);
+                }
+                fieldsBox.append(f);
+            }
+        };
+        const seg = segmented({
+            label: '聊天走哪个服务',
+            options: view.backends.map((b) => ({ value: b.id, label: BACKEND_SHORT[b.id] ?? b.label, hint: `${b.label}：${BACKEND_FORM[b.id]?.note ?? ''}` })),
+            current: chosen,
+            onChange: (v) => { chosen = v; renderFields(); },
+        });
+        const saveBtn = el('div', 'menu_button cm-connect cm-connect-quiet');
+        saveBtn.append(el('i', 'fa-solid fa-floppy-disk'), document.createTextNode(' 保存并切换'));
+        saveBtn.addEventListener('click', () => {
+            const vals = {};
+            for (const [name, { input }] of Object.entries(inputs)) if (!input.disabled) vals[name] = input.value;
+            saveBackend({ backend: chosen, fields: { [chosen]: vals } });
+        });
+        renderFields();
+        wrap.append(status, seg, fieldsBox, saveBtn,
+            el('small', 'cm-hint', '密钥只存在代理那台电脑（data/backend.json），只发给对应的服务；这里不会再显示。切换从下一条回复起生效，正在写的回复不受影响。'));
+        return wrap;
+    }
+
+    async function saveBackend(body) {
+        try {
+            const res = await fetchProxy('/backend', '/v1/backend', { method: 'POST', body });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok || !data.ok) throw new Error(data.message ?? `HTTP ${res.status}`);
+            notify('ok', '代理后端', data.message ?? '已保存', { ms: 8000, replace: 'backend' });
+            refreshQuota();
+        } catch (err) {
+            notify('bad', '代理后端没改成', String(err instanceof Error ? err.message : err), { ms: 12000, replace: 'backend' });
+        }
+        refreshBackend();
     }
 
     /** Proxy address + access key, in 设置 (the status note links here while the proxy can't be reached). */

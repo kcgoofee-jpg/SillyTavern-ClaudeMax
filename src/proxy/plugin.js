@@ -32,6 +32,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import { handleStatus } from './status.js';
 import { handleQuota } from './oauth.js';
+import { handleBackendGet, handleBackendPost } from './backend-config.js';
 import { handleStats } from './usage-stats.js';
 import { handleDebugLast } from './debug-dump.js';
 import { handleCancelReply, handleKeptReply } from './reply-keeper.js';
@@ -156,6 +157,9 @@ export async function init(router) {
     router.get('/reply/:slot', handleKeptReply);
     // The panel's Stop button (POST: goes through SillyTavern's CSRF check).
     router.post('/reply/:slot/cancel', handleCancelReply);
+    // Backend choice, same-origin for a panel opened on another device (POST: CSRF-checked by SillyTavern).
+    router.get('/backend', handleBackendGet);
+    router.post('/backend', handleBackendPost);
 
     installUiExtension();
 
