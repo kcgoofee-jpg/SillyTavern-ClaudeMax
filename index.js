@@ -807,6 +807,7 @@
             const res = await fetchProxy('/status', '/status');
             up = res.ok;
         } catch { /* down */ }
+        if (up) diagIfAsked();
         if (!up && !heartbeatDown) {
             heartbeatDown = true;
             downToast = toastr?.warning?.('连不上 Claude 代理，正在每 20 秒自动重试。手机连 Mac 时：确认 Mac 没睡眠、两边在同一个 Wi-Fi。', 'Claude Max · 断线', { timeOut: 0, extendedTimeOut: 0, preventDuplicates: true });
@@ -1380,6 +1381,95 @@
         });
         row.append(logBtn);
         box.replaceChildren(card, row, pre);
+    }
+
+    // ── Performance diagnosis: what in this page keeps the phone busy ──
+    // Counts running animations, embedded frames and frosted-glass elements
+    // per chat floor, then samples the frame rate and long tasks for a few
+    // seconds. Reported to the proxy (the Mac reads it); numbers only.
+    async function runPerfDiag() {
+        const floorOf = (el) => el?.closest?.('#chat .mes')?.getAttribute('mesid') ?? 'page';
+        const tally = {};
+        const bump = (floor, key, n = 1) => {
+            tally[floor] ??= {};
+            tally[floor][key] = (tally[floor][key] ?? 0) + n;
+        };
+        const selectorOf = (el) => (el && el.nodeType === 1)
+            ? `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${[...el.classList].slice(0, 2).map((c) => `.${c}`).join('')}`
+            : '?';
+        const topAnims = {};
+        const countAnims = (doc, floor) => {
+            for (const a of doc.getAnimations?.() ?? []) {
+                if (a.playState !== 'running') continue;
+                const target = a.effect?.target;
+                const f = floor ?? floorOf(target);
+                const infinite = a.effect?.getTiming?.().iterations === Infinity;
+                bump(f, infinite ? 'infiniteAnimations' : 'animations');
+                if (infinite) {
+                    const k = `${f} ${selectorOf(target)} ${a.animationName ?? ''}`.trim();
+                    topAnims[k] = (topAnims[k] ?? 0) + 1;
+                }
+            }
+        };
+        countAnims(document, null);
+        let crossOrigin = 0;
+        for (const fr of document.querySelectorAll('iframe')) {
+            const f = floorOf(fr);
+            bump(f, 'iframes');
+            try {
+                const d = fr.contentDocument;
+                if (d) countAnims(d, f); else crossOrigin++;
+            } catch { crossOrigin++; }
+        }
+        let blur = 0;
+        for (const el of document.querySelectorAll('#chat *')) {
+            const cs = getComputedStyle(el);
+            if ((cs.backdropFilter && cs.backdropFilter !== 'none') || (cs.webkitBackdropFilter && cs.webkitBackdropFilter !== 'none')) {
+                blur++;
+                bump(floorOf(el), 'backdropBlur');
+            }
+        }
+        // Frame rate and long tasks over 4 s.
+        let frames = 0;
+        let longTasks = 0;
+        let longMs = 0;
+        let po = null;
+        try {
+            po = new PerformanceObserver((list) => { for (const e of list.getEntries()) { longTasks++; longMs += e.duration; } });
+            po.observe({ entryTypes: ['longtask'] });
+        } catch { po = null; }
+        const t0 = performance.now();
+        await new Promise((resolve) => {
+            const tick = () => { frames++; if (performance.now() - t0 < 4000) requestAnimationFrame(tick); else resolve(); };
+            requestAnimationFrame(tick);
+        });
+        po?.disconnect();
+        const secs = (performance.now() - t0) / 1000;
+        const ctx = SillyTavern.getContext();
+        return {
+            ok: true,
+            app: IS_TAURI ? 'TauriTavern' : 'SillyTavern',
+            visible: !document.hidden,
+            fps: Math.round(frames / secs),
+            longTasks, longTaskMs: Math.round(longMs),
+            domNodes: document.getElementsByTagName('*').length,
+            floorsShown: document.querySelectorAll('#chat .mes').length,
+            chatLength: ctx.chat?.length ?? 0,
+            iframes: document.querySelectorAll('iframe').length,
+            crossOriginFrames: crossOrigin,
+            backdropBlur: blur,
+            perFloor: tally,
+            topInfinite: Object.entries(topAnims).sort((a, b) => b[1] - a[1]).slice(0, 15),
+        };
+    }
+
+    async function diagIfAsked() {
+        try {
+            const res = await controlFetch('/v1/control/diag-request');
+            if (!res.ok || !(await res.json()).requested) return;
+            const result = await runPerfDiag();
+            await controlFetch('/v1/control/diag', result);
+        } catch { /* proxy unreachable or not the launcher's: nothing to do */ }
     }
 
     function buildAdvTab(pane, settings, save) {

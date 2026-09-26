@@ -20,6 +20,9 @@ fi
 for f in launcher/mac/*.zsh launcher/mac/*.command; do
     zsh -n "$f" 2>/dev/null || bad "语法错误：$f"
 done
+for f in launcher/android/*/*.sh; do
+    [[ -f "$f" ]] && { sh -n "$f" 2>/dev/null || bad "语法错误：$f"; }
+done
 for f in launcher/*.py; do
     python3 -m py_compile "$f" 2>/dev/null || bad "语法错误：$f"
 done
