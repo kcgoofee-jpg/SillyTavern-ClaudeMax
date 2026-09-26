@@ -264,7 +264,66 @@
         return nextEffort ?? settings.effort;
     }
 
-    function buildIncludeBodyYaml(settings, quiet = false) {
+    // ── Reply keeper (lib/reply-keeper.js) ──
+    // Each request carries a slot: a hash of the chat and the player's message
+    // (no text). The proxy keeps the finished reply under it, in memory; if the
+    // app lost it (background, closed mid-stream) the floor is filled back in.
+
+    function fnv64(str) {
+        let h1 = 0x811c9dc5, h2 = 0x01000193;
+        for (let i = 0; i < str.length; i++) {
+            const c = str.charCodeAt(i);
+            h1 = Math.imul(h1 ^ c, 0x01000193) >>> 0;
+            h2 = Math.imul(h2 ^ c, 0x5bd1e995) >>> 0;
+        }
+        return h1.toString(16).padStart(8, '0') + h2.toString(16).padStart(8, '0');
+    }
+
+    function replySlotFor(ctx, beforeIndex = ctx.chat?.length ?? 0) {
+        const chat = ctx.chat ?? [];
+        for (let i = Math.min(beforeIndex, chat.length) - 1; i >= 0; i--) {
+            const m = chat[i];
+            if (m?.is_user) return fnv64(`${ctx.chatId ?? ''}\u0000${m.mes ?? ''}`);
+        }
+        return null;
+    }
+
+    let recovering = false;
+    async function recoverKeptReply() {
+        if (recovering) return;
+        const ctx = SillyTavern.getContext();
+        const chat = ctx.chat ?? [];
+        const i = chat.length - 1;
+        const last = chat[i];
+        if (!last || last.is_user || last.is_system || i < 1) return;
+        if (ctx.streamingProcessor && !ctx.streamingProcessor.isFinished) return; // still being written
+        const now = String(last.mes ?? '').trim();
+        const slot = replySlotFor(ctx, i);
+        if (!slot) return;
+        recovering = true;
+        try {
+            const res = await fetchProxy(`/reply/${slot}`, `/v1/replies/${slot}`);
+            if (!res.ok) return;
+            const kept = await res.json();
+            const text = String(kept?.text ?? '');
+            if (!text || text.length <= now.length) return;
+            const partial = now && now !== '...';
+            if (partial && !text.startsWith(now.slice(0, Math.min(40, now.length)))) return; // a different reply: leave it
+            const cur = SillyTavern.getContext().chat?.[i];
+            if (cur !== last) return; // chat changed meanwhile
+            last.mes = text;
+            if (Array.isArray(last.swipes) && Number.isInteger(last.swipe_id)) last.swipes[last.swipe_id] = text;
+            last.extra = { ...(last.extra ?? {}), ...(kept.reasoning ? { reasoning: kept.reasoning } : {}) };
+            last.gen_finished = new Date(kept.at).toISOString();
+            ctx.updateMessageBlock?.(i, last);
+            await ctx.saveChat?.();
+            toastr?.success?.(`第 ${i} 楼的回复刚才没存上，已从代理补回（${text.length} 字）。`, 'Claude Max · 已补回', { timeOut: 8000 });
+        } catch { /* proxy unreachable: try again next time */ } finally {
+            recovering = false;
+        }
+    }
+
+    function buildIncludeBodyYaml(settings, quiet = false, slot = null) {
         const lines = ['claude_subscription:'];
         // Background calls never take the one-shot effort meant for the next reply.
         const effort = quiet ? (settings.quietEffort === 'follow' ? settings.effort : settings.quietEffort) : effectiveEffort(settings);
@@ -279,6 +338,7 @@
         lines.push(`  lore_tail: ${settings.loreTail}`);
         lines.push(`  fold_tail: ${settings.foldTail}`);
         if (settings.debugDump) lines.push('  debug_dump: true');
+        if (slot && !quiet) lines.push(`  reply_slot: ${slot}`);
         return lines.join('\n');
     }
 
@@ -294,7 +354,8 @@
                 .replace(/^claude_subscription:[\s\S]*?(?=^\S|\s*$(?![\s\S]))/m, '')
                 .replace(/\n{3,}/g, '\n\n')
                 .trim();
-            data.custom_include_body = (cleaned ? cleaned + '\n' : '') + buildIncludeBodyYaml(settings, data.type === 'quiet');
+            const slot = ['quiet', 'impersonate', 'continue'].includes(data.type) ? null : replySlotFor(SillyTavern.getContext());
+            data.custom_include_body = (cleaned ? cleaned + '\n' : '') + buildIncludeBodyYaml(settings, data.type === 'quiet', slot);
             preflightCheck(data);
             postProcessingCheck(data);
         } catch (err) {
@@ -755,6 +816,7 @@
             if (downToast) toastr?.clear?.(downToast);
             downToast = null;
             toastr?.success?.('已重新连上 Claude 代理，可以继续发消息了。', 'Claude Max · 已恢复');
+            setTimeout(recoverKeptReply, 500);
             refreshProxyStatus();
         }
     }
@@ -1564,7 +1626,7 @@
     refreshProxyStatus();
     setInterval(heartbeat, HEARTBEAT_MS);
     // Phone app back from the background: check right away, not up to 20 s later.
-    document.addEventListener('visibilitychange', () => { if (!document.hidden) heartbeat(); });
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) { heartbeat(); setTimeout(recoverKeptReply, 1500); } });
     eventSource.on(eventTypes.CHAT_COMPLETION_SETTINGS_READY, onSettingsReady);
     // Keep stats fresh while the panel is open.
     const refreshIfOpen = () => {
@@ -1573,6 +1635,7 @@
     };
     eventSource.on(eventTypes.MESSAGE_RECEIVED, clearOneShotEffort);
     eventSource.on(eventTypes.CHARACTER_MESSAGE_RENDERED ?? eventTypes.MESSAGE_RECEIVED, () => setTimeout(() => runCheckup({ toast: true }), 200));
+    eventSource.on(eventTypes.CHAT_CHANGED, () => setTimeout(recoverKeptReply, 1500));
     eventSource.on(eventTypes.CHAT_CHANGED, () => setTimeout(() => {
         const leak = document.getElementById('claude_max_leak');
         if (leak) leak.value = getSettings().leakWords?.[currentCharKey()] ?? '';

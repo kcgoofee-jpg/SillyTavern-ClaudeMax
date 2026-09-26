@@ -33,6 +33,7 @@ import { handleStatus } from './lib/status.js';
 import { handleQuota } from './lib/oauth.js';
 import { handleStats } from './lib/usage-stats.js';
 import { handleDebugLast } from './lib/debug-dump.js';
+import { handleKeptReply } from './lib/reply-keeper.js';
 import { startStandaloneListener, stopStandaloneListener, probeExistingProxy, portInUseMessage } from './lib/listener.js';
 
 const DEFAULT_PORT = 8901;
@@ -146,6 +147,7 @@ export async function init(router) {
     router.get('/quota', handleQuota);
     router.get('/stats', handleStats);
     router.get('/debug', handleDebugLast);
+    router.get('/reply/:slot', handleKeptReply);
 
     installUiExtension();
 
