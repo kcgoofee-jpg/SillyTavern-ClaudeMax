@@ -40,6 +40,13 @@ installed=${installed#version=}
 if [[ -n "$installed" ]]; then
     ok "已安装：版本 $installed"
     "$adb" -s "$serial" shell "su -c 'sh /data/adb/modules/$MOD_ID/action.sh'" 2>/dev/null | tr -d '\r' | sed 's/^/     /'
+    # 把手机上的日志和统计存一份到模块仓库的 logs/（不进 git），方便在电脑上看
+    logdir="$MODULE_REPO/logs/$(date +%Y%m%d-%H%M%S)"; mkdir -p "$logdir"
+    for f in service.log stats.txt; do
+        "$adb" -s "$serial" shell "su -c 'cat /data/adb/modules/$MOD_ID/$f'" 2>/dev/null | tr -d '\r' > "$logdir/$f"
+        [[ -s "$logdir/$f" ]] || rm -f "$logdir/$f"
+    done
+    rmdir "$logdir" 2>/dev/null || ok "日志存到了 ${logdir/#$HOME/~}"
 else
     explain "还没安装（或手机没有 root）。"
 fi
