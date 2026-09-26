@@ -1,12 +1,12 @@
 {
-    "display_name": "Claude Max",
+    "display_name": "CCST",
     "loading_order": 100,
     "requires": [],
     "optional": [],
-    "js": "index.js",
-    "css": "style.css",
+    "js": "src/panel/index.js",
+    "css": "src/panel/style.css",
     "author": "LukaTheHero, kcgoofee-jpg",
-    "version": "2.29.1",
+    "version": "3.0.0",
     "homePage": "https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax",
     "auto_update": false
 }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { summarizeLore, makeAllConstant, backupName } from '../lib/lore-constant.js';
+import { summarizeLore, makeAllConstant, backupName } from '../src/shared/lore-constant.js';
 
 const book = { entries: {
     0: { constant: true, content: '常驻' },

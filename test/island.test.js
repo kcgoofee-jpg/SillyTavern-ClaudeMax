@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { springCurve, linearEasing } from '../lib/island.js';
+import { springCurve, linearEasing } from '../src/shared/island.js';
 
 test('springCurve starts at 0, ends at 1, overshoots only a little', () => {
     const c = springCurve({ stiffness: 420, damping: 32 });
@@ -44,7 +44,7 @@ const shownTitle = (isl) => {
 
 test('a sticky notice steps aside when a reply starts generating', async (t) => {
     t.mock.timers.enable({ apis: ['setTimeout', 'setInterval'] });
-    const { createIsland } = await import('../lib/island.js');
+    const { createIsland } = await import('../src/shared/island.js');
     const isl = createIsland(fakeDoc());
     isl.notice({ tone: 'bad', title: '连不上代理', ms: 0, replace: 'proxy' });
     assert.equal(shownTitle(isl), '连不上代理');
@@ -60,7 +60,7 @@ test('a sticky notice steps aside when a reply starts generating', async (t) => 
 });
 
 test('clear() needs a key; drain() hands back pending notices', async () => {
-    const { createIsland } = await import('../lib/island.js');
+    const { createIsland } = await import('../src/shared/island.js');
     const isl = createIsland(fakeDoc());
     isl.notice({ tone: 'info', title: 'a', ms: 0 });
     isl.notice({ tone: 'info', title: 'b', ms: 0, replace: 'k' });

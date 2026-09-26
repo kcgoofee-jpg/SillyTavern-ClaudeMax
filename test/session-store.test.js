@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, mkdtempSync, utimesSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { sweepLeftovers, projectKeyFor, sweepSessionTranscript, flushSweeps } from '../lib/session-store.js';
+import { sweepLeftovers, projectKeyFor, sweepSessionTranscript, flushSweeps } from '../src/proxy/session-store.js';
 
 const UUID = (n) => `${String(n).repeat(8)}-1111-4111-8111-${String(n).repeat(12)}`;
 const age = (p, ms) => { const t = (Date.now() - ms) / 1000; utimesSync(p, t, t); };

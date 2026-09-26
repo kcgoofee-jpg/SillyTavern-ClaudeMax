@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────
-# Claude Max 启动器 · macOS 公共函数
+# CCST 启动器 · macOS 公共函数
 # 被同目录的 .command 脚本引用，不要直接双击这个文件。
 #
 # 路径自动识别：
@@ -89,7 +89,7 @@ cm_version() {
 banner() {
     print
     print -r -- "${C_BOLD}${C_CYAN}════════════════════════════════════════════${C_RESET}"
-    print -r -- "${C_BOLD}  $1${C_RESET}  ${C_DIM}Claude Max $(cm_version)${C_RESET}"
+    print -r -- "${C_BOLD}  $1${C_RESET}  ${C_DIM}CCST $(cm_version)${C_RESET}"
     print -r -- "${C_BOLD}${C_CYAN}════════════════════════════════════════════${C_RESET}"
     log_event "===== $1 ====="
 }
@@ -210,7 +210,7 @@ diagnose_log() {
         "在酒馆工具里选「登录 Claude」重新登录。"
     _diag 'rate.limit|(^|[^0-9.,k])429([^0-9.,k]|$)|Too many requests' \
         "触发了订阅额度限流（请求太频繁或额度用完）" \
-        "稍等几分钟再试；在酒馆的 Claude Max 面板里可以看到额度重置时间。"
+        "稍等几分钟再试；在酒馆的 CCST 面板里可以看到额度重置时间。"
     _diag 'Extra Usage|out of extra usage' \
         "1M 上下文需要额外用量，当前套餐不可用" \
         "改用不带「(1M context)」的模型。"
@@ -402,7 +402,7 @@ check_deps() {
 # 登录状态：打印「yes 套餐」/「no」/「unknown」
 login_state() {
     local json logged=unknown plan
-    json=$(cd "$PROXY_DIR" && node scripts/claude-cli.js auth status 2>/dev/null)
+    json=$(cd "$PROXY_DIR" && node bin/claude-cli.js auth status 2>/dev/null)
     # 不再为解析这点 JSON 单独起一个 node
     if [[ "$json" =~ '"loggedIn"[[:space:]]*:[[:space:]]*(true|false)' ]]; then
         [[ $match[1] == true ]] && logged=yes || logged=no

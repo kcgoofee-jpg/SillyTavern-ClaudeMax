@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 
-import { ACTIONS, handleControlAction, countInFlight, busyCount, markStandalone, __setInFlight, LID_PAUSE_FILE } from '../lib/control.js';
+import { ACTIONS, handleControlAction, countInFlight, busyCount, markStandalone, __setInFlight, LID_PAUSE_FILE } from '../src/proxy/control.js';
 
 function fakeRes() {
     const res = { statusCode: 200, body: null };

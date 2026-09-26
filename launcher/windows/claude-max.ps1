@@ -1,6 +1,6 @@
 ﻿# ──────────────────────────────────────────────
-# Claude Max 启动器 · Windows
-# 由同目录的 .bat 调用：claude-max.ps1 <start|stop|restart|status|login|repair|autostart|autostart-run|logs>
+# CCST 启动器 · Windows
+# 由菜单（launcher/menu.mjs，入口 酒馆工具.bat）调用：claude-max.ps1 <start|stop|restart|status|login|repair|autostart|autostart-run|logs>
 #
 # 路径自动识别：
 #   代理目录 = 本仓库根目录
@@ -106,7 +106,7 @@ function CheckDeps($dir, $name) {
 
 function CheckLogin {
     Push-Location $PROXY_DIR
-    $json = node scripts/claude-cli.js auth status 2>$null | Out-String
+    $json = node bin/claude-cli.js auth status 2>$null | Out-String
     Pop-Location
     try { $j = $json | ConvertFrom-Json } catch { $j = $null }
     if ($j -and $j.loggedIn) { Ok "Claude 订阅已登录（$($j.subscriptionType) 套餐）" }
@@ -208,13 +208,15 @@ function HealthCheck {
 
 # ── 开机自动启动（启动文件夹里的快捷方式）──
 
-$STARTUP_LNK = Join-Path ([Environment]::GetFolderPath('Startup')) 'Claude Max 启动器.lnk'
+$STARTUP_LNK = Join-Path ([Environment]::GetFolderPath('Startup')) 'CCST 启动器.lnk'
+# 3.0 之前叫「Claude Max 启动器」：开着旧的也算开启，关闭时一起删
+$OLD_STARTUP_LNK = Join-Path ([Environment]::GetFolderPath('Startup')) 'Claude Max 启动器.lnk'
 
 function AutostartToggle {
     Step '当前状态'
-    if (Test-Path $STARTUP_LNK) {
+    if ((Test-Path $STARTUP_LNK) -or (Test-Path $OLD_STARTUP_LNK)) {
         Ok '开机自动启动：已开启'
-        if (AskYes '要关闭开机自动启动吗？') { Remove-Item $STARTUP_LNK; Ok '已关闭（现在正在运行的程序不受影响）' }
+        if (AskYes '要关闭开机自动启动吗？') { Remove-Item $STARTUP_LNK, $OLD_STARTUP_LNK -ErrorAction SilentlyContinue; Ok '已关闭（现在正在运行的程序不受影响）' }
     } else {
         Explain '· 开机自动启动：未开启'
         if (AskYes '要开启开机自动启动吗？') {
@@ -242,7 +244,7 @@ switch ($Action) {
         HealthCheck
         Summary
         if ($stOk) { Start-Process "http://127.0.0.1:$ST_PORT" }
-        elseif (-not (HasSt)) { Write-Host ''; Write-Host '  代理已就绪。打开 TauriTavern（或你的酒馆），在 Claude Max 面板里点「一键连接」。' }
+        elseif (-not (HasSt)) { Write-Host ''; Write-Host '  代理已就绪。打开 TauriTavern（或你的酒馆），在 CCST 面板里点「一键连接」。' }
         PauseEnd
     }
     'stop' { Banner '关闭'; StopAll; Summary; PauseEnd }
@@ -266,7 +268,7 @@ switch ($Action) {
         Banner '登录 Claude 订阅'
         Explain '会打开浏览器，用你的 Claude（Pro / Max）账号授权。登录信息保存在 %USERPROFILE%\.claude 里，一般只需要登录一次。'
         Explain '如果浏览器没有自动打开，把窗口里显示的网址复制到浏览器；网页给出授权码时，粘贴回这个窗口。'
-        Push-Location $PROXY_DIR; node scripts/claude-cli.js auth login; Pop-Location
+        Push-Location $PROXY_DIR; node bin/claude-cli.js auth login; Pop-Location
         Step '确认登录结果'; CheckLogin; Summary; PauseEnd
     }
     'repair' {

@@ -39,7 +39,7 @@ step "3/5 登录 Claude 订阅（Pro / Max）"
 if [[ "$(login_state)" == yes* ]]; then
     check_login
 elif ask_yes "还没登录。现在登录吗？（会打开浏览器，用你的 Claude 账号授权，只需要一次）"; then
-    (cd "$PROXY_DIR" && node scripts/claude-cli.js auth login)
+    (cd "$PROXY_DIR" && node bin/claude-cli.js auth login)
     check_login
 else
     warn "没有登录：代理能启动，但发消息会失败"
@@ -73,12 +73,12 @@ start_proxy
 have_tt=0; [[ -d /Applications/TauriTavern.app ]] && have_tt=1
 if st_managed; then
     start_st && open "http://127.0.0.1:$ST_PORT"
-    explain "酒馆里：「扩展」→ Claude Max 面板 →「一键连接」。面板没出现就强制刷新一次（Cmd+Shift+R）。"
+    explain "酒馆里：「扩展」→ CCST 面板 →「一键连接」。面板没出现就强制刷新一次（Cmd+Shift+R）。"
 elif (( have_tt )); then
     mac_tt_open
     explain "TauriTavern 里（只需第一次）："
     explain "  ① 扩展 → 安装扩展，地址填 https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax"
-    explain "  ② 打开 Claude Max 面板，点「一键连接」；弹出授权框时允许访问 127.0.0.1:$PROXY_PORT"
+    explain "  ② 打开 CCST 面板，点「一键连接」；弹出授权框时允许访问 127.0.0.1:$PROXY_PORT"
 else
     warn "这台 Mac 上没找到 TauriTavern，也没找到酒馆（SillyTavern）"
     fix "推荐装 TauriTavern（桌面 App）：https://github.com/Darkatse/TauriTavern/releases ；装好后再双击本脚本。"

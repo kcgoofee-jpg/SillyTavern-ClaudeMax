@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isAllowedOrigin, isAllowedHost } from '../lib/listener.js';
+import { isAllowedOrigin, isAllowedHost } from '../src/proxy/listener.js';
 
 test('loopback origins are allowed (SillyTavern in a local browser)', () => {
     for (const o of ['http://127.0.0.1:8000', 'http://localhost:8000', 'https://localhost', 'http://[::1]:8000']) {
@@ -37,7 +37,7 @@ test('host guard: LAN binding accepts IP literals; extra names are opt-in', () =
     assert.equal(isAllowedHost('myhost:8901', 'myhost', ''), true);
 });
 
-import { isLoopbackAddress, keyMatches } from '../lib/listener.js';
+import { isLoopbackAddress, keyMatches } from '../src/proxy/listener.js';
 
 test('LAN access: loopback needs no key, others must match it exactly', () => {
     assert.equal(isLoopbackAddress('127.0.0.1'), true);
@@ -51,7 +51,7 @@ test('LAN access: loopback needs no key, others must match it exactly', () => {
     assert.equal(keyMatches(null, 'abc'), false);
 });
 
-import { presentedKey } from '../lib/listener.js';
+import { presentedKey } from '../src/proxy/listener.js';
 
 test('access key: X-Claude-Max-Key is trimmed; a blank one does not hide a valid Bearer', () => {
     assert.equal(presentedKey({ headers: { 'x-claude-max-key': ' k1 ' } }), 'k1');
