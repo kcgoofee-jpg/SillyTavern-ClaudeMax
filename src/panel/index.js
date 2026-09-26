@@ -1263,7 +1263,7 @@
         } catch (err) {
             box.classList.remove('cm-loading');
             box = document.getElementById('claude_max_quota') ?? box;
-            box.replaceChildren(el('small', 'cm-hint', `额度暂不可用（${err instanceof Error ? err.message : err}）`));
+            box.replaceChildren(el('small', 'cm-hint', proxyErrorText('额度', err)));
         } finally {
             box.classList.remove('cm-loading');
         }
@@ -1457,7 +1457,7 @@
         } catch (err) {
             box.classList.remove('cm-loading');
             box = document.getElementById('claude_max_stats') ?? box;
-            box.replaceChildren(el('small', 'cm-hint', `统计暂不可用（${err instanceof Error ? err.message : err}）`));
+            box.replaceChildren(el('small', 'cm-hint', proxyErrorText('用量统计', err)));
         } finally {
             box.classList.remove('cm-loading');
         }
@@ -1542,6 +1542,13 @@
      *  `direct`: Claude without this proxy — SillyTavern's own Claude source, or a Claude model on
      *  OpenRouter. The panel's local features (model switch on Claude source, pre-send check, 体检,
      *  card check, island) work there too; cache layout, reply recovery, quota and stats need the proxy. */
+    /** 没装 / 没连本代理时（酒馆里没有插件路由 → 404，或连不上）说人话，别只给 HTTP 码。 */
+    function proxyErrorText(what, err) {
+        const msg = String(err instanceof Error ? err.message : err);
+        if (/404|Failed to fetch|NetworkError|ECONNREFUSED/i.test(msg)) return `${what}只在连着 CCST 代理时显示（现在没连上）。`;
+        return `${what}暂不可用（${msg}）`;
+    }
+
     function connectionInfo() {
         const ctx = SillyTavern.getContext();
         const oai = ctx.chatCompletionSettings ?? {};

@@ -50,7 +50,7 @@ cmd_install() {
     if [[ -d "$ROOTFS" ]]; then
         ok "Debian 已安装，跳过"
     else
-        proot-distro install "$DISTRO" || { fail "Debian 安装失败，检查网络后重试"; exit 1; }
+        proot-distro install "$DISTRO" || { fail "Debian 安装失败：要能访问 Docker Hub（国内一般要开代理 / VPN；DNS 被污染时 auth.docker.io 会解析到错误地址）。开好后重跑 install"; exit 1; }
         ok "Debian 已安装"
     fi
 
