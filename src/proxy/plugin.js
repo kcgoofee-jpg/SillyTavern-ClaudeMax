@@ -40,7 +40,7 @@ import { ROOT } from './paths.js';
 
 const DEFAULT_PORT = 8901;
 const DEFAULT_HOST = '127.0.0.1';
-const UI_EXTENSION_DIR_NAME = 'SillyTavern-ClaudeMax';
+const UI_EXTENSION_DIR_NAME = 'CCST';
 
 export const info = {
     id: 'claude-subscription',
@@ -103,15 +103,17 @@ function installUiExtension() {
         }
 
         // Dialog-installed clone present? It's git-managed by ST — let it own
-        // the extension and skip the auto-copy.
-        // Old repo name first, then the current one. A git clone at the
-        // auto-install target (the repo is now named SillyTavern-ClaudeMax
-        // too) is ST-managed — never copy files over it.
-        const dialogClones = ['SillyTavern-ClaudeSubscription', UI_EXTENSION_DIR_NAME].flatMap((name) => [
+        // the extension and skip the auto-copy. The repo was called
+        // SillyTavern-ClaudeSubscription, then SillyTavern-ClaudeMax, now CCST;
+        // the oldest name was never an auto-install target, so any copy there is
+        // the user's own. SillyTavern-ClaudeMax was one (before 3.0): only a git
+        // clone there counts, an old auto-copy must not block installing into CCST.
+        const dialogClones = ['SillyTavern-ClaudeSubscription', 'SillyTavern-ClaudeMax', UI_EXTENSION_DIR_NAME].flatMap((name) => [
             join(thirdParty, name),
             join(stRoot, 'data', 'default-user', 'extensions', name),
         ]);
-        if (dialogClones.some((dir) => existsSync(join(dir, 'manifest.json')) && (existsSync(join(dir, '.git')) || !dir.endsWith(UI_EXTENSION_DIR_NAME)))) {
+        const userOwned = (dir) => existsSync(join(dir, '.git')) || /SillyTavern-ClaudeSubscription$/.test(dir);
+        if (dialogClones.some((dir) => existsSync(join(dir, 'manifest.json')) && userOwned(dir))) {
             console.log(`[${info.id}] UI extension already installed via SillyTavern's extension installer — auto-install skipped`);
             return;
         }

@@ -3,8 +3,8 @@
 ## 准备
 
 ```bash
-git clone https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax
-cd SillyTavern-ClaudeMax
+git clone https://github.com/kcgoofee-jpg/CCST
+cd CCST
 npm install
 git config core.hooksPath .githooks   # 提交 / 推送前自动跑门控
 ```

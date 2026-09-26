@@ -8,8 +8,8 @@
 
 <sub>非 Anthropic 官方产品，与 Anthropic 无关。Claude 是 Anthropic 的商标。</sub>
 
-[![版本](https://img.shields.io/github/package-json/v/kcgoofee-jpg/SillyTavern-ClaudeMax?label=%E7%89%88%E6%9C%AC&color=0d0d0d)](https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax/releases)
-[![测试](https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax/actions/workflows/test.yml/badge.svg)](https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax/actions/workflows/test.yml)
+[![版本](https://img.shields.io/github/package-json/v/kcgoofee-jpg/CCST?label=%E7%89%88%E6%9C%AC&color=0d0d0d)](https://github.com/kcgoofee-jpg/CCST/releases)
+[![测试](https://github.com/kcgoofee-jpg/CCST/actions/workflows/test.yml/badge.svg)](https://github.com/kcgoofee-jpg/CCST/actions/workflows/test.yml)
 [![Node](https://img.shields.io/badge/Node-%E2%89%A518-3c873a)](https://nodejs.org)
 [![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%C2%B7%20Android%20TauriTavern-555)](#快速开始)
 [![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-AGPL--3.0-blue)](LICENSE)
@@ -58,12 +58,12 @@
 
 ### Mac 一键安装
 
-1. 下载本仓库：右上角 **Code → Download ZIP** 解压；会用 git 的话 `git clone https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax`。
+1. 下载本仓库：右上角 **Code → Download ZIP** 解压；会用 git 的话 `git clone https://github.com/kcgoofee-jpg/CCST`。
    用原版酒馆的话，把解压出来的文件夹放在 `SillyTavern` 文件夹**旁边**（同一层），启动器会自动找到酒馆。
 2. 双击 `launcher/mac/首次安装.command`，一路按提示：检查 Node.js（没有会带你去装）→ 安装依赖 → 浏览器登录 Claude 订阅（只需一次）→ 桌面放一个「**酒馆工具**」→ 启动代理，打开 TauriTavern 或酒馆。
    - 第一次双击提示「无法验证开发者」：在文件上**右键 → 打开**，再点「打开」（或「系统设置 → 隐私与安全性 → 仍要打开」）。只需一次。
 3. 在 TauriTavern / 酒馆里打开 **CCST** 面板，点 **一键连接**。
-   - TauriTavern：先「扩展 → 安装扩展」，地址填 `https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax`；第一次连接会弹授权框，允许访问 `127.0.0.1:8901`。
+   - TauriTavern：先「扩展 → 安装扩展」，地址填 `https://github.com/kcgoofee-jpg/CCST`；第一次连接会弹授权框，允许访问 `127.0.0.1:8901`。
    - 酒馆：面板会自动出现；没出现就强制刷新（Cmd+Shift+R）。
 
 以后只用桌面上的「酒馆工具」：启动、关闭、检查状态、手机连接、同步都在菜单里。
@@ -73,8 +73,8 @@
 1. 在酒馆的 `config.yaml` 里设置 `enableServerPlugins: true`。
 2. 在酒馆目录（有 `server.js` 的那一层）运行：
    ```bash
-   node plugins.js install https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax
-   cd plugins/SillyTavern-ClaudeMax
+   node plugins.js install https://github.com/kcgoofee-jpg/CCST
+   cd plugins/CCST
    npm install
    npm run login
    ```
@@ -85,8 +85,8 @@
 ### 只跑代理（命令行）
 
 ```bash
-git clone https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax
-cd SillyTavern-ClaudeMax
+git clone https://github.com/kcgoofee-jpg/CCST
+cd CCST
 npm install
 npm run login
 npm start
@@ -259,7 +259,7 @@ Windows 上手机相关的项目显示为「目前只支持 Mac」。
 <details>
 <summary>手机上的 TauriTavern 连 Mac 的代理（同一 Wi-Fi）</summary>
 
-0. 手机装 [TauriTavern](https://github.com/Darkatse/TauriTavern/releases)（安卓 apk），「扩展 → 安装扩展」填 `https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax`。Mac 上先按[Mac 一键安装](#mac-一键安装)装好代理。
+0. 手机装 [TauriTavern](https://github.com/Darkatse/TauriTavern/releases)（安卓 apk），「扩展 → 安装扩展」填 `https://github.com/kcgoofee-jpg/CCST`。Mac 上先按[Mac 一键安装](#mac-一键安装)装好代理。
 1. Mac 上菜单选「手机模式」（电脑模式 ↔ 手机模式切换）。它会生成一个访问密码，让代理接受局域网请求，并显示代理地址（`http://<Mac 的局域网 IP>:8901/v1`）和密码。
 2. 手机 TauriTavern → CCST 面板顶部状态卡（连不上时出现）或「更多 → 调试选项 → 连接」：「代理地址」「访问密码」分别填上，点「重新连接」。用「手机同步」同步过的话已经填好。
 3. Mac 首次弹出「允许 node 接受传入连接」时点允许。
@@ -296,7 +296,7 @@ Windows 上手机相关的项目显示为「目前只支持 Mac」。
   关闭、检查、开机自动启动也都在这个菜单里。自定义路径写在 `launcher\config.local.ps1`，例如 `$ST_DIR = 'D:\SillyTavern'`。
 - **安卓 Termux**：Claude CLI 没有安卓版，脚本会在 Termux 里装一个 Debian 子系统（约 100MB），代理跑在里面，酒馆照常跑在 Termux 里。
   ```bash
-  curl -fsSLO https://raw.githubusercontent.com/kcgoofee-jpg/SillyTavern-ClaudeMax/main/launcher/termux/claude-max.sh
+  curl -fsSLO https://raw.githubusercontent.com/kcgoofee-jpg/CCST/main/launcher/termux/claude-max.sh
   bash claude-max.sh install
   claude-max login
   claude-max start

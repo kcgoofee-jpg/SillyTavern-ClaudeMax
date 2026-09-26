@@ -77,7 +77,7 @@ if st_managed; then
 elif (( have_tt )); then
     mac_tt_open
     explain "TauriTavern 里（只需第一次）："
-    explain "  ① 扩展 → 安装扩展，地址填 https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax"
+    explain "  ① 扩展 → 安装扩展，地址填 https://github.com/kcgoofee-jpg/CCST"
     explain "  ② 打开 CCST 面板，点「一键连接」；弹出授权框时允许访问 127.0.0.1:$PROXY_PORT"
 else
     warn "这台 Mac 上没找到 TauriTavern，也没找到酒馆（SillyTavern）"

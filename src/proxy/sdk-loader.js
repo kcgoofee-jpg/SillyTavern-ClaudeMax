@@ -23,7 +23,7 @@ export function loadSdk() {
             const msg = err instanceof Error ? err.message : String(err);
             throw new Error(
                 'Failed to load @anthropic-ai/claude-agent-sdk. Run `npm install` inside the plugin ' +
-                'directory (plugins/SillyTavern-ClaudeMax) WITHOUT --omit=optional, restart ' +
+                'directory (plugins/CCST) WITHOUT --omit=optional, restart ' +
                 'SillyTavern, and make sure `claude login` has been run once on this host. ' +
                 `Underlying error: ${msg}`,
             );

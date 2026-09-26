@@ -13,8 +13,8 @@
 # ──────────────────────────────────────────────
 
 DISTRO=debian
-REPO_URL=https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax
-GUEST_DIR=/root/SillyTavern-ClaudeMax
+REPO_URL=https://github.com/kcgoofee-jpg/CCST
+GUEST_DIR=/root/CCST
 PORT=8901
 STATE_DIR="$HOME/.claude-max"
 LOG="$STATE_DIR/proxy.log"
@@ -122,7 +122,7 @@ cmd_stop() {
     local pid
     pid=$(cat "$PID_FILE" 2>/dev/null)
     [[ -n "$pid" ]] && kill "$pid" 2>/dev/null
-    pkill -f "SillyTavern-ClaudeMax/server.js" 2>/dev/null
+    pkill -f "CCST/server.js" 2>/dev/null
     sleep 1
     if proxy_up; then fail "代理还在运行，重启 Termux 即可"; else ok "已关闭"; fi
     rm -f "$PID_FILE"
