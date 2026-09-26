@@ -35,7 +35,7 @@ const RULES = [
         code: 'usage_limit',
         test: /usage limit|limit reached|quota|rate.?limit|too many requests|\b429\b/i,
         message: '触发了订阅额度限制（请求太频繁，或 5 小时 / 7 天额度已用完）',
-        hint: '稍等几分钟再试；Claude Max 面板的「订阅额度」里能看到重置时间。',
+        hint: '稍等几分钟再试；CCST 面板的「订阅额度」里能看到重置时间。',
     },
     {
         code: 'overloaded',
@@ -103,5 +103,5 @@ export function explainError(raw) {
 /** One-line user-facing text: 中文说明 + 办法 + 原始错误. */
 export function formatErrorForUser(raw) {
     const e = explainError(raw);
-    return `【Claude Max】${e.message}。${e.hint}（原始错误：${e.raw}）`;
+    return `【CCST】${e.message}。${e.hint}（原始错误：${e.raw}）`;
 }

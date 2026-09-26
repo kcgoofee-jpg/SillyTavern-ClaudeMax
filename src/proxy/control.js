@@ -2,7 +2,7 @@
 // Phone → Mac remote control (standalone listener only)
 // ──────────────────────────────────────────────
 //
-// The Claude Max panel on the phone can see how the Mac is doing and press a
+// The CCST panel on the phone can see how the Mac is doing and press a
 // few fixed buttons. Everything goes through the launcher's own zsh
 // functions (launcher/mac/lib.zsh), so the phone can do exactly what the
 // menu can and nothing else: there is no way to pass a command, only an
@@ -101,7 +101,7 @@ function zsh(script, { detached = false } = {}) {
 }
 
 function logEvent(text) {
-    return zsh(`log_event ${JSON.stringify(`[遥控] ${text}`)}; osascript -e ${JSON.stringify(`display notification "${text.replace(/"/g, '')}" with title "Claude Max · 手机遥控"`)} >/dev/null 2>&1`);
+    return zsh(`log_event ${JSON.stringify(`[遥控] ${text}`)}; osascript -e ${JSON.stringify(`display notification "${text.replace(/"/g, '')}" with title "CCST · 手机遥控"`)} >/dev/null 2>&1`);
 }
 
 function tail(file, lines) {

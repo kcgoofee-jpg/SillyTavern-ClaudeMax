@@ -28,7 +28,7 @@ show_phone_setup() {
         ok "代理地址：http://$ip:$PROXY_PORT/v1"
     fi
     print -r -- "  ${C_GREEN}✓${C_RESET} 访问密码：$(<"$LAN_KEY_FILE")"   # 只显示，不写进日志
-    explain "手机 TauriTavern → 扩展 → Claude Max：连不上代理时顶部状态卡里会出现「代理地址」「访问密码」，填上后点「重新连接」。"
+    explain "手机 TauriTavern → 扩展 → CCST：连不上代理时顶部状态卡里会出现「代理地址」「访问密码」，填上后点「重新连接」。"
     explain "已经用「手机同步」同步过设置的话，手机上已经填好了，不用再填。"
 }
 

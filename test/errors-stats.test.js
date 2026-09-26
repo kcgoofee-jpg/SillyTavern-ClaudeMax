@@ -15,7 +15,7 @@ test('common upstream errors get Chinese explanations', () => {
     assert.equal(explainError('Extra usage is required for 1M context').code, 'extra_usage');
     assert.equal(explainError('something odd').code, 'unknown');
     const text = formatErrorForUser('Not logged in · Please run /login');
-    assert.match(text, /^【Claude Max】Claude 订阅未登录/);
+    assert.match(text, /^【CCST】Claude 订阅未登录/);
     assert.match(text, /原始错误：Not logged in/);
 });
 

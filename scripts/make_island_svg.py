@@ -171,10 +171,10 @@ for i, st in enumerate(STATES):
         f'<g filter="url(#b{i})" opacity="0"><animate attributeName="opacity" dur="{fmt(TOTAL)}s" repeatCount="indefinite" keyTimes="{vkt}" values="{vop}"/>{body}</g>')
 
 svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif">
-<title>Claude Max 面板顶部的灵动岛：思考中 → 写作中 → 完成（字数 · 用时 · 缓存）→ 体检提示 → 缩回小点</title>
+<title>CCST 面板顶部的灵动岛：思考中 → 写作中 → 完成（字数 · 用时 · 缓存）→ 体检提示 → 缩回小点</title>
 <rect width="{W}" height="{H}" rx="18" fill="#e9e6e1"/>
 <rect x="24" y="{H - 50}" width="172" height="34" rx="9" fill="#fff" fill-opacity=".85"/><text x="40" y="{H - 28}" font-size="13" fill="#9a958d">模型 · Opus 5.5</text><rect x="204" y="{H - 50}" width="172" height="34" rx="9" fill="#fff" fill-opacity=".85"/><text x="220" y="{H - 28}" font-size="13" fill="#9a958d">5 小时额度 · 32%</text><rect x="384" y="{H - 50}" width="172" height="34" rx="9" fill="#fff" fill-opacity=".85"/><text x="400" y="{H - 28}" font-size="13" fill="#9a958d">上轮缓存 · 96%</text><rect x="564" y="{H - 50}" width="172" height="34" rx="9" fill="#fff" fill-opacity=".85"/><text x="580" y="{H - 28}" font-size="13" fill="#9a958d">体检 · 正常</text>
-<text x="{CX}" y="40" font-size="15" fill="#6f6a62" text-anchor="middle">Claude Max 面板 · 灵动岛</text>
+<text x="{CX}" y="40" font-size="15" fill="#6f6a62" text-anchor="middle">CCST 面板 · 灵动岛</text>
 <rect x="{fmt(CX - 7)}" y="{fmt(CY - 7)}" width="14" height="14" rx="7" fill="#3ecf6e">
 {anim('width', ws)}{anim('height', hs)}{anim('x', xs)}{anim('y', ys)}{anim('rx', rs)}
 <animate attributeName="fill" dur="{fmt(TOTAL)}s" repeatCount="indefinite" calcMode="discrete" keyTimes="{ckt}" values="{cvals}"/>

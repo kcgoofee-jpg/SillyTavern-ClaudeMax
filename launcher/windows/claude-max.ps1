@@ -1,5 +1,5 @@
 ﻿# ──────────────────────────────────────────────
-# Claude Max 启动器 · Windows
+# CCST 启动器 · Windows
 # 由同目录的 .bat 调用：claude-max.ps1 <start|stop|restart|status|login|repair|autostart|autostart-run|logs>
 #
 # 路径自动识别：
@@ -208,13 +208,15 @@ function HealthCheck {
 
 # ── 开机自动启动（启动文件夹里的快捷方式）──
 
-$STARTUP_LNK = Join-Path ([Environment]::GetFolderPath('Startup')) 'Claude Max 启动器.lnk'
+$STARTUP_LNK = Join-Path ([Environment]::GetFolderPath('Startup')) 'CCST 启动器.lnk'
+# 3.0 之前叫「Claude Max 启动器」：开着旧的也算开启，关闭时一起删
+$OLD_STARTUP_LNK = Join-Path ([Environment]::GetFolderPath('Startup')) 'Claude Max 启动器.lnk'
 
 function AutostartToggle {
     Step '当前状态'
-    if (Test-Path $STARTUP_LNK) {
+    if ((Test-Path $STARTUP_LNK) -or (Test-Path $OLD_STARTUP_LNK)) {
         Ok '开机自动启动：已开启'
-        if (AskYes '要关闭开机自动启动吗？') { Remove-Item $STARTUP_LNK; Ok '已关闭（现在正在运行的程序不受影响）' }
+        if (AskYes '要关闭开机自动启动吗？') { Remove-Item $STARTUP_LNK, $OLD_STARTUP_LNK -ErrorAction SilentlyContinue; Ok '已关闭（现在正在运行的程序不受影响）' }
     } else {
         Explain '· 开机自动启动：未开启'
         if (AskYes '要开启开机自动启动吗？') {
@@ -242,7 +244,7 @@ switch ($Action) {
         HealthCheck
         Summary
         if ($stOk) { Start-Process "http://127.0.0.1:$ST_PORT" }
-        elseif (-not (HasSt)) { Write-Host ''; Write-Host '  代理已就绪。打开 TauriTavern（或你的酒馆），在 Claude Max 面板里点「一键连接」。' }
+        elseif (-not (HasSt)) { Write-Host ''; Write-Host '  代理已就绪。打开 TauriTavern（或你的酒馆），在 CCST 面板里点「一键连接」。' }
         PauseEnd
     }
     'stop' { Banner '关闭'; StopAll; Summary; PauseEnd }

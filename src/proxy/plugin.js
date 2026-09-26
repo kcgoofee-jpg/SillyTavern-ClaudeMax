@@ -8,7 +8,7 @@
 // so they sit outside SillyTavern's CSRF middleware — see lib/listener.js.
 //
 // v2 additions:
-//   • Companion UI extension ("Claude Max") is auto-installed/updated into
+//   • Companion UI extension ("CCST") is auto-installed/updated into
 //     SillyTavern's third-party extensions on startup — it provides one-click
 //     connection (no URL typing), Claude-native reasoning-effort control
 //     (low/medium/high/xhigh/max), thinking display, and a quota meter.
@@ -48,7 +48,7 @@ export const info = {
     description:
         'Routes chat through the local Claude Agent SDK so it bills against your Anthropic Pro / Max ' +
         'subscription instead of an sk-ant-* API key. Fable 5.1 / Opus 5 / 1M context / reasoning ' +
-        'effort / thinking display / quota meter. Pairs with the auto-installed "Claude Max" UI extension.',
+        'effort / thinking display / quota meter. Pairs with the auto-installed "CCST" UI extension.',
 };
 
 /** true if dotted version a is strictly newer than b (numeric compare). */
@@ -172,7 +172,7 @@ export async function init(router) {
         await startStandaloneListener({ port, host });
         console.log(
             `[${info.id}] initialised — endpoint http://${host}:${port}/v1 ` +
-            '(use the "Claude Max" panel in the Extensions drawer to connect)',
+            '(use the "CCST" panel in the Extensions drawer to connect)',
         );
     } catch (err) {
         if (err?.code === 'EADDRINUSE' && await probeExistingProxy({ port, host })) {

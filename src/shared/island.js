@@ -1,5 +1,5 @@
 // ──────────────────────────────────────────────
-// 灵动岛：one pill at the top of the Claude Max panel that morphs between states
+// 灵动岛：one pill at the top of the CCST panel that morphs between states
 // ──────────────────────────────────────────────
 //
 // idle (a dot: proxy up / down) → thinking (elapsed seconds) → writing

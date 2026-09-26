@@ -7,7 +7,7 @@
 // cache diagnosis — offsets, hashes and tag names, never message or prompt
 // text; see cache-diag.js nearestLabel) and prints a
 // one-line summary to the console. /v1/usage/stats aggregates today and the
-// last 7 days for the Claude Max panel: request count, tokens, average
+// last 7 days for the CCST panel: request count, tokens, average
 // latency, prompt-cache hit rate, and the most recent failure.
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs';

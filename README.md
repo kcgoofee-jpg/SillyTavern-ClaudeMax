@@ -1,8 +1,12 @@
 <div align="center">
 
-# Claude Max for SillyTavern
+# CCST
 
-用自己的 **Claude Pro / Max 订阅** 在 SillyTavern（酒馆）或 TauriTavern 里聊天，不用另买 API 额度。
+**Claude Code × SillyTavern**：让酒馆里的 Claude 角色扮演更省、更稳、跨设备不断线。
+
+面板对任何 Claude 连接都能用（官方 API、OpenRouter）；配上自带的代理，可以用自己的 **Claude Pro / Max 订阅**玩，并获得缓存排布、手机防丢回复、Mac ↔ 手机同步。
+
+<sub>非 Anthropic 官方产品，与 Anthropic 无关。Claude 是 Anthropic 的商标。</sub>
 
 [![版本](https://img.shields.io/github/package-json/v/kcgoofee-jpg/SillyTavern-ClaudeMax?label=%E7%89%88%E6%9C%AC&color=0d0d0d)](https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax/releases)
 [![测试](https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax/actions/workflows/test.yml/badge.svg)](https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax/actions/workflows/test.yml)
@@ -17,7 +21,7 @@
 </div>
 
 - **本地代理**：通过官方 [Claude Agent SDK](https://code.claude.com/docs/en/agent-sdk/overview) 调用你登录的订阅，对外提供 OpenAI 兼容接口 `http://127.0.0.1:8901/v1`。
-- **Claude Max 面板**：酒馆扩展，一键连接；只有一个设置项（思考深度），其余自动处理。
+- **CCST 面板**：酒馆扩展，一键连接；只有一个设置项（思考深度），其余自动处理。
 
 | | |
 | --- | --- |
@@ -58,7 +62,7 @@
    用原版酒馆的话，把解压出来的文件夹放在 `SillyTavern` 文件夹**旁边**（同一层），启动器会自动找到酒馆。
 2. 双击 `launcher/mac/首次安装.command`，一路按提示：检查 Node.js（没有会带你去装）→ 安装依赖 → 浏览器登录 Claude 订阅（只需一次）→ 桌面放一个「**酒馆工具**」→ 启动代理，打开 TauriTavern 或酒馆。
    - 第一次双击提示「无法验证开发者」：在文件上**右键 → 打开**，再点「打开」（或「系统设置 → 隐私与安全性 → 仍要打开」）。只需一次。
-3. 在 TauriTavern / 酒馆里打开 **Claude Max** 面板，点 **一键连接**。
+3. 在 TauriTavern / 酒馆里打开 **CCST** 面板，点 **一键连接**。
    - TauriTavern：先「扩展 → 安装扩展」，地址填 `https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax`；第一次连接会弹授权框，允许访问 `127.0.0.1:8901`。
    - 酒馆：面板会自动出现；没出现就强制刷新（Cmd+Shift+R）。
 
@@ -93,7 +97,7 @@ npm start
 ### 更新与卸载
 
 - **更新代理**：用 git 的在仓库里 `git pull`；下载 ZIP 的重新下载解压，在新文件夹里双击 `launcher/mac/首次安装.command`（桌面上的「酒馆工具」会自动改指向新文件夹，旧文件夹可以删）。然后在酒馆工具里选「重启酒馆」（没在生成回复时）。「检查状态」发现代理还在跑旧版本会提醒。
-- **更新面板**：TauriTavern / 酒馆的「扩展」管理里更新 Claude Max；手机上的面板可以用「手机同步」一起更新。
+- **更新面板**：TauriTavern / 酒馆的「扩展」管理里更新 CCST；手机上的面板可以用「手机同步」一起更新。
 - **卸载**：酒馆工具里关掉「开机自动启动」，选「关闭酒馆」，删掉仓库文件夹和桌面上的「酒馆工具」；「合盖不睡」装过的话先在菜单里卸掉（会删 `/etc/sudoers.d/claudemax-lid`）。聊天记录在 TauriTavern / 酒馆自己的数据里，不受影响。
 
 ## 酒馆工具（Mac 菜单）
@@ -113,7 +117,7 @@ npm start
 
 ## 使用
 
-1. 打开「扩展」里的 **Claude Max** 面板，点 **一键连接**。
+1. 打开「扩展」里的 **CCST** 面板，点 **一键连接**。
 2. 选模型：面板「推理」页一键切 Opus 5.5 / Opus 4.6，或在「API 连接」的模型下拉框里选（Sonnet 5、Fable 5.1 等）。预设可以推荐模型（`extensions.claude_max.model`），切到这个预设时面板自动换过去；只换模型，不动代理地址（酒馆自己的「预设绑定连接」会连地址一起换，手机上会断）。
 3. 开始聊天。
 
@@ -121,7 +125,7 @@ npm start
 
 面板顶部的四张小卡片显示模型、额度、上轮缓存和体检结果。代理没开、没登录或酒馆没连上时，最上面会出现状态卡和「一键连接」按钮（连不上代理时还会出现代理地址和访问密码）；一切正常时它会自动隐藏。
 
-**灵动岛**：Claude Max 面板顶部一个会变形的小胶囊（不出现在聊天界面上）。发出消息后展开成「思考中 · 秒数」，出字后显示实时字数，写完变成打勾「字数 · 用时 · 缓存命中」，几秒后缩回小点。面板开着时，回复补回、体检问题、断线 / 恢复、换了模型、被截断也显示在这里，点一下收起；面板关着时这些照常用酒馆的弹窗提示。形状按弹簧曲线过渡，文字切换带一下模糊；系统开了「减少动态效果」时直接切换。
+**灵动岛**：CCST 面板顶部一个会变形的小胶囊（不出现在聊天界面上）。发出消息后展开成「思考中 · 秒数」，出字后显示实时字数，写完变成打勾「字数 · 用时 · 缓存命中」，几秒后缩回小点。面板开着时，回复补回、体检问题、断线 / 恢复、换了模型、被截断也显示在这里，点一下收起；面板关着时这些照常用酒馆的弹窗提示。形状按弹簧曲线过渡，文字切换带一下模糊；系统开了「减少动态效果」时直接切换。
 
 **要调的只有两样**：「推理」页的模型（Opus 5.5 / 4.6）和思考深度（自动 / 低 / 中 / 高 / 超高 / 最大 / 不思考，加「仅下一轮」）。其余都自动处理：
 
@@ -239,7 +243,7 @@ npm start
 
 0. 手机装 [TauriTavern](https://github.com/Darkatse/TauriTavern/releases)（安卓 apk），「扩展 → 安装扩展」填 `https://github.com/kcgoofee-jpg/SillyTavern-ClaudeMax`。Mac 上先按[Mac 一键安装](#mac-一键安装)装好代理。
 1. Mac 上菜单选「手机模式」（电脑模式 ↔ 手机模式切换）。它会生成一个访问密码，让代理接受局域网请求，并显示代理地址（`http://<Mac 的局域网 IP>:8901/v1`）和密码。
-2. 手机 TauriTavern → Claude Max 面板顶部状态卡（连不上时出现）或「更多 → 调试选项 → 连接」：「代理地址」「访问密码」分别填上，点「重新连接」。用「手机同步」同步过的话已经填好。
+2. 手机 TauriTavern → CCST 面板顶部状态卡（连不上时出现）或「更多 → 调试选项 → 连接」：「代理地址」「访问密码」分别填上，点「重新连接」。用「手机同步」同步过的话已经填好。
 3. Mac 首次弹出「允许 node 接受传入连接」时点允许。
 
 手机模式下后台有一个守护进程：Mac 不空闲睡眠（`caffeinate`），代理退出后 30 秒内自动重启，Mac 断网或局域网地址变了会发通知（Mac 通知中心，以及通过 adb 连着的手机）。手机上的面板每 20 秒探测一次代理，断线时提示、连回来后提示「已恢复」。切回电脑模式时守护一起停止。
@@ -250,7 +254,7 @@ npm start
 
 **安卓保活模块**（菜单「安卓保活模块」，需要 root + KernelSU / Magisk）：[tt-root-module](https://github.com/kcgoofee-jpg/tt-root-module)，git clone 到本仓库同级目录。保住 TauriTavern 的电池白名单和后台权限，记下 TT 被冻结、退出的原因，生成回复中被冻结或被杀时发通知，每天备份。菜单会打包放进手机「下载」，在 KernelSU 管理器里「从本地安装」后重启。
 
-**本机 TT 导入**（菜单「本机TT导入」，测试用）：电脑 SillyTavern → 同一台 Mac 上的 TauriTavern，一键导入聊天、角色卡（连同标签）、世界书、预设、图片和第三方扩展，可选连扩展设置（柏宝绘、MVU、小白X、正则、Claude Max）和当前预设一起导入。单向：TT 独有的文件保留，TT 上更新过的不覆盖，被覆盖的先备份。
+**本机 TT 导入**（菜单「本机TT导入」，测试用）：电脑 SillyTavern → 同一台 Mac 上的 TauriTavern，一键导入聊天、角色卡（连同标签）、世界书、预设、图片和第三方扩展，可选连扩展设置（柏宝绘、MVU、小白X、正则、CCST）和当前预设一起导入。单向：TT 独有的文件保留，TT 上更新过的不覆盖，被覆盖的先备份。
 
 **回复不会再丢**：手机上的 TauriTavern 退到后台时，系统会暂停它的网页，收到的回复可能来不及存；中途被关掉也会断在一半。现在每次请求带一个「槽位」（聊天、楼层、第几个回复和你那句话的哈希，不含内容），代理写完后把回复按槽位存在内存里（不落盘，最多 40 个聊天，6 小时）。App 中途断开时代理照样写完；你按「停止」时面板会通知代理停下并丢掉这条，不会再补回。重新打开聊天、切回 App 或连回代理时，只有这几种情况会补回：最后一楼是空的或「...」、写到一半断了（面板在写的过程中做了标记）、App 在存盘前就被关了（聊天停在你的发言上，补一楼上去）。你编辑过、删掉或按停止的回复一律不动。
 
@@ -270,7 +274,7 @@ npm start
   1. 装 [Node.js](https://nodejs.org) LTS（安装时保持默认选项）。
   2. 下载本仓库（Code → Download ZIP）解压；用原版酒馆的话放在 `SillyTavern` 文件夹旁边。
   3. 打开 `launcher\windows\`，双击 `登录 Claude.bat`（浏览器登录订阅，只需一次），再双击 `启动酒馆.bat`：它会先自检，缺依赖时问你要不要装。
-  4. TauriTavern / 酒馆里打开 Claude Max 面板，点「一键连接」（TauriTavern 先「扩展 → 安装扩展」填本仓库地址）。
+  4. TauriTavern / 酒馆里打开 CCST 面板，点「一键连接」（TauriTavern 先「扩展 → 安装扩展」填本仓库地址）。
   其余：`关闭酒馆.bat`、`检查状态.bat`、`开机自动启动.bat` 等。自定义路径写在 `launcher\config.local.ps1`，例如 `$ST_DIR = 'D:\SillyTavern'`。
 - **安卓 Termux**：Claude CLI 没有安卓版，脚本会在 Termux 里装一个 Debian 子系统（约 100MB），代理跑在里面，酒馆照常跑在 Termux 里。
   ```bash

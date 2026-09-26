@@ -9,6 +9,8 @@
 重新整理项目结构和版本规范。**老用户要做的**：Mac 上「重启酒馆」一次（代理换了代码位置）；桌面快捷方式、`npm start`、`npm run login` 不变。
 
 ### 变更
+- **改名 CCST**（Claude Code × SillyTavern）：扩展列表、面板标题、启动器、文档都改了；设置和已安装的文件夹名不变，老设置照常生效。Windows 开机启动的快捷方式改叫「CCST 启动器」，旧的也认。
+- 面板和代理版本不一致时，状态卡说明哪边旧、怎么更新。
 - 代码搬进 `src/`：`src/panel/`（面板）、`src/proxy/`（代理）、`src/shared/`（共用）；根目录只留入口（`manifest.json`、`package.json`、`server.js`）和文档。
 - 登录工具 `scripts/claude-cli.js` → `bin/claude-cli.js`（启动脚本已跟着改；`npm run login` 不变）。
 - 版本号只写在 `package.json`，`scripts/version.mjs` 同步到 `manifest.json`；代理和测试从 `package.json` 读。

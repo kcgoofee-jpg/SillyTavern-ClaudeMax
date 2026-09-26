@@ -1,6 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
 # ──────────────────────────────────────────────
-# Claude Max 启动器 · Android（Termux）
+# CCST 启动器 · Android（Termux）
 #
 # Claude CLI 没有安卓版，不能直接在 Termux 里运行。这个脚本在 Termux 里装一个
 # Debian 子系统（proot-distro），代理跑在 Debian 里；酒馆照常跑在 Termux 里，
@@ -65,7 +65,7 @@ cmd_install() {
     fi
     ok "Node.js $major"
 
-    step "下载 Claude Max 代理"
+    step "下载 CCST 代理"
     in_debian "if [ -d $GUEST_DIR/.git ]; then cd $GUEST_DIR && git pull --ff-only; else git clone --depth 1 $REPO_URL $GUEST_DIR; fi" \
         || { fail "下载失败，检查能否访问 GitHub"; exit 1; }
     in_debian "cd $GUEST_DIR && npm install --no-audit --no-fund" || { fail "npm install 失败"; exit 1; }

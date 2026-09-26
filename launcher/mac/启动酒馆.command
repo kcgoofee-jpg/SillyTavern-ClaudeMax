@@ -29,7 +29,7 @@ if ! st_managed; then
         print -r -- "  代理已就绪，正在打开 TauriTavern。"
         mac_tt_open
     else
-        print -r -- "  代理已就绪。打开 TauriTavern（或你的酒馆），在 Claude Max 面板里点「一键连接」。"
+        print -r -- "  代理已就绪。打开 TauriTavern（或你的酒馆），在 CCST 面板里点「一键连接」。"
     fi
 elif (( st_ok )); then
     print

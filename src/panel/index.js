@@ -1,5 +1,5 @@
 // ──────────────────────────────────────────────
-// Claude Max — UI extension for the claude-subscription server plugin
+// CCST — UI extension for the claude-subscription server plugin
 // ──────────────────────────────────────────────
 //
 // This file is the UI EXTENSION (loaded in the browser, src/panel/). The
@@ -36,7 +36,7 @@
 
 (function () {
     if (window.__claudeMaxUiLoaded) {
-        console.log('[claude-max] another copy of the Claude Max extension is already active — this one will stay dormant');
+        console.log('[claude-max] another copy of the CCST extension is already active — this one will stay dormant');
         return;
     }
     window.__claudeMaxUiLoaded = true;
@@ -60,7 +60,7 @@
     import(new URL('../shared/preset-reco.js', import.meta.url).href)
         .then((m) => { presetReco = m; adoptUnrecordedReco(); })
         .catch(() => { /* preset recommendations unavailable */ });
-    // 灵动岛 (lib/island.js): one morphing pill at the top of the Claude Max
+    // 灵动岛 (lib/island.js): one morphing pill at the top of the CCST
     // panel (never over the chat). It shows the reply being generated and,
     // while the panel is open, the notices; with the panel closed notices are
     // ordinary toasts.
@@ -85,7 +85,7 @@
         if (island?.visible) return island.notice({ tone, title, text, ms, replace: opts.replace, onDismiss: opts.onDismiss });
         if (opts.replace) island?.clear(opts.replace);
         const esc = (v) => String(v).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
-        const t = toastr?.[TOAST_KIND[tone]]?.(esc(text).replace(/\n/g, '<br>'), `Claude Max · ${esc(title)}`, {
+        const t = toastr?.[TOAST_KIND[tone]]?.(esc(text).replace(/\n/g, '<br>'), `CCST · ${esc(title)}`, {
             timeOut: ms, extendedTimeOut: ms === 0 ? 0 : 1000, escapeHtml: false, preventDuplicates: true,
             // ST turns toastr's close button off: tapping the toast is how it gets dismissed.
             ...(opts.onDismiss ? { onclick: () => opts.onDismiss() } : {}),
@@ -268,7 +268,7 @@
         warnedPostProcessing = true;
         notify('warn', `提示词后处理是「${POST_PROCESSING_LABELS[mode] ?? mode}」`,
             '它会把预设合并成用户消息，预设失去系统权重，而且世界书一变整段缓存就失效。' +
-            '建议改成「无」（API 连接 → 提示词后处理），或重新点一次 Claude Max 面板的「一键连接」自动改好。',
+            '建议改成「无」（API 连接 → 提示词后处理），或重新点一次 CCST 面板的「一键连接」自动改好。',
             { ms: 20000 });
     }
 
@@ -859,7 +859,7 @@
         const key = ch.avatar ?? ch.name;
         if (toast && high.length && !auditedCards.has(key)) {
             auditedCards.add(key);
-            notify('bad', `角色卡检查 ·「${ch.name}」`, `有 ${high.length} 处未成年人物相关内容（${[...new Set(high.map((f) => f.where))].slice(0, 3).join('、')}）。详情见 Claude Max 面板「体检 → 角色卡检查」。`, { ms: 20000 });
+            notify('bad', `角色卡检查 ·「${ch.name}」`, `有 ${high.length} 处未成年人物相关内容（${[...new Set(high.map((f) => f.where))].slice(0, 3).join('、')}）。详情见 CCST 面板「体检 → 角色卡检查」。`, { ms: 20000 });
         }
     }
 
@@ -980,6 +980,25 @@
 
     let proxyState = null;
 
+    // Panel and proxy update through different channels (SillyTavern's extension manager or
+    // 手机同步 for the panel; git pull / ZIP + a restart for the proxy), so they drift apart.
+    // Same major.minor = compatible; otherwise say which side is behind and how to update it.
+    let panelVersion = null;
+    fetch(new URL('../../manifest.json', import.meta.url).href)
+        .then((r) => r.json()).then((m) => { panelVersion = m.version ?? null; }).catch(() => { /* copy without a manifest */ });
+    const majorMinor = (v) => String(v ?? '').split('.').slice(0, 2).map(Number);
+    let warnedVersions = null;
+    function versionMismatch(proxyVersion) {
+        if (!panelVersion || !proxyVersion) return null;
+        const [pa, pb] = majorMinor(panelVersion);
+        const [xa, xb] = majorMinor(proxyVersion);
+        if (pa === xa && pb === xb) return null;
+        const proxyOlder = xa < pa || (xa === pa && xb < pb);
+        return proxyOlder
+            ? `代理是 v${proxyVersion}，面板是 v${panelVersion}：代理还在跑旧代码。Mac 上「酒馆工具」选「重启酒馆」（下载的 ZIP 要先换成新版）。`
+            : `面板是 v${panelVersion}，代理是 v${proxyVersion}：面板是旧的。酒馆「扩展」里更新 CCST；手机上用 Mac 的「手机同步」更新。`;
+    }
+
     /** Card title once the proxy is up: whether SillyTavern is pointed at it, and with which model. */
     function statusTitleOnline() {
         const { connected, model } = connectionInfo();
@@ -1026,6 +1045,17 @@
                 title.textContent = statusTitleOnline();
                 const plan = SUBSCRIPTION_LABELS[cred.subscriptionType] ?? cred.subscriptionType ?? '订阅';
                 sub.textContent = `${plan} 订阅 · 凭据来自${SOURCE_LABELS[cred.source] ?? cred.source} · 代理 v${data.version}`;
+                const mismatch = versionMismatch(data.version);
+                if (mismatch) {
+                    proxyState = 'warning'; // keeps the status card on screen until they match
+                    setDot('warning');
+                    sub.textContent += `。${mismatch}`;
+                    const key = `${panelVersion}|${data.version}`;
+                    if (warnedVersions !== key) {
+                        warnedVersions = key;
+                        notify('warn', '面板和代理版本不一致', mismatch, { ms: 15000 });
+                    }
+                }
                 const info = document.getElementById('claude_max_proxy_info');
                 if (info) info.textContent = `代理 v${data.version} 在线 · ${plan} 订阅 · 凭据来自${SOURCE_LABELS[cred.source] ?? cred.source}`;
             } else {
@@ -1080,7 +1110,7 @@
         } else if (!up && !heartbeatDown && connected) {
             heartbeatDown = true;
             if (status === 401) {
-                notify('bad', '代理拒绝了连接：访问密码不对', '在 Claude Max 面板里填对访问密码，再点「重新连接」。', { ms: 0, replace: 'proxy' });
+                notify('bad', '代理拒绝了连接：访问密码不对', '在 CCST 面板里填对访问密码，再点「重新连接」。', { ms: 0, replace: 'proxy' });
             } else if (status === 403) {
                 notify('bad', '代理拒绝了连接', '那台电脑的代理没开「手机模式」，或不接受这个地址。在 Mac 上双击「酒馆工具」选「手机模式」。', { ms: 0, replace: 'proxy' });
             } else {
@@ -2188,7 +2218,7 @@
         const heading = el('b', 'cm-heading');
         const headSum = el('small', 'cm-head-sum');
         headSum.id = 'claude_max_head_sum';
-        heading.append(el('span', 'cm-dot'), el('span', 'cm-heading-name', 'Claude Max'), headSum);
+        heading.append(el('span', 'cm-dot'), el('span', 'cm-heading-name', 'CCST'), headSum);
         toggle.append(heading, el('div', 'inline-drawer-icon fa-solid fa-circle-chevron-down down'));
         const drawerContent = el('div', 'inline-drawer-content');
         // ST slide-toggles the drawer content's display — keep our flex

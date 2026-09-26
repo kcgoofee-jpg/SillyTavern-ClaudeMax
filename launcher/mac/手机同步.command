@@ -1,7 +1,7 @@
 #!/bin/zsh
 # 手机 TauriTavern ↔ 同步中心（这台 Mac 的 TauriTavern，或电脑酒馆；config.local 的 SYNC_HUB，见 lib.zsh）双向同步：
 # 聊天、角色卡、世界书、预设、图片、角色卡标签等；扩展代码只从 Mac 推出去（中心是 Mac TT 时先推给 Mac TT 再推给手机）。
-# 其他设置和 API 密钥不同步；只改手机设置里的一处：Claude Max 的代理地址对准这台 Mac 的 IP，
+# 其他设置和 API 密钥不同步；只改手机设置里的一处：CCST 的代理地址对准这台 Mac 的 IP，
 # 手机模式开着时顺便填上 Mac 的访问密码（lan-key.local）。
 # 手机用 USB 线连着（开了 USB 调试），或者之前在这里开过无线调试
 # 全自动：不问问题。两边已经一样就什么都不关；要同步时手机弹通知倒数 10 秒，同步完把原来开着的 TT 重新打开。
