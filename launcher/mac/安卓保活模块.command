@@ -1,12 +1,17 @@
 #!/bin/zsh
 # 手机 TauriTavern 后台保活（KernelSU / Magisk 模块）：打包 → 放进手机「下载」→ 你在 KernelSU 管理器里装；
-# 装好后在这里看它的状态（只读）。
+# 装好后在这里看它的状态（只读），顺手把手机上的日志、崩溃记录和最新的 TT 备份拷回电脑，
+# 还可以选一份备份恢复（恢复前模块会先把现在的数据另存一份；不会替你强制停止 TT）。
+# 电脑上的备份放在 ${PROXY_DIR:h}/phone-backups/tt（config.local 里 TT_PHONE_BACKUP_DIR 可改），不自动删。
 # 模块在单独的仓库里开发（默认和本仓库同级的 tt-root-module，可在 launcher/config.local 里写
 # TT_MODULE_DIR="目录" 改），说明和安全自查见那里的 README.md；这里只负责打包、推送和看状态。
 source "${0:A:h}/lib.zsh"
 banner "安卓保活模块"
 MODULE_REPO=${TT_MODULE_DIR:-${PROXY_DIR:h}/tt-root-module}
 MOD_ID=claudemax_tt_keepalive
+MOD=/data/adb/modules/$MOD_ID
+PHONE_BK=/sdcard/Documents/TauriTavern-backup
+MAC_BK=${TT_PHONE_BACKUP_DIR:-${PROXY_DIR:h}/phone-backups/tt}
 
 step "打包"
 [[ -f "$MODULE_REPO/build-ksu-module.sh" ]] || {
@@ -40,13 +45,60 @@ installed=${installed#version=}
 if [[ -n "$installed" ]]; then
     ok "已安装：版本 $installed"
     "$adb" -s "$serial" shell "su -c 'sh /data/adb/modules/$MOD_ID/action.sh'" 2>/dev/null | tr -d '\r' | sed 's/^/     /'
-    # 把手机上的日志和统计存一份到模块仓库的 logs/（不进 git），方便在电脑上看
+    # 把手机上的日志、统计和崩溃记录存一份到模块仓库的 logs/（不进 git），方便在电脑上看
     logdir="$MODULE_REPO/logs/$(date +%Y%m%d-%H%M%S)"; mkdir -p "$logdir"
     for f in service.log stats.txt; do
-        "$adb" -s "$serial" shell "su -c 'cat /data/adb/modules/$MOD_ID/$f'" 2>/dev/null | tr -d '\r' > "$logdir/$f"
+        "$adb" -s "$serial" shell "su -c 'cat $MOD/$f'" 2>/dev/null | tr -d '\r' > "$logdir/$f"
         [[ -s "$logdir/$f" ]] || rm -f "$logdir/$f"
     done
+    "$adb" -s "$serial" exec-out "su -c 'cd $MOD && [ -d crash ] && tar -cf - crash'" 2>/dev/null | tar -xf - -C "$logdir" 2>/dev/null
     rmdir "$logdir" 2>/dev/null || ok "日志存到了 ${logdir/#$HOME/~}"
+    [[ -d "$logdir/crash" ]] && explain "里面有 TT 的崩溃记录（crash 文件夹）。"
+
+    step "把手机上最新的 TT 备份拷到电脑"
+    backups=(${(f)"$("$adb" -s "$serial" shell "ls $PHONE_BK 2>/dev/null" | tr -d '\r' | grep '^tt-default-user-.*\.tar\.gz$' | sort -r)"})
+    if (( ${#backups} == 0 )); then
+        explain "手机上还没有备份（模块每天自动备份一次，开机解锁后才开始）。"
+    elif [[ -f "$MAC_BK/${backups[1]}" ]]; then
+        ok "电脑上已经有最新的：${backups[1]}"
+    else
+        mkdir -p "$MAC_BK"
+        if "$adb" -s "$serial" pull "$PHONE_BK/${backups[1]}" "$MAC_BK/${backups[1]}.part" >/dev/null 2>&1 \
+            && mv "$MAC_BK/${backups[1]}.part" "$MAC_BK/${backups[1]}"; then
+            ok "已拷到 ${MAC_BK/#$HOME/~}/${backups[1]}"
+        else
+            rm -f "$MAC_BK/${backups[1]}.part"; fail "没拷成：${backups[1]}"
+        fi
+    fi
+
+    if [[ -t 0 ]] && (( ${#backups} > 0 )) && [[ -n "$("$adb" -s "$serial" shell "su -c '[ -f $MOD/restore.sh ] && echo y'" 2>/dev/null | tr -d '\r')" ]]; then
+        step "从备份恢复（不需要就直接回车）"
+        explain "手机上的备份（新的在前）："
+        for i in {1..${#backups}}; do print -r -- "     $i  ${backups[$i]}"; done
+        print -n -- "  要恢复就输入编号，直接回车跳过："
+        read -r pick
+        if [[ "$pick" == <-> ]] && (( pick >= 1 && pick <= ${#backups} )); then
+            b=${backups[$pick]}
+            explain "会用 $b 覆盖 TT 里同名的聊天、角色卡、世界书、设置；备份之后新建的不会删；API 密钥不动。"
+            explain "恢复前模块会先把现在的数据另存一份（同一个文件夹），想撤销就再恢复那一份。"
+            if ask_yes "确定恢复 $b？"; then
+                tries=0
+                while [[ -n "$("$adb" -s "$serial" shell pidof com.tauritavern.client 2>/dev/null | tr -d '\r')" ]] && (( tries < 3 )); do
+                    explain "TT 正在运行：请在手机的最近任务里把 TT 划掉，然后回到这里按回车。"
+                    read -r _; (( tries++ ))
+                done
+                out=$("$adb" -s "$serial" shell "su -c 'sh $MOD/restore.sh $b'; echo rc=\$?" 2>&1 | tr -d '\r')
+                print -r -- "$out" | grep -v '^rc=' | sed 's/^/     /'
+                if [[ "$out" == *"rc=0"* ]]; then
+                    ok "恢复好了，打开 TT 看看。"
+                else
+                    fail "没恢复（上面是原因）"
+                fi
+            fi
+        elif [[ -n "$pick" ]]; then
+            explain "没有这个编号，跳过恢复。"
+        fi
+    fi
 else
     explain "还没安装（或手机没有 root）。"
 fi

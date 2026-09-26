@@ -289,10 +289,11 @@
     };
 
     function applyPresetRecommendation() {
-        syncModelControl();   // presets carry their own model
-        if (!presetReco) return;
         const ctx = SillyTavern.getContext();
         const rec = ctx.chatCompletionSettings?.extensions?.claude_max;
+        applyPresetModel(rec?.model);
+        syncModelControl();
+        if (!presetReco) return;
         const settings = getSettings();
         const { next, restored, applied, record } = presetReco.planPresetReco(settings, rec, settings.presetRecoRecord ?? null, PRESET_FIELDS);
         settings.presetRecoRecord = record;
@@ -1539,7 +1540,7 @@
     // until the next preset switch — presets store their own model.
     const MODEL_PICKS = [
         { value: 'claude-opus-5-5', label: 'Opus 5.5', hint: '思考总是开着。要求把思考写进正文的预设或世界书条目会被拦（reasoning_extraction）。' },
-        { value: 'claude-opus-4-6', label: 'Opus 4.6', hint: '思考可以关；写法更干净。切换预设时会换回预设里存的模型。' },
+        { value: 'claude-opus-4-6', label: 'Opus 4.6', hint: '思考可以关；写法更干净，思考过程完整可见。切换预设时会换成预设推荐的模型。' },
     ];
     const modelBase = (id) => String(id ?? '').replace(/\[1m\]$/i, '');
 
@@ -1572,11 +1573,25 @@
                 if (id === cur) return;
                 setModel(id);
                 renderGlance();
-                notify('info', `已切到 ${shortModel(id)}`, '到下次切换预设为止；想让某个预设固定用它，就在预设里保存一次。', { ms: 6000 });
+                notify('info', `已切到 ${shortModel(id)}`, '到下次切换预设为止（预设推荐了模型的，切过去时会换成推荐的）。', { ms: 6000 });
             },
         });
         row.id = 'claude_max_model';
         return row;
+    }
+
+    // A preset may name its model in extensions.claude_max.model. SillyTavern only switches the
+    // model with the preset when "bind preset to connection" is on, and that would also overwrite
+    // the endpoint saved in the preset (a phone would lose its LAN address) — so the model alone
+    // is applied here. Presets without one keep whatever model is selected.
+    function applyPresetModel(model) {
+        if (typeof model !== 'string' || !/^claude-[\w.-]+$/i.test(model)) return;
+        const { connected, model: cur } = connectionInfo();
+        if (!connected || modelBase(cur) === modelBase(model)) return;
+        const id = modelBase(model) + (/\[1m\]$/i.test(cur ?? '') ? '[1m]' : '');
+        setModel(id);
+        renderGlance();
+        notify('info', `预设用 ${shortModel(id)}`, '切换预设时自动换成预设推荐的模型；想临时换，在「推理」页点另一个。', { ms: 5000 });
     }
 
     function syncModelControl() {
