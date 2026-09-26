@@ -442,7 +442,7 @@
             group.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.effort === (nextEffort ?? '')));
             status.textContent = nextEffort
                 ? `下一条回复用「${EFFORT_LABEL[nextEffort]}」，收到后恢复「${EFFORT_LABEL[settings.effort]}」。再点一次取消。`
-                : '关键剧情点一下，只影响下一条回复。实测高约慢 1/3，超高约慢 3 倍。';
+                : '关键剧情点一下，只影响下一条回复。实测高约慢 1/3，超高约慢 3 倍；这一轮聊天记录的缓存要重写一次，下一轮切回后原来的缓存照样能用。';
         };
         for (const [value, label] of [['high', '高'], ['xhigh', '超高']]) {
             const b = el('button', 'cm-seg-btn', label);
@@ -1146,7 +1146,7 @@
         { value: 'low', label: '低', hint: '最快、最省额度，但长篇角色扮演容易漏规则、人设变浅，一般不推荐。' },
         { value: 'medium', label: '中', hint: '速度与质量的平衡点。' },
         { value: 'high', label: '高', hint: '复杂剧情更连贯、规则执行更完整，回复稍慢。长篇角色扮演推荐。' },
-        { value: 'xhigh', label: '超高', hint: '更深入的推理，回复更慢、更耗额度。' },
+        { value: 'xhigh', label: '超高', hint: '更深入的推理，回复更慢、更耗额度。Opus 4.6 没有这一档，按「高」处理。' },
         { value: 'max', label: '最大', hint: '最深度的思考，最慢、最耗额度。' },
     ];
 
