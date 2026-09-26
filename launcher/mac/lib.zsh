@@ -8,6 +8,9 @@
 #              否则找仓库旁边的 SillyTavern 文件夹；都没有就只管理代理（TauriTavern 用户）
 # 想手动指定，在 launcher/config.local 里写（该文件不会被提交）：
 #   ST_DIR="/path/to/SillyTavern"   LOG_DIR="/path/to/logs"   ST_PORT=8000   PROXY_PORT=8901
+#   ST_AUTOSTART=0   启动 / 重启 / 开机启动时不启动酒馆（平时用 TauriTavern，酒馆只拿来测试）
+#   SYNC_HUB=tt      「手机同步」以这台 Mac 的 TauriTavern 为中心（Mac TT ↔ 手机）；st = 以电脑酒馆为中心
+#                    不写时：有酒馆就是 st，没有就是 tt
 # ──────────────────────────────────────────────
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
@@ -21,6 +24,9 @@ ST_PORT=8000
 PROXY_PORT=8901
 COMFY_DIR="${PROXY_DIR:h}/ComfyUI"   # 可选：本地生图（ComfyUI），没装就忽略
 COMFY_PORT=8188
+ST_AUTOSTART=1
+SYNC_HUB=""
+MAC_TT_DATA="$HOME/Library/Application Support/com.tauritavern.client/data"
 LAN_KEY_FILE="$PROXY_DIR/launcher/lan-key.local"   # 有这个文件 = 手机连接（局域网访问）已开启
 [[ -f "$PROXY_DIR/launcher/config.local" ]] && source "$PROXY_DIR/launcher/config.local"
 if [[ -z "$ST_DIR" ]]; then
@@ -222,6 +228,8 @@ our_pids() {
 }
 
 has_st() { [[ -n "$ST_DIR" ]]; }
+# 启动器要不要管酒馆的启动（ST_AUTOSTART=0：只在测试时手动开；关闭酒馆时照样会关）
+st_managed() { has_st && [[ "$ST_AUTOSTART" != 0 ]]; }
 
 foreign_owner() {
     # 端口被别的程序占着时，返回该程序名
@@ -302,9 +310,11 @@ self_check() {
     fi
 
     # 2. 程序文件
-    if has_st; then
+    if st_managed; then
         [[ -f "$ST_DIR/server.js" ]] && ok "酒馆程序：$ST_DIR" \
             || { fail "找不到酒馆程序（$ST_DIR/server.js）"; fix "检查 launcher/config.local 里的 ST_DIR。"; }
+    elif has_st; then
+        explain "· 酒馆不随启动器启动（config.local 里 ST_AUTOSTART=0），只管理 Claude 代理"
     else
         explain "· 没有找到酒馆目录，只管理 Claude 代理（TauriTavern 用户不需要酒馆）"
         explain "  需要一起启动酒馆的话，在 launcher/config.local 里写 ST_DIR=\"酒馆目录\""
@@ -312,7 +322,7 @@ self_check() {
     ok "Claude 代理程序：$PROXY_DIR"
 
     # 3. 依赖
-    has_st && check_deps "$ST_DIR" "酒馆"
+    st_managed && check_deps "$ST_DIR" "酒馆"
     check_deps "$PROXY_DIR" "Claude 代理"
 
     # 4. Claude CLI（随 SDK 一起安装）
@@ -327,7 +337,7 @@ self_check() {
     check_login
 
     # 6. 酒馆服务器插件开关
-    if ! has_st; then
+    if ! st_managed; then
         :
     elif grep -qE '^enableServerPlugins:[[:space:]]*true' "$ST_DIR/config.yaml" 2>/dev/null; then
         ok "酒馆已开启服务器插件（酒馆页面也能读取额度和状态）"
@@ -337,7 +347,7 @@ self_check() {
     fi
 
     # 7. 端口
-    has_st && check_port $ST_PORT "酒馆"
+    st_managed && check_port $ST_PORT "酒馆"
     check_port $PROXY_PORT "Claude 代理"
 }
 
@@ -643,6 +653,62 @@ phone_tt_busy_reason() {
     return 0
 }
 
+# ── 手机同步的「中心」 ─────────────────────────
+# tt：这台 Mac 的 TauriTavern ↔ 手机；st：电脑酒馆 ↔ 手机（见文件开头 SYNC_HUB）。
+# 扩展代码的来源：有酒馆就用酒馆的第三方扩展目录（开发时的源码都在那里，也会先推给 Mac TT），
+# 没有就用 Mac TT 自己的。
+sync_hub() {
+    case $SYNC_HUB in
+        tt|st) print $SYNC_HUB ;;
+        *) if has_st; then print st; else print tt; fi ;;
+    esac
+}
+ext_source_dir() {
+    if has_st && [[ -d "$ST_DIR/public/scripts/extensions/third-party" ]]; then
+        print -r -- "$ST_DIR/public/scripts/extensions/third-party"
+    else
+        print -r -- "$MAC_TT_DATA/extensions/third-party"
+    fi
+}
+hub_label() { [[ "$(sync_hub)" == tt ]] && print "Mac TT" || print "电脑酒馆"; }
+hub_ready() {   # 中心的数据在不在：不在就打印原因
+    if [[ "$(sync_hub)" == tt ]]; then
+        [[ -d "$MAC_TT_DATA/default-user" ]] || { print -r -- "这台 Mac 上没找到 TauriTavern 的数据（装好并打开过一次才有）"; return 1; }
+    else
+        has_st || { print -r -- "Mac 上没有酒馆数据"; return 1; }
+    fi
+}
+# phone_sync.py 的参数（手机那边的 --adb / --serial 另外加）
+hub_sync_args() {
+    local -a a
+    if [[ "$(sync_hub)" == tt ]]; then
+        a=(--st "$MAC_TT_DATA/default-user" --local-name "Mac TT"
+           --state "$PROXY_DIR/launcher/phone-sync-state-tt.local.json")
+    else
+        a=(--st "$ST_DIR/data/default-user" --state "$PROXY_DIR/launcher/phone-sync-state.local.json")
+    fi
+    a+=(--backups "${PROXY_DIR:h}/backups" --port $PROXY_PORT --ext-dir "$(ext_source_dir)")
+    print -rn -- "${(pj:\0:)a}"
+}
+
+mac_tt_running() { pgrep -xq tauritavern; }
+# 正常退出 Mac 上的 TT（它开着时会把旧内容存回去）；10 秒没退出返回 1
+mac_tt_quit() {
+    local i
+    mac_tt_running || return 0
+    osascript -e 'quit app "TauriTavern"' >/dev/null 2>&1
+    for i in {1..20}; do mac_tt_running || return 0; sleep 0.5; done
+    return 1
+}
+mac_tt_open() { [[ -d /Applications/TauriTavern.app ]] && open -a TauriTavern; }
+
+# 中心是 Mac TT 时：扩展源码 → Mac TT（只在 Mac TT 上是旧版本时推；和手机同一套规则）。Mac TT 要先退出
+hub_update_mac_tt_ext() {
+    local src=$(ext_source_dir)
+    [[ "$(sync_hub)" == tt && "$src" != "$MAC_TT_DATA/extensions/third-party" ]] || return 0
+    python3 "$LAUNCHER_DIR/../phone_sync.py" --ext-only --local-tt "$MAC_TT_DATA/default-user" --ext-dir "$src" "$@"
+}
+
 # 手机遥控「同步」：不问问题直接双向同步（关掉手机上的 TT → 同步 → 再打开），结果发通知。
 # 同步前照样检查手机忙不忙；只有「TT 在屏幕上」这一条不算——按钮就是在 TT 里按的，
 # 这时再单独确认代理没在写回复（检查脚本看到 TT 在屏幕上就不往下查了）。
@@ -654,7 +720,8 @@ phone_sync_auto() {
         adb_reconnect "$adb"; sleep 1; serial=$(phone_serial)
     fi
     [[ -n "$serial" ]] || { notify "手机同步没做成" "Mac 连不上手机的无线调试"; return 1; }
-    has_st || { notify "手机同步没做成" "Mac 上没有酒馆数据"; return 1; }
+    local why tt_was=0
+    why=$(hub_ready) || { notify "手机同步没做成" "$why"; return 1; }
     if ! busy=$(phone_tt_busy_reason "$serial" "$adb"); then
         if [[ "$busy" == *屏幕上* ]]; then
             n=$(proxy_inflight)
@@ -670,16 +737,21 @@ phone_sync_auto() {
             return 1
         fi
     fi
+    # 中心是 Mac TT：它开着会把旧内容存回去，先正常退出（上面已确认代理没在写回复），同步完再打开
+    if [[ "$(sync_hub)" == tt ]] && mac_tt_running; then
+        tt_was=1
+        mac_tt_quit || { notify "手机同步没做成" "Mac 上的 TauriTavern 没能退出，先手动退出再同步。"; return 1; }
+    fi
     "$adb" -s "$serial" shell am force-stop com.tauritavern.client >/dev/null 2>&1
-    args=(--st "$ST_DIR/data/default-user" --adb "$adb" --serial "$serial"
-          --state "$PROXY_DIR/launcher/phone-sync-state.local.json" --backups "${PROXY_DIR:h}/backups" --port $PROXY_PORT
-          --ext-dir "$ST_DIR/public/scripts/extensions/third-party")
+    hub_update_mac_tt_ext >/dev/null 2>&1
+    args=("${(@0)$(hub_sync_args)}" --adb "$adb" --serial "$serial")
     [[ -s "$LAN_KEY_FILE" && -n "$(lan_ip)" ]] && args+=(--mac-ip "$(lan_ip)" --lan-key-file "$LAN_KEY_FILE")
     out=$(python3 "$LAUNCHER_DIR/../phone_sync.py" "${args[@]}" 2>&1)
     rc=$?
     out=$(print -r -- "$out" | grep '✓ 同步完成\|✗' | head -2)
-    log_event "[同步] 手机遥控触发（退出码 $rc）：${out//$'\n'/；}"
+    log_event "[同步] 手机遥控触发（$(hub_label) ↔ 手机，退出码 $rc）：${out//$'\n'/；}"
     "$adb" -s "$serial" shell monkey -p com.tauritavern.client -c android.intent.category.LAUNCHER 1 >/dev/null 2>&1
+    (( tt_was )) && mac_tt_open
     if (( rc == 0 )); then
         notify "手机同步完成" "${out:-已同步}"
     else
@@ -743,7 +815,7 @@ start_proxy() {
 ST_SPAWNED=0
 ST_PID=""
 spawn_st() {
-    has_st && (( ! ST_SPAWNED )) || return 0
+    st_managed && (( ! ST_SPAWNED )) || return 0
     port_busy $ST_PORT && return 0
     rotate_log "$ST_LOG"
     mark_log "$ST_LOG"
@@ -752,7 +824,7 @@ spawn_st() {
 }
 
 start_st() {
-    has_st || return 1
+    st_managed || return 1
     local owner
     step "启动酒馆（端口 $ST_PORT）"
     explain "首次启动或更新后需要编译前端，可能要 10–60 秒，请耐心等待。"
@@ -885,7 +957,7 @@ health_check() {
 
 show_running() {
     step "当前运行状态"
-    if has_st; then
+    if st_managed || { has_st && [[ -n "$(our_pids $ST_PORT)" ]]; }; then
         if [[ -n "$(our_pids $ST_PORT)" ]]; then ok "酒馆：运行中 → http://127.0.0.1:$ST_PORT"
         else explain "· 酒馆：未运行"; fi
     fi

@@ -12,6 +12,8 @@
 规则（按上次同步时记下的状态判断哪边改过）：
   只有一边改过 → 用改过的那边；两边都改过（冲突），或者没有同步记录、两边又不一样 → 用较新的，
   另一份存进备份，并且列出来。只有一边有的文件 → 复制到另一边。从不删除文件。
+  聊天记录冲突时再按楼层比一次：输的那份里有赢的那份没有的楼层（两边各自往下聊过）→ 另存成
+  「原名 [冲突副本·哪边 时间].jsonl」，两边的聊天列表里都能看到，不只是进备份。
   只差大小写的两个文件名（Mac 和手机都不分大小写，会互相覆盖）→ 不动，列出来。
   被覆盖的文件先备份到 <酒馆目录>/backups/<日期>/<时间>-手机同步前/{电脑,手机}/；备份没做成的那批不覆盖。
   写入先写到临时文件 / 临时文件夹再换名，中途断开不会留下写了一半的文件。
@@ -21,7 +23,7 @@
       [--mac-ip IP --port 8901 --lan-key-file F]
       phone_sync.py --st <…> --local-tt <TT 的 data/default-user> [--dry-run] [--port 8901]
 """
-import argparse, io, json, os, re, secrets, shlex, shutil, subprocess, sys, tarfile, tempfile, time, uuid
+import argparse, hashlib, io, json, os, re, secrets, shlex, shutil, subprocess, sys, tarfile, tempfile, time, uuid
 
 PKG = 'com.tauritavern.client'
 REMOTE_ROOTS = [f'/data/media/0/Android/data/{PKG}/data/default-user', f'/sdcard/Android/data/{PKG}/data/default-user']
@@ -33,6 +35,7 @@ PACKER = 'cm-pack-2'   # 扩展打包方式的版本：变了就会把已经「�
 EXT_CARRY = ('node_modules', 'data')   # 扩展顶层里电脑不推、手机上原有就保留的文件夹
 SHRINK_LIMIT = 0.2    # 手机上少了超过这个比例的已同步文件：怀疑列表不完整，拒绝同步
 WARNINGS = []
+LOCAL = '电脑'   # 这一侧在输出里的叫法（--local-name；Mac TT 当中心时叫「Mac TT」）
 
 
 class SyncError(RuntimeError):
@@ -263,7 +266,7 @@ def tar_bytes(st, rels):
 def tar_names(data):
     try:
         with tarfile.open(fileobj=io.BytesIO(data)) as t:
-            return {m.name for m in t.getmembers() if m.isfile()}
+            return {m.name for m in t.getmembers() if m.isfile() and not skip(m.name)}
     except (tarfile.TarError, EOFError) as e:
         raise SyncError(f'收到的压缩包是坏的（{e}）')
 
@@ -301,7 +304,7 @@ def extract(data, dest):
     try:
         with tarfile.open(fileobj=io.BytesIO(data)) as t:
             for m in t.getmembers():
-                if not m.isfile() or not _safe_name(m.name):
+                if not m.isfile() or not _safe_name(m.name) or skip(m.name):   # macOS tar 会夹带 ._ 附属文件
                     continue
                 atomic_write(os.path.join(dest, m.name), t.extractfile(m), (m.mode & 0o777) or 0o644, m.mtime)
                 done.add(m.name)
@@ -765,7 +768,7 @@ def sync_tags(ph, st, bk, loc_files, rem_files, push_only=False, dry=False):
         lraw = open(lpath, 'rb').read()
         loc_d = json.loads(lraw.decode('utf-8'))
     except (OSError, ValueError) as e:
-        return None, [f'电脑的 settings.json 读不了（{e}）']
+        return None, [f'{LOCAL}的 settings.json 读不了（{e}）']
     rraw, err = read_remote_text(ph, rpath)
     if err:
         return None, [] if err == 'missing' else [f'{side}的 settings.json：{err}']
@@ -776,7 +779,7 @@ def sync_tags(ph, st, bk, loc_files, rem_files, push_only=False, dry=False):
     cards = lambda files: {r.split('/', 1)[1] for r in files if r.startswith('characters/') and r.count('/') == 1}
     to_rem, to_loc = plan_tags(loc_d, rem_d, cards(loc_files), cards(rem_files), push_only)
     n_rem, n_loc = sum(map(len, to_rem.values())), sum(map(len, to_loc.values()))
-    text = f'标签：→ {side} {n_rem} 个，← 电脑 {n_loc} 个（{len(to_rem)} / {len(to_loc)} 张卡）'
+    text = f'标签：→ {side} {n_rem} 个，← {LOCAL} {n_loc} 个（{len(to_rem)} / {len(to_loc)} 张卡）'
     if dry or not (n_rem or n_loc):
         return text, []
     errors = []
@@ -790,11 +793,87 @@ def sync_tags(ph, st, bk, loc_files, rem_files, push_only=False, dry=False):
     if n_loc:
         try:
             add_tags(loc_d, to_loc)
-            atomic_write(os.path.join(bk, '电脑', 'settings.json'), lraw)
+            atomic_write(os.path.join(bk, LOCAL, 'settings.json'), lraw)
             atomic_write(lpath, json.dumps(loc_d, ensure_ascii=False, indent=4).encode('utf-8'))
         except OSError as e:
-            errors.append(f'电脑的标签没写成：{e}')
+            errors.append(f'{LOCAL}的标签没写成：{e}')
     return text, errors
+
+
+# ── 聊天冲突 ──────────────────────────────────────
+
+CHAT_DIRS = ('chats/', 'group chats/')
+
+
+def _floors(raw):
+    out = []
+    for line in raw.split(b'\n')[1:]:   # 第一行是聊天设置
+        if not line.strip():
+            continue
+        try:
+            m = json.loads(line)
+        except ValueError:
+            m = {'raw': hashlib.md5(line).hexdigest()}
+        out.append(m if isinstance(m, dict) else {'raw': hashlib.md5(line).hexdigest()})
+    return out
+
+
+def _texts(m):
+    who = (str(m.get('name')), bool(m.get('is_user')))
+    return {(who, t) for t in [m.get('mes'), *(m.get('swipes') or [])] if isinstance(t, str)}
+
+
+def missing_floors(win_raw, lose_raw):
+    """输的那份里，赢的那份没有的楼数。一楼算「有」：发送时间、名字、是否用户都对得上；
+    或者它的每个回复（正文和所有 swipe）都在赢的那份同一个人的回复里出现过——
+    重新生成会改发送时间、多一个 swipe，旧回复还在，不算丢。"""
+    win = _floors(win_raw)
+    keys = {(str(m.get('send_date')), str(m.get('name')), bool(m.get('is_user')), m.get('raw')) for m in win}
+    texts = set().union(*(_texts(m) for m in win)) if win else set()
+    n = 0
+    for m in _floors(lose_raw):
+        if (str(m.get('send_date')), str(m.get('name')), bool(m.get('is_user')), m.get('raw')) in keys:
+            continue
+        t = _texts(m)
+        if t and t <= texts:
+            continue
+        n += 1
+    return n
+
+
+def conflict_copy_name(rel, side, mtime):
+    stem, ext = os.path.splitext(rel)
+    return f"{stem} [冲突副本·{side} {time.strftime('%m-%d %H%M', time.localtime(mtime))}]{ext}"
+
+
+def chat_conflict_copies(ph, st, conflicts, push, loc, rem, write=True):
+    """聊天冲突里，输的一份有赢的一份没有的楼层 → 另存到这一侧（随后推到对方）。
+    → [(原文件, 副本相对路径, 多出的楼数)]。write=False 只算不写（预览）。"""
+    chats = [r for r in conflicts if r.startswith(CHAT_DIRS) and r.endswith('.jsonl')]
+    if not chats:
+        return []
+    data, _ = pull_tar(ph, chats)
+    out = []
+    with tempfile.TemporaryDirectory() as tmp:
+        got = extract(data, tmp) if data else set()
+        for rel in chats:
+            if rel not in got:
+                continue
+            with open(os.path.join(st, rel), 'rb') as f:
+                l = f.read()
+            with open(os.path.join(tmp, rel), 'rb') as f:
+                r = f.read()
+            local_wins = rel in push
+            win, lose = (l, r) if local_wins else (r, l)
+            extra = missing_floors(win, lose)
+            if not extra:
+                continue   # 赢的那份包含输的那份的每一楼（只是更新过 / 重新生成过 / 聊得更多）：备份就够了
+            side, mt = (ph.label, rem[rel][0]) if local_wins else (LOCAL, loc[rel][0])
+            name = conflict_copy_name(rel, side, mt)
+            if write:
+                atomic_write(os.path.join(st, name), lose, mtime=mt)
+            out.append((rel, name, extra))
+    return out
 
 
 # ── 状态 ──────────────────────────────────────
@@ -851,7 +930,7 @@ def run_sync(ph, st, push, pull, loc, rem, bk):
     for rel in pull:   # 电脑上要被覆盖的：先备份
         if rel in loc:
             try:
-                p = os.path.join(bk, '电脑', rel)
+                p = os.path.join(bk, LOCAL, rel)
                 os.makedirs(os.path.dirname(p), exist_ok=True)
                 shutil.copy2(os.path.join(st, rel), p)
                 backed = True
@@ -875,7 +954,7 @@ def run_sync(ph, st, push, pull, loc, rem, bk):
             got = extract(data, st) if data else set()
             failed.update(set(part) - got)
         except SyncError as e:
-            print(f'  ✗ ← 电脑：{e}')
+            print(f'  ✗ ← {LOCAL}：{e}')
             failed.update(part)
     if backed:
         print(f'  被覆盖的旧文件备份在 {bk}')
@@ -891,7 +970,9 @@ def show(lst, arrow, n=8):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument('--st', required=True)
+    ap.add_argument('--st', help='这一侧的 data/default-user（电脑酒馆，或当中心的 Mac TT）；--ext-only 时可以不给')
+    ap.add_argument('--local-name', default='电脑', help='这一侧在输出里的叫法')
+    ap.add_argument('--ext-only', action='store_true', help='只推扩展（--ext-dir → 对方），不同步文件和标签')
     ap.add_argument('--adb')
     ap.add_argument('--serial')
     ap.add_argument('--push-only', action='store_true',
@@ -899,8 +980,8 @@ def main(argv=None):
     ap.add_argument('--settings', action='store_true',
                     help='（仅 --local-tt）把电脑酒馆的部分扩展设置和对话补全设置复制过去')
     ap.add_argument('--local-tt', help='这台 Mac 上 TauriTavern 的 data/default-user（代替 --adb/--serial）')
-    ap.add_argument('--state', required=True)
-    ap.add_argument('--backups', required=True)
+    ap.add_argument('--state')
+    ap.add_argument('--backups')
     ap.add_argument('--dry-run', action='store_true')
     ap.add_argument('--mac-ip')
     ap.add_argument('--port', type=int, default=8901)
@@ -910,6 +991,12 @@ def main(argv=None):
     ap.add_argument('--trust-listing', action='store_true',
                     help='手机上确实删掉了很多文件：不因为「列表比上次少很多」而拒绝同步')
     a = ap.parse_args(argv)
+    global LOCAL
+    LOCAL = a.local_name
+    if not a.ext_only and not (a.st and a.state and a.backups):
+        ap.error('需要 --st、--state 和 --backups（只推扩展时用 --ext-only）')
+    if a.ext_only and not a.ext_dir:
+        ap.error('--ext-only 需要 --ext-dir')
 
     if a.local_tt:
         ph = LocalTT(a.local_tt)
@@ -934,6 +1021,16 @@ def main(argv=None):
             print('  没有 root 时：用 TauriTavern 自带的「数据迁移」扩展导出 / 导入。')
         return 2
     print(f'  {side}：{a.local_tt or a.serial}{"（root）" if ph.root else ""}')
+    if a.ext_only:
+        todo = plan_extensions(ph, a.ext_dir, a.ext_force) if os.path.isdir(a.ext_dir) else []
+        if not todo:
+            print('  扩展：没有要推的')
+            return 0
+        if a.dry_run:
+            return 0
+        failed = push_extensions(ph, todo)
+        print(f'  ✓ 扩展已更新 {len(todo)} 个' if not failed else f'  ✗ {len(failed)} 个扩展没推成：{"、".join(failed)}')
+        return 1 if failed else 0
     state = load_state(a.state)
     loc = local_files(a.st)
     try:
@@ -952,15 +1049,15 @@ def main(argv=None):
         only_there = [r for r in pull if r not in loc]
         pull, conflicts = [], [r for r in conflicts if r in push]
         if only_there:
-            print(f'  {side}独有、电脑上没有的 {len(only_there)} 个文件：保留在{side}，不拉回电脑')
+            print(f'  {side}独有、{LOCAL}上没有的 {len(only_there)} 个文件：保留在{side}，不拉回{LOCAL}')
         for rel in kept:
-            print(f'  ! {side}上的比电脑新，没有覆盖：{rel}')
-    print(f'  电脑 {len(loc)} 个文件，{side} {len(rem)} 个文件')
-    print(f'  → {side}：{len(push)} 个    ← 电脑：{len(pull)} 个    两边都改过 / 没有记录：{len(conflicts)} 个')
+            print(f'  ! {side}上的比{LOCAL}新，没有覆盖：{rel}')
+    print(f'  {LOCAL} {len(loc)} 个文件，{side} {len(rem)} 个文件')
+    print(f'  → {side}：{len(push)} 个    ← {LOCAL}：{len(pull)} 个    两边都改过 / 没有记录：{len(conflicts)} 个')
     show(push, '→')
     show(pull, '←')
     for rel in conflicts[:20]:
-        print(f'  ! {"两边都改过" if rel in state else "没有同步记录、两边不一样"}，用较新的一份（{"电脑" if rel in push else side}），另一份进备份：{rel}')
+        print(f'  ! {"两边都改过" if rel in state else "没有同步记录、两边不一样"}，用较新的一份（{LOCAL if rel in push else side}），另一份进备份：{rel}')
     if len(conflicts) > 20:
         print(f'  ! … 另 {len(conflicts) - 20} 个同样处理')
     for rel in clashes:
@@ -970,6 +1067,17 @@ def main(argv=None):
         ext_todo = plan_extensions(ph, a.ext_dir, a.ext_force)
         if not ext_todo:
             print(f'  扩展：没有要推的')
+    try:
+        copies = chat_conflict_copies(ph, a.st, conflicts, push, loc, rem, write=not a.dry_run)
+    except (SyncError, OSError) as e:
+        print(f'✗ 比较冲突的聊天记录时出错（{e}）。什么都没改。')
+        return 2
+    for rel, name, n in copies:
+        print(f'  ! 两边各自往下聊过：{os.path.basename(rel)} 里输的那份多出 {n} 楼，'
+              f'{"会" if a.dry_run else "已"}另存为「{os.path.basename(name)}」（两边都有）')
+        if not a.dry_run:
+            loc[name] = (int(os.stat(os.path.join(a.st, name)).st_mtime), os.path.getsize(os.path.join(a.st, name)))
+            push.append(name)
     if a.dry_run:
         # 预览按同步完成后的样子算：要传过去的角色卡也算对方有
         text, errs = sync_tags(ph, a.st, None, set(loc) | set(pull), set(rem) | set(push), a.push_only, dry=True)
@@ -1031,9 +1139,9 @@ def main(argv=None):
         notes.append('没核对上')
     if missing:
         notes.append(f'{len(missing)} 个文件没同步成功')
-    counts = f'→ {side} {n_push}/{len(push)} 个，← 电脑 {n_pull}/{len(pull)} 个'
+    counts = f'→ {side} {n_push}/{len(push)} 个，← {LOCAL} {n_pull}/{len(pull)} 个'
     if not missing and not notes:
-        print(f'  ✓ 同步完成：→ {side} {len(push)} 个，← 电脑 {len(pull)} 个' + (f'，扩展 {len(ext_todo)} 个' if ext_todo else ''))
+        print(f'  ✓ 同步完成：→ {side} {len(push)} 个，← {LOCAL} {len(pull)} 个' + (f'，扩展 {len(ext_todo)} 个' if ext_todo else ''))
     elif touched and n_push + n_pull == 0 and missing:
         print(f'  ✗ 同步失败：{counts}；' + '；'.join(notes))
     else:

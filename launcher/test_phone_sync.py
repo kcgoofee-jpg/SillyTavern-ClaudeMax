@@ -472,6 +472,67 @@ class TagTests(unittest.TestCase):
             e.close()
 
 
+def chat(*floors, head='{"chat_metadata":{}}'):
+    """floors: (发送时间, 名字, 内容)。"""
+    return '\n'.join([head] + [json.dumps({'send_date': d, 'name': n, 'is_user': n == 'U', 'mes': m}, ensure_ascii=False) for d, n, m in floors])
+
+
+class ChatConflictTests(unittest.TestCase):
+    def setUp(self):
+        self.e = Env()
+
+    def tearDown(self):
+        self.e.close()
+
+    def test_diverged_chat_keeps_both_on_both_sides(self):
+        e = self.e
+        base = [('d1', 'U', '你好'), ('d2', 'C', '欢迎')]
+        write(f'{e.st}/chats/C/c.jsonl', chat(*base, ('d3', 'U', '电脑上聊的')), 1_700_000_000)
+        write(f'{e.phone}/chats/C/c.jsonl', chat(*base, ('d4', 'U', '手机上聊的'), ('d5', 'C', '回复')), 1_700_000_900)
+        rc, out = e.sync('--dry-run')
+        self.assertIn('会另存为', out)
+        self.assertEqual(sorted(os.listdir(f'{e.st}/chats/C')), ['c.jsonl'])   # 预览不写
+        rc, out = e.sync()
+        self.assertEqual(rc, 0, out)
+        copies = [f for f in os.listdir(f'{e.st}/chats/C') if '冲突副本·电脑' in f]
+        self.assertEqual(len(copies), 1, os.listdir(f'{e.st}/chats/C'))
+        self.assertIn('电脑上聊的', read(f'{e.st}/chats/C/{copies[0]}'))
+        self.assertIn('手机上聊的', read(f'{e.st}/chats/C/c.jsonl'))         # 较新的（手机）赢
+        self.assertIn('电脑上聊的', read(f'{e.phone}/chats/C/{copies[0]}'))  # 副本两边都有
+        rc, out = e.sync()
+        self.assertIn('→ 手机：0 个    ← 电脑：0 个', out)
+
+    def test_winner_containing_every_floor_needs_no_copy(self):
+        e = self.e
+        write(f'{e.st}/chats/C/c.jsonl', chat(('d1', 'U', '你好'), ('d2', 'C', '旧回复')), 1_700_000_000)
+        write(f'{e.phone}/chats/C/c.jsonl', chat(('d1', 'U', '你好'), ('d2', 'C', '重新生成的回复'), ('d3', 'U', '继续')), 1_700_000_900)
+        rc, out = e.sync()
+        self.assertEqual(rc, 0, out)
+        self.assertNotIn('冲突副本', out)
+        self.assertEqual(os.listdir(f'{e.st}/chats/C'), ['c.jsonl'])
+        self.assertIn('重新生成的回复', read(f'{e.st}/chats/C/c.jsonl'))
+
+    def test_regenerated_reply_is_not_a_lost_floor(self):
+        old = chat(('d1', 'U', '你好'), ('d2', 'C', '第一版回复'))
+        new = '\n'.join(['{}', json.dumps({'send_date': 'd1', 'name': 'U', 'is_user': True, 'mes': '你好'}),
+                         json.dumps({'send_date': 'd9', 'name': 'C', 'is_user': False, 'mes': '第二版',
+                                     'swipes': ['第一版回复', '第二版']}, ensure_ascii=False)])
+        self.assertEqual(ps.missing_floors(new.encode(), old.encode()), 0)
+        edited = chat(('d1', 'U', '你好'), ('d7', 'C', '别处改写的回复'))
+        self.assertEqual(ps.missing_floors(new.encode(), edited.encode()), 1)
+
+    def test_local_name_and_ext_only(self):
+        e = self.e
+        write(f'{e.st}/chats/A/x.jsonl', 'x', 1_700_000_000)
+        rc, out = e.sync('--local-name', 'Mac TT', '--dry-run')
+        self.assertIn('Mac TT 1 个文件', out)
+        buf = io.StringIO()
+        with redirect_stdout(buf):
+            rc = ps.main(['--ext-only', '--adb', e.adb, '--serial', 'FAKE', '--ext-dir', os.path.join(e.root, 'none')])
+        self.assertEqual(rc, 0, buf.getvalue())
+        self.assertIn('扩展：没有要推的', buf.getvalue())
+
+
 class LocalTTTests(unittest.TestCase):
     def test_local_tt_push_only(self):
         root = tempfile.mkdtemp()

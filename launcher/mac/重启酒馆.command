@@ -22,5 +22,6 @@ st_ok=0
 start_st && st_ok=1
 health_check
 summary
-(( st_ok )) && open "http://127.0.0.1:$ST_PORT"
+if (( st_ok )); then open "http://127.0.0.1:$ST_PORT"
+elif ! st_managed && ! mac_tt_running; then mac_tt_open; fi
 pause_end

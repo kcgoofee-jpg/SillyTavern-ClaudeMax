@@ -6,13 +6,12 @@ HERE=${0:A:h}
 
 # 分组|脚本名|一句话说明（编号按这里的顺序）
 ITEMS=(
-    "日常|启动酒馆|启动代理和酒馆，打开浏览器"
+    "日常|启动酒馆|$(st_managed && print "启动代理和酒馆，打开浏览器" || print "启动代理，打开 TauriTavern（酒馆不自动启动）")"
     "日常|关闭酒馆|关闭酒馆和代理"
     "日常|重启酒馆|更新代码、改设置、一直出错时用"
     "日常|检查状态|体检：运行、登录、日志错误（不启动也不关闭）"
     "手机|手机模式|电脑模式 ↔ 手机模式（防睡眠、掉线重启、通知）"
-    "手机|手机同步|电脑 ↔ 手机双向同步聊天、角色、世界书、预设"
-    "手机|本机TT导入|电脑酒馆 → 这台 Mac 的 TauriTavern（内容、扩展、设置）"
+    "手机|手机同步|$(hub_label) ↔ 手机双向同步聊天、角色、世界书、预设、标签"
     "手机|合盖不睡|装 / 卸：手机模式下合上盖子也不睡（一次性输密码）"
     "手机|安卓保活模块|手机 TT 后台不被杀、不被冻结（KernelSU 模块，看状态 / 更新）"
     "生图|启动生图|本地 ComfyUI（用 NovelAI 时不需要）"
@@ -21,6 +20,7 @@ ITEMS=(
     "维护|修复依赖|启动报「缺少依赖」时重装程序库"
     "维护|打开日志|打开日志文件夹"
     "维护|开机自动启动|开 / 关：登录 Mac 时自动在后台启动"
+    "维护|本机TT导入|测试用：电脑酒馆 → 这台 Mac 的 TauriTavern（内容、扩展、设置）"
 )
 
 # 去掉首尾空白（[[:space:]]# 这种写法要 extendedglob，只在这个函数里打开）
@@ -46,10 +46,11 @@ item_no() {   # 脚本名 → 编号
 
 status_lines() {
     local line="${C_BOLD}酒馆工具${C_RESET}   代理 $(running $PROXY_PORT)"
-    has_st && line+="  ·  酒馆 $(running $ST_PORT)"
+    if st_managed || { has_st && [[ -n "$(our_pids $ST_PORT)" ]]; }; then line+="  ·  酒馆 $(running $ST_PORT)"; fi
+    [[ "$(sync_hub)" == tt ]] && { mac_tt_running && line+="  ·  Mac TT ${C_GREEN}开着${C_RESET}" || line+="  ·  Mac TT ${C_DIM}没开${C_RESET}"; }
     [[ -d "$COMFY_DIR" && -n "$(our_pids $COMFY_PORT)" ]] && line+="  ·  生图 ${C_GREEN}运行中${C_RESET}"
     print -r -- "$line"
-    local mode serial adb ip sync_file="$PROXY_DIR/launcher/phone-sync-state.local.json"
+    local mode serial adb ip sync_file="$PROXY_DIR/launcher/phone-sync-state$([[ "$(sync_hub)" == tt ]] && print -- -tt).local.json"
     if [[ -s "$LAN_KEY_FILE" ]]; then
         ip=$(lan_ip)
         mode="${C_GREEN}手机模式${C_RESET}"

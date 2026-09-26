@@ -23,9 +23,14 @@ start_st && st_ok=1
 health_check
 summary
 
-if ! has_st; then
+if ! st_managed; then
     print
-    print -r -- "  代理已就绪。打开 TauriTavern（或你的酒馆），在 Claude Max 面板里点「一键连接」。"
+    if [[ -d /Applications/TauriTavern.app ]]; then
+        print -r -- "  代理已就绪，正在打开 TauriTavern。"
+        mac_tt_open
+    else
+        print -r -- "  代理已就绪。打开 TauriTavern（或你的酒馆），在 Claude Max 面板里点「一键连接」。"
+    fi
 elif (( st_ok )); then
     print
     print -r -- "  正在打开浏览器：${C_BOLD}http://127.0.0.1:$ST_PORT${C_RESET}"
