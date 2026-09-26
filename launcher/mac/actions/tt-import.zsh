@@ -6,7 +6,7 @@
 #         CCST 面板的扩展设置，以及对话补全设置（当前预设、模型、各项开关）
 #         （以 launcher/phone_sync.py 的 EXT_SETTING_KEYS / copy_settings 为准）
 # 单向：TT 独有的文件留着，TT 上更新过的文件不覆盖；被覆盖的旧文件和旧设置先备份。
-source "${0:A:h}/lib.zsh"
+source "${0:A:h}/../lib.zsh"
 banner "本机 TT 导入"
 TT_USER="$HOME/Library/Application Support/com.tauritavern.client/data/default-user"
 

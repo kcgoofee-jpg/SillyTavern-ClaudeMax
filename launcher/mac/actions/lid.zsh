@@ -3,7 +3,7 @@
 #   macOS 合盖就睡，caffeinate 挡不住；唯一的开关是 pmset disablesleep，需要管理员权限。
 #   这里装一条 sudoers 规则，只允许免密执行「pmset -a disablesleep 0/1」这两条命令，
 #   之后由手机模式的守护自动开关，不用每次输密码。卸载就是删掉这条规则。
-source "${0:A:h}/lib.zsh"
+source "${0:A:h}/../lib.zsh"
 banner "合盖不睡"
 
 show_state() {

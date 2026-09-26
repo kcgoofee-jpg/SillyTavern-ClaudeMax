@@ -1,6 +1,6 @@
 #!/bin/zsh
 # 把「提示词拆分」导出的最新柏宝绘配方（下载文件夹里的 柏宝绘配方-*.json）写进柏宝绘
-source "${0:A:h}/lib.zsh"
+source "${0:A:h}/../lib.zsh"
 banner "导入柏宝绘配方"
 explain "新建一个画师串配方（画师串 + 质量词 + 负面提示词）并选中，参数写到 NovelAI 渠道；尺寸和种子不动。"
 explain "只显示 tag 数量，不显示提示词内容。"
@@ -28,7 +28,7 @@ if (( ${#targets} == 0 )); then
     fail "没找到要写入的设置文件（电脑酒馆和本机 TauriTavern 都没有）"
     summary; pause_end 1
 fi
-if python3 "${0:A:h}/../baibai_import.py" "$preset" "${targets[@]}"; then
+if python3 "${0:A:h}/../../baibai_import.py" "$preset" "${targets[@]}"; then
     ok "完成。打开酒馆 → 柏宝绘 → 渠道 → NovelAI，画师串已选中「${${preset:t:r}#柏宝绘配方-}」。"
     summary; pause_end 0
 else

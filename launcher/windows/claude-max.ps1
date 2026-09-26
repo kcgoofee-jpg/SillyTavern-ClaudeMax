@@ -1,6 +1,6 @@
 ﻿# ──────────────────────────────────────────────
 # CCST 启动器 · Windows
-# 由同目录的 .bat 调用：claude-max.ps1 <start|stop|restart|status|login|repair|autostart|autostart-run|logs>
+# 由菜单（launcher/menu.mjs，入口 酒馆工具.bat）调用：claude-max.ps1 <start|stop|restart|status|login|repair|autostart|autostart-run|logs>
 #
 # 路径自动识别：
 #   代理目录 = 本仓库根目录

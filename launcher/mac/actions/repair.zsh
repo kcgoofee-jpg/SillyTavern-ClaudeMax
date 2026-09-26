@@ -1,6 +1,6 @@
 #!/bin/zsh
 # 修复依赖：重新安装酒馆和 Claude 代理的 npm 依赖（不会动聊天记录和设置）
-source "${0:A:h}/lib.zsh"
+source "${0:A:h}/../lib.zsh"
 banner "修复依赖"
 explain "重新安装${ST_DIR:+酒馆和 }Claude 代理需要的程序库（npm 依赖），用于："
 explain "  · 日志里提示 Cannot find module / 缺少依赖    · 更新代码之后启动失败"

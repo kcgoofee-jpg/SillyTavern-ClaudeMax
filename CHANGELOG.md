@@ -11,6 +11,8 @@
 ### 变更
 - **改名 CCST**（Claude Code × SillyTavern）：扩展列表、面板标题、启动器、文档都改了；设置和已安装的文件夹名不变，老设置照常生效。Windows 开机启动的快捷方式改叫「CCST 启动器」，旧的也认。
 - 面板和代理版本不一致时，状态卡说明哪边旧、怎么更新。
+- **酒馆工具重做**：一个菜单三个系统共用（`launcher/menu.mjs`，不依赖 npm 包）。首页一句总结（一切正常 / 几个问题，按字母去修），回车做推荐操作（没开就启动、开着就打开），重启 / 关闭 / 手机同步 / 检查一键，其余收进「手机 / 生图 / 维护」子菜单；按键直接执行，↑↓ 也行。生图只在本机装了 ComfyUI 时出现。代理还在跑旧版本时首页会提示重启。
+- Mac 的各项脚本移到 `launcher/mac/actions/`（英文文件名，不再单独双击）；Windows 的 8 个 .bat 合成一个 `酒馆工具.bat`。菜单项改名：启动 / 重启 / 关闭 / 检查。
 - 代码搬进 `src/`：`src/panel/`（面板）、`src/proxy/`（代理）、`src/shared/`（共用）；根目录只留入口（`manifest.json`、`package.json`、`server.js`）和文档。
 - 登录工具 `scripts/claude-cli.js` → `bin/claude-cli.js`（启动脚本已跟着改；`npm run login` 不变）。
 - 版本号只写在 `package.json`，`scripts/version.mjs` 同步到 `manifest.json`；代理和测试从 `package.json` 读。

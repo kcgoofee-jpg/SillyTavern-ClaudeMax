@@ -5,7 +5,7 @@
 # 手机模式开着时顺便填上 Mac 的访问密码（lan-key.local）。
 # 手机用 USB 线连着（开了 USB 调试），或者之前在这里开过无线调试
 # 全自动：不问问题。两边已经一样就什么都不关；要同步时手机弹通知倒数 10 秒，同步完把原来开着的 TT 重新打开。
-source "${0:A:h}/lib.zsh"
+source "${0:A:h}/../lib.zsh"
 banner "手机同步（$(hub_label) ↔ 手机）"
 TT_PKG=com.tauritavern.client   # 无线调试时手机的地址在 $PHONE_FILE（lib.zsh）
 HUB=$(sync_hub)

@@ -5,7 +5,7 @@
 # 电脑上的备份放在 ${PROXY_DIR:h}/phone-backups/tt（config.local 里 TT_PHONE_BACKUP_DIR 可改），按 14 天 / 8 周 / 24 个月保留。
 # 模块在单独的仓库里开发（默认和本仓库同级的 tt-root-module，可在 launcher/config.local 里写
 # TT_MODULE_DIR="目录" 改），说明和安全自查见那里的 README.md；这里只负责打包、推送和看状态。
-source "${0:A:h}/lib.zsh"
+source "${0:A:h}/../lib.zsh"
 banner "安卓保活模块"
 MODULE_REPO=${TT_MODULE_DIR:-${PROXY_DIR:h}/tt-root-module}
 MOD_ID=claudemax_tt_keepalive

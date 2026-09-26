@@ -1,6 +1,6 @@
 #!/bin/zsh
 # 开机自动启动：开 / 关切换
-source "${0:A:h}/lib.zsh"
+source "${0:A:h}/../lib.zsh"
 banner "开机自动启动（开关）"
 explain "开启后，每次登录 Mac 都会在后台自动启动 Claude 代理和酒馆，"
 explain "适合经常用 TauriTavern、不想每次先选「启动酒馆」的情况。"

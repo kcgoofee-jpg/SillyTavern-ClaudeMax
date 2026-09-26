@@ -1,6 +1,6 @@
 #!/bin/zsh
 # 启动酒馆：自检 → 启动 Claude 代理 → 启动酒馆 → 检查 → 打开浏览器
-source "${0:A:h}/lib.zsh"
+source "${0:A:h}/../lib.zsh"
 banner "启动酒馆"
 explain "这个脚本会依次："
 explain "  ① 自检运行环境  ② 同时启动 Claude 代理和酒馆  ③ 检查是否正常  ④ 打开浏览器"

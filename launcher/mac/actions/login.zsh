@@ -1,6 +1,6 @@
 #!/bin/zsh
 # 登录 / 重新登录 Claude 订阅账号
-source "${0:A:h}/lib.zsh"
+source "${0:A:h}/../lib.zsh"
 banner "登录 Claude 订阅"
 explain "会打开浏览器，用你的 Claude（Pro / Max）账号授权。"
 explain "登录信息保存在 macOS 钥匙串里，代理会自动读取，一般只需要登录一次。"
