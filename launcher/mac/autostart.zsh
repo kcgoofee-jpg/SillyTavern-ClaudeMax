@@ -4,6 +4,7 @@ source "${0:A:h}/lib.zsh"
 banner "开机自动启动"
 sleep 5   # 等网络和钥匙串就绪
 lid_cleanup_stale   # 上次守护没来得及收尾（强杀、死机）时恢复合盖睡眠
+spawn_st
 start_proxy
 start_st
 # 手机模式开着：把守护也拉起来（防睡眠、掉线自动重启）

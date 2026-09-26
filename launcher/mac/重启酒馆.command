@@ -16,6 +16,7 @@ if ! confirm_proxy_idle "重启"; then
 fi
 stop_all
 # 不把自检的错误清零：选了「仍然重启」的问题照样算进最后的结果里
+spawn_st
 start_proxy
 st_ok=0
 start_st && st_ok=1

@@ -11,6 +11,7 @@
 # ──────────────────────────────────────────────
 
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin:$PATH"
+zmodload zsh/datetime   # EPOCHSECONDS：等端口时按真实经过的时间算
 
 LAUNCHER_DIR=${${(%):-%x}:A:h}
 PROXY_DIR=${LAUNCHER_DIR:h:h}
@@ -204,22 +205,29 @@ port_pids() {
     lsof -nP -iTCP:$1 -sTCP:LISTEN -t 2>/dev/null
 }
 
-# 监听该端口、且工作目录是代理或酒馆目录的进程（只动我们自己的程序）
+# 监听该端口、且工作目录是代理或酒馆目录的进程（只动我们自己的程序）。
+# 所有监听进程的工作目录用一次 lsof 读完（菜单每次刷新要查三个端口，逐个查会慢）
 our_pids() {
-    local pid cwd
-    for pid in $(port_pids $1); do
-        cwd=$(lsof -a -p $pid -d cwd -Fn 2>/dev/null | sed -n 's/^n//p')
-        [[ "$cwd" == "$PROXY_DIR"* || ( -n "$ST_DIR" && "$cwd" == "$ST_DIR"* ) || "$cwd" == "$COMFY_DIR"* ]] && print $pid
-    done
+    local -a pids=($(port_pids $1))
+    local pid line   # 管道最后一段在当前 shell 里跑：变量要 local，不能漏给调用方
+    (( ${#pids} )) || return 0
+    lsof -a -p ${(j:,:)pids} -d cwd -Fpn 2>/dev/null |
+        while IFS= read -r line; do
+            case $line in
+                p*) pid=${line#p} ;;
+                n*) line=${line#n}
+                    [[ "$line" == "$PROXY_DIR"* || ( -n "$ST_DIR" && "$line" == "$ST_DIR"* ) || "$line" == "$COMFY_DIR"* ]] && print $pid ;;
+            esac
+        done
 }
 
 has_st() { [[ -n "$ST_DIR" ]]; }
 
 foreign_owner() {
     # 端口被别的程序占着时，返回该程序名
-    local pid
+    local pid ours=" ${(f)$(our_pids $1)} "
     for pid in $(port_pids $1); do
-        [[ -n "$(our_pids $1 | grep -x $pid)" ]] && continue
+        [[ "$ours" == *" $pid "* ]] && continue
         local comm=$(ps -o comm= -p $pid 2>/dev/null)
         print -r -- "${comm:t}"   # 程序名可能带空格（如 Google Chrome Helper），不能交给 xargs
         return
@@ -228,15 +236,26 @@ foreign_owner() {
 
 port_busy() { [[ -n "$(port_pids $1)" ]]; }
 
-# 等到端口上出现「我们自己的」进程（别的程序占着端口不算启动成功）
+# 等到端口上出现「我们自己的」进程（别的程序占着端口不算启动成功）。
+# 每 0.3 秒看一次；给了 PID 时那个进程退出了就不再干等（启动失败，马上去看日志）
 wait_port() {
-    local port=$1 secs=$2 i
-    for ((i = 0; i < secs; i++)); do
+    local port=$1 secs=$2 pid=$3 start=$EPOCHSECONDS next=10
+    while (( EPOCHSECONDS - start < secs )); do
         [[ -n "$(our_pids $port)" ]] && return 0
-        sleep 1
-        (( i > 0 && i % 10 == 0 )) && explain "已等待 ${i} 秒…"
+        [[ -n "$pid" ]] && ! kill -0 $pid 2>/dev/null && return 1
+        sleep 0.3
+        (( EPOCHSECONDS - start >= next )) && { explain "已等待 ${next} 秒…"; (( next += 10 )); }
     done
-    return 1
+    [[ -n "$(our_pids $port)" ]]
+}
+
+# 启动失败时说清楚是「马上退出了」还是「一直没好」
+start_failed() {   # start_failed 名字 秒数 PID
+    if [[ -n "$3" ]] && ! kill -0 $3 2>/dev/null; then
+        fail "$1启动后马上退出了"
+    else
+        fail "$1 $2 秒内没有启动成功"
+    fi
 }
 
 # 在自己的会话 / 进程组里后台运行长期程序（代理、酒馆、生图、守护）。
@@ -249,6 +268,16 @@ detach() {
     else
         nohup "$@"
     fi
+}
+
+# 在目录里后台启动一个长期程序，打印它的 PID（perl → nohup → 程序一路 exec，PID 不变）
+# 用法：pid=$(spawn 目录 日志 命令 参数…)；要带环境变量就写在前面：pid=$(变量=值 spawn …)
+# 必须放在 $( ) 里用：里面的 cd 只影响这个子 shell
+spawn() {
+    local dir=$1 log=$2; shift 2
+    cd "$dir" 2>/dev/null || return 1
+    detach "$@" >>"$log" 2>&1 </dev/null &!
+    print $!
 }
 
 # ── 自检 ─────────────────────────────────────
@@ -337,11 +366,14 @@ check_deps() {
 }
 
 check_login() {
-    local json logged plan
+    local json logged=unknown plan
     json=$(cd "$PROXY_DIR" && node scripts/claude-cli.js auth status 2>/dev/null)
-    logged=$(print -r -- "$json" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);console.log(j.loggedIn?'yes':'no', j.subscriptionType||'')}catch{console.log('unknown')}})" 2>/dev/null)
-    plan=${logged#* }
-    case ${logged%% *} in
+    # 不再为解析这点 JSON 单独起一个 node
+    if [[ "$json" =~ '"loggedIn"[[:space:]]*:[[:space:]]*(true|false)' ]]; then
+        [[ $match[1] == true ]] && logged=yes || logged=no
+    fi
+    [[ "$json" =~ '"subscriptionType"[[:space:]]*:[[:space:]]*"([^"]*)"' ]] && plan=$match[1]
+    case $logged in
         yes) ok "Claude 订阅已登录（$(plan_name "$plan") 套餐）" ;;
         no)
             warn "Claude 订阅还没有登录 —— 酒馆能打开，但发消息会失败"
@@ -434,11 +466,15 @@ find_adb() {
     return 1
 }
 
+# 从 adb devices 的输出里挑已授权的手机：USB 优先（同一台手机开了无线调试会出现两次）
+pick_serial() {
+    awk 'NR>1 && $2=="device" { if ($1 ~ /:/) w = w ? w : $1; else { print $1; found = 1; exit } } END { if (!found && w) print w }'
+}
+
 # 已连接（USB 或无线调试）且已授权的手机序列号，没有就空
 phone_serial() {
     local adb; adb=$(find_adb) || return 1
-    # USB 优先（同一台手机开了无线调试会出现两次）
-    "$adb" devices 2>/dev/null | awk 'NR>1 && $2=="device" { if ($1 ~ /:/) w = w ? w : $1; else { print $1; found = 1; exit } } END { if (!found && w) print w }'
+    "$adb" devices 2>/dev/null | pick_serial
 }
 
 # 连着但没授权 / 离线的手机（给出具体提示用）
@@ -678,14 +714,14 @@ start_proxy() {
     fi
     rotate_log "$PROXY_LOG"
     mark_log "$PROXY_LOG"
+    local pid
     if [[ -s "$LAN_KEY_FILE" ]]; then
         explain "手机连接已开启：同一 Wi-Fi 下的设备带访问密码可以连这个代理。"
-        (cd "$PROXY_DIR" && export CLAUDE_SUBSCRIPTION_HOST=0.0.0.0 CLAUDE_SUBSCRIPTION_LAN_KEY="$(<"$LAN_KEY_FILE")" &&
-            detach node server.js >>"$PROXY_LOG" 2>&1 &!)
+        pid=$(CLAUDE_SUBSCRIPTION_HOST=0.0.0.0 CLAUDE_SUBSCRIPTION_LAN_KEY="$(<"$LAN_KEY_FILE")" spawn "$PROXY_DIR" "$PROXY_LOG" node server.js)
     else
-        (cd "$PROXY_DIR" && detach node server.js >>"$PROXY_LOG" 2>&1 &!)
+        pid=$(spawn "$PROXY_DIR" "$PROXY_LOG" node server.js)
     fi
-    if wait_port $PROXY_PORT 20; then
+    if wait_port $PROXY_PORT 20 $pid; then
         rm -f "$RESTART_MARK"
         ok "代理已启动：http://127.0.0.1:$PROXY_PORT/v1"
         if [[ -s "$LAN_KEY_FILE" ]]; then
@@ -697,57 +733,88 @@ start_proxy() {
         fi
         return 0
     fi
-    fail "代理 20 秒内没有启动成功"
+    start_failed "代理" 20 "$pid"
     diagnose_log "$PROXY_LOG" "代理"
     return 1
 }
 
-start_st() {
-    has_st || return 1
-    step "启动酒馆（端口 $ST_PORT）"
-    explain "首次启动或更新后需要编译前端，可能要 10–60 秒，请耐心等待。"
-    if [[ -n "$(our_pids $ST_PORT)" ]]; then
-        ok "酒馆已经在运行，跳过"
-        return 0
-    fi
+# 酒馆编译前端要十几秒到一分钟：先把它在后台拉起来，再去启动代理，两边同时进行；
+# 之后 start_st 只负责等它就绪。酒馆已在运行、端口被别的程序占着时这里什么都不做，交给 start_st 报告
+ST_SPAWNED=0
+ST_PID=""
+spawn_st() {
+    has_st && (( ! ST_SPAWNED )) || return 0
+    port_busy $ST_PORT && return 0
     rotate_log "$ST_LOG"
     mark_log "$ST_LOG"
-    (cd "$ST_DIR" && detach node server.js >>"$ST_LOG" 2>&1 &!)
-    if wait_port $ST_PORT 120; then
+    ST_PID=$(spawn "$ST_DIR" "$ST_LOG" node server.js)
+    ST_SPAWNED=1
+}
+
+start_st() {
+    has_st || return 1
+    local owner
+    step "启动酒馆（端口 $ST_PORT）"
+    explain "首次启动或更新后需要编译前端，可能要 10–60 秒，请耐心等待。"
+    if (( ! ST_SPAWNED )); then
+        if [[ -n "$(our_pids $ST_PORT)" ]]; then
+            ok "酒馆已经在运行，跳过"
+            return 0
+        fi
+        if owner=$(foreign_owner $ST_PORT) && [[ -n "$owner" ]]; then
+            fail "端口 $ST_PORT 被其他程序占着：$owner，酒馆启动不了"
+            fix "关闭「$owner」后再试，或重启电脑。"
+            return 1
+        fi
+        spawn_st
+    fi
+    if wait_port $ST_PORT 120 $ST_PID; then
         ok "酒馆已启动：http://127.0.0.1:$ST_PORT"
         return 0
     fi
-    fail "酒馆 120 秒内没有启动成功"
+    start_failed "酒馆" 120 "$ST_PID"
     diagnose_log "$ST_LOG" "酒馆"
     return 1
 }
 
+# 关一个或几个程序：先一起发 TERM，再一起等（每 0.2 秒看一次，一共最多 10 秒），没退出的强制结束
+# 用法：stop_one 端口 名字 [端口 名字 …]
 stop_one() {
-    local port=$1 name=$2 pids i
-    pids=($(our_pids $port))
-    if (( ${#pids} == 0 )); then
-        ok "$name 本来就没有运行"
-        return
-    fi
-    # 关代理前打个标记：守护 60 秒内不去「自动重启」它（遥控重启、手机模式切换会马上自己启动）
-    [[ "$port" == "$PROXY_PORT" ]] && : >"$RESTART_MARK"
-    kill $pids 2>/dev/null
-    for ((i = 0; i < 10; i++)); do
-        sleep 1
-        pids=($(our_pids $port))
-        if (( ${#pids} == 0 )); then
-            ok "已关闭$name"
-            return
+    local -A left
+    local port pids start=$EPOCHREALTIME
+    while (( $# >= 2 )); do
+        pids=$(our_pids $1)
+        if [[ -z "$pids" ]]; then
+            ok "$2 本来就没有运行"
+        else
+            # 关代理前打个标记：守护 60 秒内不去「自动重启」它（遥控重启、手机模式切换会马上自己启动）
+            [[ "$1" == "$PROXY_PORT" ]] && : >"$RESTART_MARK"
+            kill ${=pids} 2>/dev/null
+            left[$1]=$2
+        fi
+        shift 2
+    done
+    while (( ${#left} && EPOCHREALTIME - start < 10 )); do
+        sleep 0.2
+        for port in ${(k)left}; do
+            [[ -z "$(our_pids $port)" ]] && { ok "已关闭${left[$port]}"; unset "left[$port]"; }
+        done
+    done
+    (( ${#left} )) || return 0
+    for port in ${(k)left}; do
+        pids=$(our_pids $port)
+        kill -9 ${=pids} 2>/dev/null
+    done
+    sleep 1
+    for port in ${(k)left}; do
+        pids=$(our_pids $port)
+        if [[ -z "$pids" ]]; then
+            warn "${left[$port]} 没有正常退出，已强制关闭"
+        else
+            fail "${left[$port]} 无法关闭（进程 ${pids//$'\n'/ }）"
+            fix "重启电脑即可。"
         fi
     done
-    kill -9 $pids 2>/dev/null
-    sleep 1
-    if [[ -z "$(our_pids $port)" ]]; then
-        warn "$name 没有正常退出，已强制关闭"
-    else
-        fail "$name 无法关闭（进程 $pids）"
-        fix "重启电脑即可。"
-    fi
 }
 
 # 代理正在写回复时，关掉 / 重启会把这条回复掐断：先问（没在写就直接返回 0）
@@ -763,8 +830,7 @@ stop_all() {
     step "关闭酒馆和 Claude 代理"
     explain "关闭后 TauriTavern 也会连不上代理，直到下次启动。"
     watchdog_running && { watchdog_stop; ok "手机模式守护已停止（下次启动时自动恢复）"; }
-    has_st && stop_one $ST_PORT "酒馆"
-    stop_one $PROXY_PORT "Claude 代理"
+    if has_st; then stop_one $ST_PORT "酒馆" $PROXY_PORT "Claude 代理"; else stop_one $PROXY_PORT "Claude 代理"; fi
 }
 
 # ── 启动后检查 ────────────────────────────────
@@ -785,14 +851,15 @@ health_check() {
         fail "代理没有响应"
         diagnose_log "$PROXY_LOG" "代理"
     else
-        parsed=$(print -r -- "$body" | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);const c=j.credential||{};console.log([j.ok?'ok':'bad',j.version,c.present?'yes':'no',c.subscriptionType||'',c.source||''].map(v=>String(v??'').replace(/[|\\n]/g,' ')).join('|'))}catch{console.log('bad')}})")
+        # 顺便读仓库里的版本号（第 6 个字段），省一次 node 启动
+        parsed=$(print -r -- "$body" | node -e "let v='';try{v=require(process.argv[1]+'/package.json').version}catch{}let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{try{const j=JSON.parse(s);const c=j.credential||{};console.log([j.ok?'ok':'bad',j.version,c.present?'yes':'no',c.subscriptionType||'',c.source||'',v].map(v=>String(v??'').replace(/[|\\n]/g,' ')).join('|'))}catch{console.log('bad')}})" "$PROXY_DIR")
         local -a f=("${(@s:|:)parsed}")   # 按 | 分，空字段（没有套餐类型等）也占位，后面的字段不会错位
         if [[ "${f[1]}" != ok ]]; then
             fail "代理有响应，但报告异常（SDK 未加载）"
             diagnose_log "$PROXY_LOG" "代理"
         elif [[ "${f[3]}" == yes ]]; then
             ok "代理正常（v${f[2]}，$(plan_name "${f[4]}") 订阅，凭据来自$(cred_source_name "${f[5]}")）"
-            local repo_v=$(node -p "require('$PROXY_DIR/package.json').version" 2>/dev/null)
+            local repo_v=${f[6]}
             if [[ -n "$repo_v" && "${f[2]}" != "$repo_v" ]]; then
                 warn "代理还在跑旧版本 v${f[2]}，程序已经更新到 v$repo_v"
                 fix "没在生成回复时双击「重启酒馆」（手机模式下代理会自动重启，手机不用动）。"
@@ -942,12 +1009,13 @@ start_comfy() {
     rotate_log "$COMFY_LOG"
     mark_log "$COMFY_LOG"
     # --use-pytorch-cross-attention：M5 上实测 SDXL 832×1216 24 步 131s → 78s。只监听本机；柏宝绘在浏览器直连失败时会经由酒馆后端转发，不需要打开跨域
-    (cd "$COMFY_DIR" && export PYTORCH_ENABLE_MPS_FALLBACK=1 && detach .venv/bin/python main.py --listen 127.0.0.1 --port $COMFY_PORT --use-pytorch-cross-attention >>"$COMFY_LOG" 2>&1 &!)
-    if wait_port $COMFY_PORT 90; then
+    local pid=$(PYTORCH_ENABLE_MPS_FALLBACK=1 spawn "$COMFY_DIR" "$COMFY_LOG" .venv/bin/python main.py --listen 127.0.0.1 --port $COMFY_PORT --use-pytorch-cross-attention)
+    if wait_port $COMFY_PORT 90 $pid; then
         ok "ComfyUI 已启动：http://127.0.0.1:$COMFY_PORT"
         return 0
     fi
-    fail "ComfyUI 90 秒内没有启动成功，最后几行日志："
+    start_failed "ComfyUI" 90 "$pid"
+    explain "最后几行日志："
     tail -n 8 "$COMFY_LOG" | sed "s/^/    ${C_DIM}│${C_RESET} /"
     return 1
 }

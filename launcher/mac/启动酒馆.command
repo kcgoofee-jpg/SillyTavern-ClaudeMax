@@ -3,7 +3,7 @@
 source "${0:A:h}/lib.zsh"
 banner "启动酒馆"
 explain "这个脚本会依次："
-explain "  ① 自检运行环境  ② 启动 Claude 代理  ③ 启动酒馆  ④ 检查是否正常  ⑤ 打开浏览器"
+explain "  ① 自检运行环境  ② 同时启动 Claude 代理和酒馆  ③ 检查是否正常  ④ 打开浏览器"
 explain "启动后两个程序都在后台运行，关掉这个窗口不影响使用。"
 
 self_check
@@ -16,6 +16,7 @@ if (( FAIL_COUNT > 0 )); then
     # 不清零：选了「仍然启动」的问题照样算进最后的结果里
 fi
 
+spawn_st      # 酒馆先在后台开始启动（编译前端最慢），和代理同时进行
 start_proxy
 st_ok=0
 start_st && st_ok=1

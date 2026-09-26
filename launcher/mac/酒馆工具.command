@@ -59,10 +59,11 @@ status_lines() {
         mode="电脑模式"
     fi
     if adb=$(find_adb); then
-        serial=$(phone_serial)
+        local devs=$("$adb" devices 2>/dev/null)   # 只问一次 adb
+        serial=$(print -r -- "$devs" | pick_serial)
         if [[ -n "$serial" ]]; then
             [[ "$serial" == *:* ]] && mode+="  ·  手机 ${C_GREEN}无线已连${C_RESET}" || mode+="  ·  手机 ${C_GREEN}USB 已连${C_RESET}"
-        elif "$adb" devices 2>/dev/null | grep -q "unauthorized"; then
+        elif [[ "$devs" == *unauthorized* ]]; then
             mode+="  ·  手机 ${C_YELLOW}待授权：手机上点「允许」${C_RESET}"
         fi
     fi
