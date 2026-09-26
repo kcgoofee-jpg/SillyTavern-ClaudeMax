@@ -94,13 +94,8 @@ if [[ $HUB == tt ]] && mac_tt_running; then
     explain "Mac 上的 TauriTavern 开着：开始同步时会先让它正常退出（它开着会把旧内容存回去），同步完再打开。"
 fi
 if ask_yes "开始同步吗？（会先关掉手机上的 TauriTavern$([[ $HUB == tt ]] && print "和 Mac 上的 TauriTavern")，同步完可以再打开）"; then
-    # 同步要先关掉手机上的 TT：它正在用、或者有一条回复还没存盘（在后台）时，关掉会丢内容
-    # 判断不了（检查脚本不在、出错、读不到状态）也按「忙」处理：宁可多问一句
-    if ! busy=$(phone_tt_busy_reason "$serial" "$adb"); then
-        warn "手机现在不方便关 TT：$busy"
-        explain "先在手机上打开 TT，等最新一楼显示完整（有回复、有图），再回来同步。"
-        ask_yes "仍然要现在同步吗？（可能丢掉还没存盘的回复）" || { warn "没有同步，手机上的 TT 没动。"; summary; pause_end; }
-    fi
+    # 手机上弹通知让你离开键盘，倒数 10 秒（代理在写回复时先等它写完）
+    phone_handoff "$serial" "$adb" "同步" || { warn "代理一直在写回复，没有同步，手机上的 TT 没动。"; summary; pause_end; }
     if [[ $HUB == tt ]] && mac_tt_running; then
         # Mac TT 可能正在写回复（经过同一个代理）：先确认，再正常退出
         confirm_proxy_idle "退出 Mac 上的 TauriTavern" || { warn "没有同步，两边的 TT 都没动。"; summary; pause_end; }

@@ -649,32 +649,19 @@ adb_reconnect() {
     return 0
 }
 
-# 手机上的 TT 现在能不能关（force-stop）：能关返回 0；不能关返回 1 并打印原因。判断不了也算不能关。
-# 用 scripts/apply_settings.py --why-busy（0 = 空闲；1 = 忙，打印原因；2 = 判断不了）；
-# 没有这个脚本（不是开发目录）就自己看：代理在写的回复条数 + TT 的窗口是否可见。
-phone_tt_busy_reason() {
-    local serial=$1 adb=$2 script="${PROXY_DIR:h}/scripts/apply_settings.py" out rc n tasks vis
-    if [[ -f "$script" ]]; then
-        out=$(python3 "$script" --why-busy --serial "$serial" --adb "$adb" 2>&1); rc=$?
-        (( rc == 0 )) && [[ -z "$out" ]] && return 0
-        print -r -- "${out:-判断不了手机是否在用（检查脚本退出码 $rc）}"
-        return 1
-    fi
-    n=$(proxy_inflight)
-    if tasks=$("$adb" -s "$serial" shell "dumpsys activity activities" 2>/dev/null) && [[ -n "$tasks" ]]; then
-        vis=$(print -r -- "$tasks" | grep -E 'visible=true' | grep -c com.tauritavern.client)
-        # 屏幕关着时「可见」的窗口没人在看（和 apply_settings.py 一样）；读不到亮屏状态就当亮着
-        local wake=$("$adb" -s "$serial" shell "dumpsys power 2>/dev/null | grep -m1 mWakefulness" 2>/dev/null)
-        [[ "$wake" == *mWakefulness=* && "$wake" != *Awake* ]] && vis=0
-    fi
-    if [[ -n "$n" ]] && (( n > 0 )); then
-        print -r -- "Mac 上的代理正在写回复"; return 1
-    elif [[ -n "$vis" ]] && (( vis > 0 )); then
-        print -r -- "TT 在屏幕上开着（全屏、小窗或分屏）"; return 1
-    elif [[ -z "$n" && -z "$vis" ]]; then
-        print -r -- "读不到代理状态，也读不到手机上的窗口，保险起见不动手机"; return 1
-    fi
-    return 0
+# 要关手机上的 TT 之前：代理在写回复就等它写完（关了会丢这条回复），然后手机弹通知「离开键盘」，倒数 N 秒。
+# 不判断你在不在用手机，通知就是提醒。返回 0 可以关；1 代理一直在写（等了 10 分钟）。
+phone_handoff() {
+    local serial=$1 adb=$2 action=$3 secs=${4:-10} n i=0
+    while n=$(proxy_inflight) && [[ -n "$n" ]] && (( n > 0 )); do
+        (( i == 0 )) && { explain "代理正在写回复，等它写完…"; "$adb" -s "$serial" shell "cmd notification post -S bigtext -t '稍等' claudemax '回复写完后 Mac 要关闭 TauriTavern 一下。'" >/dev/null 2>&1; }
+        (( ++i > 300 )) && return 1
+        sleep 2
+    done
+    (( secs > 0 )) || return 0
+    "$adb" -s "$serial" shell "cmd notification post -S bigtext -t '请离开键盘：${secs} 秒后关闭 TauriTavern' claudemax 'Mac 要${action//\'/}。输入框里没发出去的字先复制；做完会重新打开。'" >/dev/null 2>&1
+    explain "已在手机上提醒，${secs} 秒后关闭 TT…"
+    sleep $secs
 }
 
 # ── 手机同步的「中心」 ─────────────────────────
@@ -734,8 +721,7 @@ hub_update_mac_tt_ext() {
 }
 
 # 手机遥控「同步」：不问问题直接双向同步（关掉手机上的 TT → 同步 → 再打开），结果发通知。
-# 同步前照样检查手机忙不忙；只有「TT 在屏幕上」这一条不算——按钮就是在 TT 里按的，
-# 这时再单独确认代理没在写回复（检查脚本看到 TT 在屏幕上就不往下查了）。
+# 代理在写回复时先等它写完。
 phone_sync_auto() {
     local adb serial args out busy rc n
     adb=$(find_adb) || { notify "手机同步没做成" "Mac 上找不到 adb"; return 1; }
@@ -746,20 +732,11 @@ phone_sync_auto() {
     [[ -n "$serial" ]] || { notify "手机同步没做成" "Mac 连不上手机的无线调试"; return 1; }
     local why tt_was=0
     why=$(hub_ready) || { notify "手机同步没做成" "$why"; return 1; }
-    if ! busy=$(phone_tt_busy_reason "$serial" "$adb"); then
-        if [[ "$busy" == *屏幕上* ]]; then
-            n=$(proxy_inflight)
-            if [[ -z "$n" ]] || (( n > 0 )); then
-                notify "手机同步没做成" "Mac 上的代理正在写回复（或读不到它的状态），写完再同步。"
-                log_event "[同步] 手机遥控触发：没做（代理在写回复或读不到状态）"
-                return 1
-            fi
-            log_event "[同步] 手机遥控触发：TT 在屏幕上（就是在 TT 里按的），代理空闲，照常同步"
-        else
-            notify "手机同步没做成" "手机现在不方便关 TT：$busy"
-            log_event "[同步] 手机遥控触发：没做（$busy）"
-            return 1
-        fi
+    # 按钮就是在 TT 里按的：不倒数，只等代理把正在写的回复写完
+    if ! phone_handoff "$serial" "$adb" "同步" 0 >/dev/null; then
+        notify "手机同步没做成" "代理一直在写回复，稍后再同步。"
+        log_event "[同步] 手机遥控触发：没做（代理一直在写回复）"
+        return 1
     fi
     # 中心是 Mac TT：它开着会把旧内容存回去，先正常退出（上面已确认代理没在写回复），同步完再打开
     if [[ "$(sync_hub)" == tt ]] && mac_tt_running; then
