@@ -1666,6 +1666,9 @@
             ctx.chatCompletionSettings.custom_model = id;
             ctx.saveSettingsDebounced?.();
         }
+        // The Custom source's model field doesn't raise CHATCOMPLETION_MODEL_CHANGED: apply the
+        // preset's per-model profile here too.
+        setTimeout(applyModelProfile, 150);
     }
 
     function modelRow() {
