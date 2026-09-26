@@ -4,6 +4,13 @@
 
 ## 未发布
 
+### 新增（3.2 所有来源一个面板）
+- 面板认得酒馆里所有能用 Claude 的来源：Claude 官方源（含反向代理）、OpenRouter、Electron Hub、NanoGPT、AI/ML API、CometAPI、自定义地址；状态栏写明「走哪 · 按什么计费」（订阅 / API 密钥 / OpenRouter 额度 / 中转）。酒馆没有 Bedrock 来源、Vertex 来源只接 Gemini，这两家经中转接入。
+- 「推理」页切模型和预设的按模型配置（`byModel`）在这些来源上都生效，自动换成各来源的模型名（如 OpenRouter 的 `anthropic/claude-opus-4.6`）；来源没有这个模型时只提示，不换别的。
+- 「状态」页新增「缓存」：直连时按来源给出酒馆自带缓存的建议（`config.yaml` 的 `cachingAtDepth`、`extendedTTL`），可一键复制；这些设置在服务器端，面板不代改。直连时看不到上一轮命中（酒馆不把用量传给网页），面板直说。
+- Claude 官方源的模型下拉框缺新模型时自动补上（代理开着时按代理的模型列表）。
+
+
 ### 修复（安卓兼容测试反馈）
 - 没连代理时「状态」页的额度和用量不再只显示「HTTP 404」，改为说明只在连着 CCST 代理时显示。
 - Termux 安装脚本：Debian 装不上时说明要能访问 Docker Hub（国内一般要开代理 / VPN）。
