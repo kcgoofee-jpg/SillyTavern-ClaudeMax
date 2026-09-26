@@ -44,6 +44,13 @@
 | 安卓手机上的 TauriTavern | 先在 Mac 上装好，再看[手机连 Mac](#phone) |
 | Windows | [Windows（实验）](#experimental) |
 | 只有安卓手机、没有电脑 | [Termux（实验）](#experimental) |
+| 已经在用 Claude API 或 OpenRouter，不想跑代理 | 只装扩展：「扩展 → 安装扩展」填本仓库地址，见[不用代理也能用](#no-proxy) |
+
+<a id="no-proxy"></a>
+### 不用代理也能用
+
+酒馆直连 Claude（「API 连接」选官方 Claude 源，或 OpenRouter 上的 Claude 模型）时，只装扩展就能用这些：「推理」页一键切 Opus 5.5 / 4.6（官方 Claude 源；酒馆列表里没有的新模型会自动补上）、预设推荐模型（切预设自动换）、发送前检查（Opus 5 / 5.5 会拦的「把思考写进正文」条目）、体检、角色卡检查、灵动岛。
+缓存排布（世界书变化部分挪到后面）、手机防丢回复、额度和用量统计、手机同步和遥控要连本扩展的代理。直连 API 的缓存用酒馆自己的设置：`config.yaml` 里 `claude.cachingAtDepth`、`claude.extendedTTL`（1 小时）。
 
 ### Mac 一键安装
 

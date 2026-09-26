@@ -54,6 +54,8 @@
 .claude-max .cm-dot[data-state="online"] { background: var(--cm-ok); box-shadow: 0 0 6px color-mix(in srgb, var(--cm-ok) 60%, transparent); }
 .claude-max .cm-dot[data-state="warning"] { background: var(--cm-warn); }
 .claude-max .cm-dot[data-state="offline"] { background: var(--cm-bad); }
+/* 直连 Claude、没开代理：不是故障，空心圆 */
+.claude-max .cm-dot[data-state="direct"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--cm-ok); }
 .claude-max .cm-dot[data-state="pending"] { animation: cm-pulse 1s ease-in-out infinite; }
 
 @keyframes cm-pulse {

@@ -527,7 +527,13 @@
         try {
             const settings = getSettings();
             if (!settings.enabled) return;
-            if (!data || data.chat_completion_source !== 'custom') return;
+            if (!data) return;
+            // Direct to Claude (no proxy): only the local pre-send check applies.
+            if (data.chat_completion_source === 'claude' || (data.chat_completion_source === 'openrouter' && /claude/i.test(String(data.model ?? '')))) {
+                preflightCheck(data);
+                return;
+            }
+            if (data.chat_completion_source !== 'custom') return;
             if (!isOurEndpoint(data.custom_url, settings)) return;
 
             const existing = typeof data.custom_include_body === 'string' ? data.custom_include_body : '';
@@ -977,7 +983,11 @@
     /** Card title once the proxy is up: whether SillyTavern is pointed at it, and with which model. */
     function statusTitleOnline() {
         const { connected, model } = connectionInfo();
-        if (!connected) return '代理在线，酒馆还没连上';
+        if (!connected) {
+            return connectionInfo().direct
+                ? '代理在线，酒馆直连 Claude（没走代理）：点「一键连接」启用缓存排布、手机防丢回复和额度显示'
+                : '代理在线，酒馆还没连上';
+        }
         return model ? `已连接 · ${shortModel(model)}` : '已连接 · 请在模型下拉框里选 Claude 模型';
     }
 
@@ -1258,7 +1268,8 @@
     // Started on GENERATION_AFTER_COMMANDS: GENERATION_STARTED also fires when
     // a slash command in the input box takes over and nothing is generated.
     function islandGenStart(type, _opts, dryRun) {
-        if (!island || dryRun || type === 'quiet' || type === 'impersonate' || !connectionInfo().connected) return;
+        const link = connectionInfo();
+        if (!island || dryRun || type === 'quiet' || type === 'impersonate' || !(link.connected || link.direct)) return;
         genActive = true;
         clearTimeout(doneTimer);
         island.set({ kind: 'thinking', startedAt: Date.now(), chars: 0, cache: null, seconds: null });
@@ -1424,20 +1435,31 @@
         return s;
     }
 
-    /** Is SillyTavern currently pointed at this proxy? */
+    /** Where SillyTavern sends chat requests. `connected`: this proxy (everything works).
+     *  `direct`: Claude without this proxy — SillyTavern's own Claude source, or a Claude model on
+     *  OpenRouter. The panel's local features (model switch on Claude source, pre-send check, 体检,
+     *  card check, island) work there too; cache layout, reply recovery, quota and stats need the proxy. */
     function connectionInfo() {
         const ctx = SillyTavern.getContext();
         const oai = ctx.chatCompletionSettings ?? {};
-        const connected = ctx.mainApi === 'openai' && oai.chat_completion_source === 'custom' && isOurEndpoint(oai.custom_url, getSettings());
-        return { connected, model: connected ? oai.custom_model : null };
+        const src = ctx.mainApi === 'openai' ? oai.chat_completion_source : null;
+        if (src === 'custom' && isOurEndpoint(oai.custom_url, getSettings())) {
+            return { kind: 'ours', connected: true, direct: false, model: oai.custom_model };
+        }
+        if (src === 'claude') return { kind: 'claude', connected: false, direct: true, model: oai.claude_model ?? null };
+        if (src === 'openrouter' && /claude/i.test(oai.openrouter_model ?? '')) {
+            return { kind: 'openrouter', connected: false, direct: true, model: oai.openrouter_model };
+        }
+        return { kind: 'other', connected: false, direct: false, model: null };
     }
 
     function renderGlance() {
         const settings = getSettings();
-        const { connected, model } = connectionInfo();
+        const { connected, direct, model } = connectionInfo();
+        const linked = connected || direct;
         const effort = effectiveEffort(settings);
         const parts = [];
-        if (connected && model) parts.push(shortModel(model));
+        if (linked && model) parts.push(shortModel(model));
         if (effort !== 'auto') parts.push(nextEffort ? `下一轮${EFFORT_LABEL[effort]}` : EFFORT_LABEL[effort]);
         if (glance.quota != null) parts.push(`5h ${glance.quota}%`);
         const head = document.getElementById('claude_max_head_sum');
@@ -1457,8 +1479,8 @@
         const n = glance.issues;
         chips.replaceChildren(
             // 「1M」goes into the label so the model name fits the narrow chip.
-            chip(connected && / 1M$/.test(shortModel(model)) ? '模型 · 1M' : '模型',
-                connected ? (model ? shortModel(model).replace(/ 1M$/, '') : '未选') : '未连接', 'reason', connected ? '' : 'bad'),
+            chip(linked && / 1M$/.test(shortModel(model)) ? '模型 · 1M' : '模型',
+                linked ? (model ? shortModel(model).replace(/ 1M$/, '') : '未选') : '未连接', 'reason', linked ? '' : 'bad'),
             chip('5 小时额度', q == null ? '–' : `${q}%`, 'stats', q >= 90 ? 'bad' : q >= 70 ? 'warn' : ''),
             chip('上轮缓存', c == null ? '–' : `${c}%`, 'stats', c != null && c < 50 ? 'warn' : ''),
             chip('体检', n == null ? '–' : n ? `${n} 项` : '正常', 'check', n ? 'warn' : ''),
@@ -1505,6 +1527,7 @@
             '订阅通道不支持温度、Top-P 等采样参数（Agent SDK 限制）。',
             '「(1M context)」模型提供 100 万上下文；部分套餐需要开通额外用量，失败时自动退回普通版一小时。',
             '顶部的状态卡只在需要处理时出现（代理没开、没登录、酒馆没连上）；一切正常时，标题旁的绿点就是在线。',
+            '不用本扩展的代理也能用：酒馆直连 Claude（官方 Claude 源，或 OpenRouter 上的 Claude）时，「推理」页的模型切换（Claude 源）、预设推荐模型、发送前检查、体检、角色卡检查、灵动岛照常可用；缓存排布、手机防丢回复、额度和用量统计要连本扩展的代理。',
         ]) list.append(el('li', null, line));
         steps.append(list);
         return steps;
@@ -1516,10 +1539,12 @@
         const btn = document.getElementById('claude_max_connect');
         const hint = document.getElementById('claude_max_connect_hint');
         if (!block || !btn || !hint) return;
-        const { connected } = connectionInfo();
+        const { connected, direct } = connectionInfo();
         btn.hidden = connected;
         hint.hidden = connected;
-        block.hidden = connected && proxyState === 'online';
+        // Direct to Claude with no proxy running: nothing needs doing, the proxy is optional.
+        block.hidden = (connected && proxyState === 'online') || (direct && proxyState !== 'online' && proxyState !== 'warning');
+        if (direct) setDot(proxyState === 'online' || proxyState === 'warning' ? 'online' : 'direct');
         const conn = document.getElementById('claude_max_status_conn');
         if (conn) conn.hidden = proxyState !== 'offline';
         const title = document.getElementById('claude_max_status_title');
@@ -1547,6 +1572,19 @@
     function setModel(id) {
         const ctx = SillyTavern.getContext();
         const $ = globalThis.jQuery;
+        if (connectionInfo().kind === 'claude') {
+            // SillyTavern's own Claude source: its dropdown can lag behind new models (1.19 has no
+            // Opus 5.5) — add the option so the dropdown and the setting agree, then pick it.
+            const sel = $?.('#model_claude_select');
+            if (sel?.length) {
+                if (!sel.find('option').filter((_, o) => o.value === id).length) sel.append(new Option(id, id));
+                sel.val(id).trigger('change');
+            } else if (ctx.chatCompletionSettings) {
+                ctx.chatCompletionSettings.claude_model = id;
+                ctx.saveSettingsDebounced?.();
+            }
+            return;
+        }
         const input = $?.('#custom_model_id');
         if (input?.length) input.val(id).trigger('input');
         else if (ctx.chatCompletionSettings) {
@@ -1556,8 +1594,8 @@
     }
 
     function modelRow() {
-        const { connected, model } = connectionInfo();
-        if (!connected) return null;
+        const { connected, kind, model } = connectionInfo();
+        if (!connected && kind !== 'claude') return null;
         const current = modelBase(model);
         const options = [...MODEL_PICKS];
         if (current && !options.some((o) => o.value === current)) {
@@ -1586,8 +1624,8 @@
     // is applied here. Presets without one keep whatever model is selected.
     function applyPresetModel(model) {
         if (typeof model !== 'string' || !/^claude-[\w.-]+$/i.test(model)) return;
-        const { connected, model: cur } = connectionInfo();
-        if (!connected || modelBase(cur) === modelBase(model)) return;
+        const { connected, kind, model: cur } = connectionInfo();
+        if ((!connected && kind !== 'claude') || modelBase(cur) === modelBase(model)) return;
         const id = modelBase(model) + (/\[1m\]$/i.test(cur ?? '') ? '[1m]' : '');
         setModel(id);
         renderGlance();
@@ -1602,6 +1640,9 @@
     function buildReasonTab(pane, settings, save) {
         const model = modelRow();
         if (model) pane.append(model);
+        if (connectionInfo().direct) {
+            pane.append(el('small', 'cm-hint', '现在酒馆直连 Claude（没走本扩展的代理）：下面的思考设置只对代理生效，直连时用酒馆「AI 回复配置」里的「推理强度」。'));
+        }
         const depth = segmented({
             label: '思考深度',
             options: [...EFFORT_OPTIONS, { value: 'off', label: '不思考', hint: '不思考，回得最快。Fable、Opus 4.7 及以上（含 Opus 5 / 5.5）总会思考，对它们无效。' }],
