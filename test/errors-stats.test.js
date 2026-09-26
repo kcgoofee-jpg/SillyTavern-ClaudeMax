@@ -4,8 +4,8 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { explainError, formatErrorForUser } from '../lib/errors-zh.js';
-import { assertServedModel } from '../lib/chat.js';
+import { explainError, formatErrorForUser } from '../src/proxy/errors-zh.js';
+import { assertServedModel } from '../src/proxy/chat.js';
 
 test('common upstream errors get Chinese explanations', () => {
     assert.equal(explainError('Not logged in · Please run /login').code, 'not_logged_in');
@@ -27,7 +27,7 @@ test('served-model guard ignores the CLI synthetic error message', () => {
 });
 
 test('usage stats record metadata only and aggregate today / week', async () => {
-    const { diagnoseCache, __resetCacheDiag } = await import('../lib/cache-diag.js');
+    const { diagnoseCache, __resetCacheDiag } = await import('../src/proxy/cache-diag.js');
     __resetCacheDiag();
     // A real diagnosis whose change sits under a heading: the heading is prompt text.
     const sys = (x) => `${'规则'.repeat(900)}\n## 小美的秘密日记\n${x}`;
@@ -36,7 +36,7 @@ test('usage stats record metadata only and aggregate today / week', async () => 
     assert.equal(diag.systemChanged, true);
     const dir = mkdtempSync(join(tmpdir(), 'cm-stats-'));
     process.env.CLAUDE_SUBSCRIPTION_STATS_FILE = join(dir, 'usage.jsonl');
-    const stats = await import('../lib/usage-stats.js');
+    const stats = await import('../src/proxy/usage-stats.js');
     stats.__resetStatsForTesting();
     const log = console.log;
     console.log = () => {};
@@ -76,7 +76,7 @@ test('Opus 5.5 safeguard refusals are recognized', () => {
 });
 
 test('promptShape run-length encodes roles without content', async () => {
-    const { promptShape } = await import('../lib/usage-stats.js');
+    const { promptShape } = await import('../src/proxy/usage-stats.js');
     const S = { role: 'system', content: 'x' }, U = { role: 'user', content: 'y' }, A = { role: 'assistant', content: 'z' };
     assert.equal(promptShape([S, S, S, A, S, U, A, U]), 'S3 A1 S1 U1 A1 U1');
 });

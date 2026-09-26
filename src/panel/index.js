@@ -2,18 +2,18 @@
 // Claude Max — UI extension for the claude-subscription server plugin
 // ──────────────────────────────────────────────
 //
-// This file is the UI EXTENSION (loaded in the browser). The SERVER plugin
-// entry is plugin.js (wired via package.json "main"). Keeping the extension
-// at the repo root with manifest.json makes the repo installable straight
-// from SillyTavern's "Install extension" dialog, AND the server plugin
-// auto-installs these same files — a window guard below makes whichever
-// copy loads second a no-op.
+// This file is the UI EXTENSION (loaded in the browser, src/panel/). The
+// SERVER plugin entry is src/proxy/plugin.js (wired via package.json "main").
+// manifest.json at the repo root points here, which makes the repo
+// installable straight from SillyTavern's "Install extension" dialog, AND the
+// server plugin auto-installs these same files — a window guard below makes
+// whichever copy loads second a no-op.
 //
 // Built on SillyTavern.getContext() (no static imports of ST modules), so
 // the file works unchanged from ANY install location (global third-party,
 // per-user data extensions, or the plugin's auto-installed copy). Helpers in
-// lib/ are loaded with dynamic import() relative to import.meta.url; a copy
-// without lib/ still works, only those sections say they are unavailable.
+// src/shared/ are loaded with dynamic import() relative to import.meta.url; a
+// copy without them still works, only those sections say they are unavailable.
 //
 // What it does:
 //   • One-click Connect: pilots SillyTavern's Custom (OpenAI-compatible)
@@ -45,19 +45,19 @@
     // lazily so a copy of this file without lib/ still works — the check-up
     // section then just says it is unavailable.
     let chatCheck = null;
-    import(new URL('./lib/chat-check.js', import.meta.url).href)
+    import(new URL('../shared/chat-check.js', import.meta.url).href)
         .then((m) => { chatCheck = m; runCheckup(); })
         .catch(() => { /* check-up unavailable */ });
     let loreConst = null;
-    import(new URL('./lib/lore-constant.js', import.meta.url).href)
+    import(new URL('../shared/lore-constant.js', import.meta.url).href)
         .then((m) => { loreConst = m; refreshLoreBox(); })
         .catch(() => { /* lore tool unavailable */ });
     let cardAudit = null;
-    import(new URL('./lib/card-audit.js', import.meta.url).href)
+    import(new URL('../shared/card-audit.js', import.meta.url).href)
         .then((m) => { cardAudit = m; runCardAudit({ toast: true }); })
         .catch(() => { /* card audit unavailable */ });
     let presetReco = null;
-    import(new URL('./lib/preset-reco.js', import.meta.url).href)
+    import(new URL('../shared/preset-reco.js', import.meta.url).href)
         .then((m) => { presetReco = m; adoptUnrecordedReco(); })
         .catch(() => { /* preset recommendations unavailable */ });
     // 灵动岛 (lib/island.js): one morphing pill at the top of the Claude Max
@@ -65,7 +65,7 @@
     // while the panel is open, the notices; with the panel closed notices are
     // ordinary toasts.
     let island = null;
-    import(new URL('./lib/island.js', import.meta.url).href)
+    import(new URL('../shared/island.js', import.meta.url).href)
         .then((m) => {
             island = m.createIsland(document);
             island.set({ online: proxyOnline });

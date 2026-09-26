@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 
 import { randomUUID } from 'node:crypto';
 
-import { createTurnCollector, replayTurn, hasPinnedContext, pinnedContext, historyReplay, replyBefore, repliesBefore, sentTextFor, __resetTurnCaptures } from '../lib/turn-capture.js';
-import { assembleEntries } from '../lib/jsonl-entries.js';
+import { createTurnCollector, replayTurn, hasPinnedContext, pinnedContext, historyReplay, replyBefore, repliesBefore, sentTextFor, __resetTurnCaptures } from '../src/proxy/turn-capture.js';
+import { assembleEntries } from '../src/proxy/jsonl-entries.js';
 
 const meta = { sessionId: 's2', cwd: '/tmp/x', version: 'v', gitBranch: '', permissionMode: 'bypassPermissions' };
 const cliEntries = [
@@ -172,7 +172,7 @@ test('CLAUDE_SUBSCRIPTION_CONTEXT_PIN_FILE=off keeps the pin in memory only', as
     const saved = process.env.CLAUDE_SUBSCRIPTION_CONTEXT_PIN_FILE;
     process.env.CLAUDE_SUBSCRIPTION_CONTEXT_PIN_FILE = 'off';
     try {
-        const mod = await import(`../lib/turn-capture.js?off=${Date.now()}`);
+        const mod = await import(`../src/proxy/turn-capture.js?off=${Date.now()}`);
         const { existsSync } = await import('node:fs');
         mod.pinContext('m-off', [{ type: 'attachment', uuid: 'x', attachment: { type: 'date', date: 'd' } }]);
         assert.equal(mod.hasPinnedContext('m-off'), true);

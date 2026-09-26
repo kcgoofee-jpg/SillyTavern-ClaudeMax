@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { auditTexts, cardItems, worldItems, unmaskDigits } from '../lib/card-audit.js';
+import { auditTexts, cardItems, worldItems, unmaskDigits } from '../src/shared/card-audit.js';
 
 const codes = (items) => auditTexts(items).map((f) => f.code);
 

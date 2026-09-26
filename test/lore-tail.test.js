@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { extractVolatileBlocks, injectBlocks, PLACEHOLDER_NOTE, TAIL_NOTE } from '../lib/lore-tail.js';
-import { diagnoseCache, __resetCacheDiag } from '../lib/cache-diag.js';
+import { extractVolatileBlocks, injectBlocks, PLACEHOLDER_NOTE, TAIL_NOTE } from '../src/proxy/lore-tail.js';
+import { diagnoseCache, __resetCacheDiag } from '../src/proxy/cache-diag.js';
 
 const rules = '规则'.repeat(2000);
 
@@ -43,8 +43,8 @@ test('diag learns a world-info tag after one change, others after two', () => {
     assert.deepEqual(diagnoseCache(sys('乙', 'z'), hist(7)).volatileTags, ['world_info', 'status']);
 });
 
-import { newLoreOnly } from '../lib/lore-tail.js';
-import { createTurnCollector, sentTextFor, __resetTurnCaptures } from '../lib/turn-capture.js';
+import { newLoreOnly } from '../src/proxy/lore-tail.js';
+import { createTurnCollector, sentTextFor, __resetTurnCaptures } from '../src/proxy/turn-capture.js';
 
 test('newLoreOnly: lines already given in earlier turns are not repeated', () => {
     const earlier = ['<world_info>\n地窖在木屋北侧\n</world_info>\n我推门'];
@@ -62,7 +62,7 @@ test('collector files the sent message under the text ST sends next turn', () =>
     assert.equal(sentTextFor(sent), null);
 });
 
-import { loreTarget, rememberInjected, injectedTextFor, __resetInjected } from '../lib/lore-tail.js';
+import { loreTarget, rememberInjected, injectedTextFor, __resetInjected } from '../src/proxy/lore-tail.js';
 
 test('lore goes on the player message, not on a depth-0 injection after it', () => {
     const h = [
@@ -88,7 +88,7 @@ test('a message sent with lore is remembered under the text ST sends next turn',
     assert.equal(injectedTextFor('m249'), 's249');
 });
 
-import { foldTrailingInjections, REPEAT_NOTE } from '../lib/lore-tail.js';
+import { foldTrailingInjections, REPEAT_NOTE } from '../src/proxy/lore-tail.js';
 
 test('depth-0 injections after the player message are folded into it', () => {
     const rules = '---\n变量更新规则:\n' + '每轮结束输出变量更新。'.repeat(30);

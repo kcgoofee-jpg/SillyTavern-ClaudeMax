@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { moveTailBlockToFront, __resetTailBlock } from '../lib/tail-block.js';
+import { moveTailBlockToFront, __resetTailBlock } from '../src/proxy/tail-block.js';
 
 const S = (c) => ({ role: 'system', content: c });
 const U = (c) => ({ role: 'user', content: c });

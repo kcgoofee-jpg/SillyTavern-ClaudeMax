@@ -402,7 +402,7 @@ check_deps() {
 # 登录状态：打印「yes 套餐」/「no」/「unknown」
 login_state() {
     local json logged=unknown plan
-    json=$(cd "$PROXY_DIR" && node scripts/claude-cli.js auth status 2>/dev/null)
+    json=$(cd "$PROXY_DIR" && node bin/claude-cli.js auth status 2>/dev/null)
     # 不再为解析这点 JSON 单独起一个 node
     if [[ "$json" =~ '"loggedIn"[[:space:]]*:[[:space:]]*(true|false)' ]]; then
         [[ $match[1] == true ]] && logged=yes || logged=no

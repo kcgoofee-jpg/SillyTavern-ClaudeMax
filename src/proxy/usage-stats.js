@@ -12,10 +12,10 @@
 
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { explainError } from './errors-zh.js';
 import { explainCache } from './cache-diag.js';
+import { DATA_DIR } from './paths.js';
 
 const PLUGIN_TAG = '[claude-subscription]';
 const MAX_FILE_BYTES = 5 * 1024 * 1024;
@@ -23,8 +23,7 @@ const WINDOW_MS = 7 * 24 * 3600 * 1000;
 
 export function statsFilePath() {
     if (process.env.CLAUDE_SUBSCRIPTION_STATS_FILE) return process.env.CLAUDE_SUBSCRIPTION_STATS_FILE;
-    const here = dirname(fileURLToPath(import.meta.url));
-    return join(here, '..', 'data', 'usage.jsonl');
+    return join(DATA_DIR, 'usage.jsonl');
 }
 
 let entries = null; // last 7 days, oldest first

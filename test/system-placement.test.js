@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { inlineLateSystemMessages } from '../lib/system-placement.js';
-import { extractSettings } from '../lib/settings.js';
+import { inlineLateSystemMessages } from '../src/proxy/system-placement.js';
+import { extractSettings } from '../src/proxy/settings.js';
 
 const S = (content) => ({ role: 'system', content });
 const U = (content) => ({ role: 'user', content });
@@ -78,7 +78,7 @@ test('system_placement setting defaults to inline', () => {
 });
 
 test('buildSystemPrompt splits at the boundary only when asked', async () => {
-    const { buildSystemPrompt } = await import('../lib/system-prompt.js');
+    const { buildSystemPrompt } = await import('../src/proxy/system-prompt.js');
     assert.equal(buildSystemPrompt('abcdef', false), 'abcdef');
     assert.equal(buildSystemPrompt('abcdef', false, 3, null), 'abcdef');
     assert.deepEqual(buildSystemPrompt('abcdef', false, 3, 'B'), { type: 'custom', prompt: ['abc', 'B', 'def'], snapshot: false });

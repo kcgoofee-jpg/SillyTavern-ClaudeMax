@@ -86,9 +86,9 @@ cmd_login() {
     need_install
     step "登录 Claude 订阅"
     hint "终端里会显示一个网址：长按复制，到手机浏览器里打开并授权；网页给出授权码后，粘贴回这里。"
-    in_debian "cd $GUEST_DIR && node scripts/claude-cli.js auth login"
+    in_debian "cd $GUEST_DIR && node bin/claude-cli.js auth login"
     step "确认登录结果"
-    if in_debian "cd $GUEST_DIR && node scripts/claude-cli.js auth status" | grep -q '"loggedIn": *true'; then
+    if in_debian "cd $GUEST_DIR && node bin/claude-cli.js auth status" | grep -q '"loggedIn": *true'; then
         ok "已登录"
     else
         warn "没有登录成功，再运行一次 claude-max login"
@@ -132,7 +132,7 @@ cmd_stop() {
 cmd_status() {
     step "检查状态"
     if [[ -d "$ROOTFS$GUEST_DIR" ]]; then ok "代理已安装"; else fail "还没有安装：bash claude-max.sh install"; return; fi
-    if in_debian "cd $GUEST_DIR && node scripts/claude-cli.js auth status" 2>/dev/null | grep -q '"loggedIn": *true'; then
+    if in_debian "cd $GUEST_DIR && node bin/claude-cli.js auth status" 2>/dev/null | grep -q '"loggedIn": *true'; then
         ok "Claude 订阅已登录"
     else
         warn "还没有登录：claude-max login"

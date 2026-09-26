@@ -23,5 +23,5 @@ jobs:
       - run: npm test
       - name: 语法检查
         run: |
-          node --check index.js
-          for f in lib/*.js; do node --check "$f"; done
+          for f in server.js bin/*.js scripts/*.mjs src/*/*.js; do node --check "$f"; done
+      - run: node scripts/version.mjs --check

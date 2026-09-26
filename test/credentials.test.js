@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { loadCredentials } from '../lib/oauth.js';
+import { loadCredentials } from '../src/proxy/oauth.js';
 
 const FILE_CREDS = { claudeAiOauth: { accessToken: 'file-token', refreshToken: 'r' } };
 const KEYCHAIN_CREDS = { claudeAiOauth: { accessToken: 'kc-token', subscriptionType: 'max' } };
@@ -64,7 +64,7 @@ test('no credentials anywhere → null source', () => {
 import { mkdtempSync, writeFileSync, statSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fetchQuota, loadCredentialsCached, __resetCredentialCache } from '../lib/oauth.js';
+import { fetchQuota, loadCredentialsCached, __resetCredentialCache } from '../src/proxy/oauth.js';
 
 test('"no credentials" is cached briefly (the keychain lookup blocks); file results never are', () => {
     __resetCredentialCache();

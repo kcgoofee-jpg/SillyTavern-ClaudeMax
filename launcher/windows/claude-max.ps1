@@ -106,7 +106,7 @@ function CheckDeps($dir, $name) {
 
 function CheckLogin {
     Push-Location $PROXY_DIR
-    $json = node scripts/claude-cli.js auth status 2>$null | Out-String
+    $json = node bin/claude-cli.js auth status 2>$null | Out-String
     Pop-Location
     try { $j = $json | ConvertFrom-Json } catch { $j = $null }
     if ($j -and $j.loggedIn) { Ok "Claude 订阅已登录（$($j.subscriptionType) 套餐）" }
@@ -266,7 +266,7 @@ switch ($Action) {
         Banner '登录 Claude 订阅'
         Explain '会打开浏览器，用你的 Claude（Pro / Max）账号授权。登录信息保存在 %USERPROFILE%\.claude 里，一般只需要登录一次。'
         Explain '如果浏览器没有自动打开，把窗口里显示的网址复制到浏览器；网页给出授权码时，粘贴回这个窗口。'
-        Push-Location $PROXY_DIR; node scripts/claude-cli.js auth login; Pop-Location
+        Push-Location $PROXY_DIR; node bin/claude-cli.js auth login; Pop-Location
         Step '确认登录结果'; CheckLogin; Summary; PauseEnd
     }
     'repair' {

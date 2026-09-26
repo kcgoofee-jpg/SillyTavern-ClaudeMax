@@ -6,7 +6,7 @@
 #   1. 单元测试 —— 跑在「要提交的快照」上，不是工作区：
 #      提交模式 = 暂存区（git checkout-index），推送模式 = HEAD（git archive）
 #   2. 语法：所有 .js/.mjs/.cjs（node --check）、.sh（sh/bash -n）、.zsh/.command（zsh -n）、.py（ast 解析，不写 __pycache__）
-#   3. 版本号四处一致（manifest / package / status.js / 测试）
+#   3. 版本号：manifest.json 和 package.json 一致（scripts/version.mjs --check）
 #   4. 密钥扫描：要提交 / 推送的「新增行」里不能有 API 密钥、令牌、私钥，
 #      也不能出现 launcher/*.local 里的任何值（只报文件名，不打印值）；
 #      本机文件（*.local、data/、secrets.json）不能进提交
@@ -73,11 +73,8 @@ EOF
 fi
 
 # ---------- 3. 版本号（快照里的文件）----------
-v=$(node -p "require('./package.json').version")
-vre="(^|[^0-9.])${v//./\\.}([^0-9.]|\$)"      # 2.23.1 不会匹配 2.23.10
-[[ "$(node -p "require('./manifest.json').version")" == "$v" ]] || bad "manifest.json 版本 ≠ package.json $v"
-grep -qF "'$v'" lib/status.js || bad "lib/status.js 里的版本不是 $v"
-grep -qE "$vre" test/models.test.js || bad "test/models.test.js 里的版本不是 $v"
+# 版本号只写在 package.json（docs/版本规范.md），manifest.json 由 scripts/version.mjs 同步
+node scripts/version.mjs --check || bad "版本号不一致（见上一行）"
 cd "$root"
 
 # ---------- 4. 密钥 / 本机文件：只看要提交 / 推送的内容 ----------

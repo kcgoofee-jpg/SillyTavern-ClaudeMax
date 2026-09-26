@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { diagnoseCache, describeDiag, nearestLabel, explainCache, __resetCacheDiag } from '../lib/cache-diag.js';
+import { diagnoseCache, describeDiag, nearestLabel, explainCache, __resetCacheDiag } from '../src/proxy/cache-diag.js';
 
 const U = (content) => ({ role: 'user', content });
 const A = (content) => ({ role: 'assistant', content });
@@ -88,6 +88,23 @@ test('a one-off early edit stops pinning the split after a few turns', () => {
     assert.equal(turn('开关乙', '雪原').splitAt, wiStart);      // edit is 3 turns old: back behind the toggles
 });
 
+test('switching presets (most of the prompt replaced) resets the split instead of pinning it early', () => {
+    __resetCacheDiag();
+    const head = '开头'.repeat(1500) + '\n';
+    const presetA = Array.from({ length: 300 }, (_, i) => `通用规则${i}：`.padEnd(60, '甲')).join('\n') + '\n';
+    const presetB = Array.from({ length: 400 }, (_, i) => `庄园规则${i}：`.padEnd(60, '乙')).join('\n') + '\n';
+    const sys = (preset, wi) => `${head}${preset}<world_info>\n${wi}\n</world_info>`;
+    let h = [A('greeting'), U('u1')];
+    const turn = (preset, wi) => { const d = diagnoseCache(sys(preset, wi), h); h = [...h, A('a'), U('u')]; return d; };
+    turn(presetA, '雪山');
+    const switched = turn(presetB, '雪山');
+    assert.equal(switched.rewrite, true);
+    assert.equal(switched.splitAt, null);                       // not pinned at the start of the preset
+    assert.match(describeDiag(switched), /换了预设/);
+    const next = turn(presetB, '沙漠');
+    assert.equal(next.splitAt, (head + presetB).length);        // learned from the new prompt right away
+});
+
 test('no split when the change is too close to the start', () => {
     __resetCacheDiag();
     diagnoseCache('A\n' + 'x'.repeat(5000), [A('g'), U('u')]);
@@ -134,7 +151,7 @@ test('explainCache flags history that stopped caching although nothing changed',
 });
 
 test('equivalentTokens uses list-price ratios', async () => {
-    const { equivalentTokens } = await import('../lib/cache-diag.js');
+    const { equivalentTokens } = await import('../src/proxy/cache-diag.js');
     assert.equal(equivalentTokens({ inputTokens: 2, cacheReadTokens: 50000, cacheCreationTokens: 2800, outputTokens: 5000 }), 2 + 5000 + 3500 + 25000);
 });
 

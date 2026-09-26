@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSubprocessEnv } from '../lib/env.js';
+import { buildSubprocessEnv } from '../src/proxy/env.js';
 
 test('buildSubprocessEnv disables non-essential CLI traffic (per-session ai-title calls)', () => {
     const env = buildSubprocessEnv({ envPins: {}, maxTokens: undefined, apiKey: null });

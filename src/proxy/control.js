@@ -12,10 +12,9 @@
 
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync, writeFileSync, unlinkSync, statSync, openSync, readSync, closeSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
+import { ROOT } from './paths.js';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const LAUNCHER_LIB = join(ROOT, 'launcher', 'mac', 'lib.zsh');
 export const LID_PAUSE_FILE = join(ROOT, 'launcher', 'lid-pause.local');
 

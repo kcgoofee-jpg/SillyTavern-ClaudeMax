@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { planPresetReco } from '../lib/preset-reco.js';
+import { planPresetReco } from '../src/shared/preset-reco.js';
 
 const fields = { inlineSystem: { valid: (v) => typeof v === 'boolean' }, effort: { valid: (v) => typeof v === 'string' } };
 

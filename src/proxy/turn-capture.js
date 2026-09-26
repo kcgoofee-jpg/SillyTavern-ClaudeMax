@@ -27,7 +27,7 @@
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { DATA_DIR } from './paths.js';
 
 const MAX_TURNS = 400;
 const captures = new Map(); // key → { entries: user entry + its attachments, contextPinned }
@@ -191,7 +191,7 @@ function pinFile() {
     const env = process.env.CLAUDE_SUBSCRIPTION_CONTEXT_PIN_FILE;
     if (env) return /^off$/i.test(env) ? null : env; // 'off': memory only, like CACHE_MEMORY_FILE
     if (process.env.NODE_TEST_CONTEXT) return null;
-    return join(dirname(fileURLToPath(import.meta.url)), '..', 'data', 'cli-context.json');
+    return join(DATA_DIR, 'cli-context.json');
 }
 
 function loadPins() {

@@ -8,21 +8,20 @@
 // `credential.expired: true` is a warning, not a verdict.
 
 import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
 import { SDK_VERSION } from './jsonl-entries.js';
 import { credentialSummary } from './oauth.js';
+import { ROOT } from './paths.js';
 
 let cachedPluginVersion = null;
 function getPluginVersion() {
     if (cachedPluginVersion) return cachedPluginVersion;
     try {
-        const here = dirname(fileURLToPath(import.meta.url));
-        const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8'));
-        cachedPluginVersion = pkg.version || '2.29.1';
+        const pkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
+        cachedPluginVersion = pkg.version || '0.0.0';
     } catch {
-        cachedPluginVersion = '2.29.1';
+        cachedPluginVersion = '0.0.0';
     }
     return cachedPluginVersion;
 }

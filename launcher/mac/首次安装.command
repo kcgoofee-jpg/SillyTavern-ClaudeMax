@@ -39,7 +39,7 @@ step "3/5 登录 Claude 订阅（Pro / Max）"
 if [[ "$(login_state)" == yes* ]]; then
     check_login
 elif ask_yes "还没登录。现在登录吗？（会打开浏览器，用你的 Claude 账号授权，只需要一次）"; then
-    (cd "$PROXY_DIR" && node scripts/claude-cli.js auth login)
+    (cd "$PROXY_DIR" && node bin/claude-cli.js auth login)
     check_login
 else
     warn "没有登录：代理能启动，但发消息会失败"

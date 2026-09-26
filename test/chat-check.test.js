@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { checkReply, bannedFromPrompts, wordRangeFromPrompts, statusNumbers } from '../lib/chat-check.js';
+import { checkReply, bannedFromPrompts, wordRangeFromPrompts, statusNumbers } from '../src/shared/chat-check.js';
 
 const status = (hp, food, pts) => `<status>\n生命: ${hp}/100 | 饥饿: ${food}/100\n资源: 木材 3 | 积分 ${pts}\n好感: 苏念念 5 | 林初晴 6\n</status>`;
 const reply = (body, extra = '') => `<content>${body}</content>\n${extra}`;
@@ -40,7 +40,7 @@ test('a clean reply has no issues', () => {
 });
 
 test('second-person presets do not trigger the person check', async () => {
-    const { secondPersonFromPreset } = await import('../lib/chat-check.js');
+    const { secondPersonFromPreset } = await import('../src/shared/chat-check.js');
     const preset = {
         prompts: [{ identifier: 'a', name: '👤第二人称user视角' }, { identifier: 'b', name: '👤第三人称' }],
         prompt_order: [{ order: [{ identifier: 'a', enabled: true }, { identifier: 'b', enabled: false }] }],
@@ -54,7 +54,7 @@ test('second-person presets do not trigger the person check', async () => {
 });
 
 test('word range from an enabled「字数」entry name, and Ny-style four options', async () => {
-    const { wordRangeFromPreset } = await import('../lib/chat-check.js');
+    const { wordRangeFromPreset } = await import('../src/shared/chat-check.js');
     const preset = {
         prompts: [{ identifier: 'w', name: '✂️ 字数｜1400–1600字', content: '' }, { identifier: 'x', name: '✂️ 字数｜800–1000字', content: '' }],
         prompt_order: [{ order: [{ identifier: 'w', enabled: true }, { identifier: 'x', enabled: false }] }],
@@ -67,7 +67,7 @@ test('word range from an enabled「字数」entry name, and Ny-style four option
 });
 
 test('childhood flashbacks must stay innocent', async () => {
-    const { flashbackText } = await import('../lib/chat-check.js');
+    const { flashbackText } = await import('../src/shared/chat-check.js');
     const clean = '<content>现在的剧情。\n> 【回忆】\n> 那年夏天我们在河边钓鱼，他把唯一的面包掰成两半。\n回到现在。</content>';
     assert.match(flashbackText(clean), /钓鱼/);
     assert.ok(!checkReply({ mes: clean }).issues.some((i) => i.code === 'flashback'));
@@ -77,14 +77,14 @@ test('childhood flashbacks must stay innocent', async () => {
     assert.ok(!checkReply({ mes: '<content>成年人的剧情：吻。\n> 【回忆】\n> 我们爬上了老槐树。</content>' }).issues.some((i) => i.code === 'flashback'));
 });
 
-import { bodyOf as bodyOfForImages } from '../lib/chat-check.js';
+import { bodyOf as bodyOfForImages } from '../src/shared/chat-check.js';
 
 test('image tags and HTML cards are not counted as prose', () => {
     const mes = '<content>她推门。\n<bbi_image>1boy, 2girls, bedroom</bbi_image>\n<htm1fenge><div>卡片</div></htm1fenge>灯亮了。</content>';
     assert.equal(bodyOfForImages(mes).replace(/\s/g, ''), '她推门。灯亮了。');
 });
 
-import { paragraphRangeFromPreset, sceneCardFromPreset, paragraphCount } from '../lib/chat-check.js';
+import { paragraphRangeFromPreset, sceneCardFromPreset, paragraphCount } from '../src/shared/chat-check.js';
 
 test('paragraph plan and scene card come from the preset; the reply is checked against them', () => {
     const preset = {

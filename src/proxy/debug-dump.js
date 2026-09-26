@@ -15,17 +15,17 @@
 // proxies elsewhere so they never touch the real one).
 
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join } from 'node:path';
 
 import { extractSystemText } from './system-prompt.js';
+import { DATA_DIR } from './paths.js';
 
 const PLUGIN_TAG = '[claude-subscription]';
 // Everything this module writes (and nothing else — the folder may be one the user chose).
 export const DUMP_FILES = ['last-request.json', 'previous-request.json', 'last-system.txt', 'previous-system.txt', 'last-entries.json', 'previous-entries.json'];
 
 export function debugDir() {
-    return process.env.CLAUDE_SUBSCRIPTION_DEBUG_DIR || join(dirname(fileURLToPath(import.meta.url)), '..', 'data', 'debug');
+    return process.env.CLAUDE_SUBSCRIPTION_DEBUG_DIR || join(DATA_DIR, 'debug');
 }
 
 let enabled = false; // as of the last request from the panel

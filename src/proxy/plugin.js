@@ -29,14 +29,14 @@
 import express from 'express';
 import { cpSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
-import { handleStatus } from './lib/status.js';
-import { handleQuota } from './lib/oauth.js';
-import { handleStats } from './lib/usage-stats.js';
-import { handleDebugLast } from './lib/debug-dump.js';
-import { handleCancelReply, handleKeptReply } from './lib/reply-keeper.js';
-import { asyncRoute, startStandaloneListener, stopStandaloneListener, probeExistingProxy, portInUseMessage } from './lib/listener.js';
+import { handleStatus } from './status.js';
+import { handleQuota } from './oauth.js';
+import { handleStats } from './usage-stats.js';
+import { handleDebugLast } from './debug-dump.js';
+import { handleCancelReply, handleKeptReply } from './reply-keeper.js';
+import { asyncRoute, startStandaloneListener, stopStandaloneListener, probeExistingProxy, portInUseMessage } from './listener.js';
+import { ROOT } from './paths.js';
 
 const DEFAULT_PORT = 8901;
 const DEFAULT_HOST = '127.0.0.1';
@@ -69,7 +69,7 @@ function isNewerVersion(a, b) {
 // manifest.json. Only these files make up the extension: the manifest,
 // index.js + style.css, and the browser modules index.js imports from lib/
 // (keep this list in step with index.js's imports).
-const UI_EXTENSION_FILES = ['manifest.json', 'index.js', 'style.css', 'lib/chat-check.js', 'lib/preset-reco.js', 'lib/lore-constant.js', 'lib/card-audit.js', 'lib/island.js'];
+const UI_EXTENSION_FILES = ['manifest.json', 'src/panel/index.js', 'src/panel/style.css', 'src/shared/chat-check.js', 'src/shared/preset-reco.js', 'src/shared/lore-constant.js', 'src/shared/card-audit.js', 'src/shared/island.js'];
 
 /**
  * Install or update the companion UI extension into SillyTavern's
@@ -88,7 +88,7 @@ function installUiExtension() {
     if (/^(1|true|yes|on)$/i.test(process.env.CLAUDE_SUBSCRIPTION_NO_UI_INSTALL ?? '')) return;
 
     try {
-        const here = dirname(fileURLToPath(import.meta.url));
+        const here = ROOT;
         if (!existsSync(join(here, 'manifest.json'))) return;
 
         // plugins/<id>/ normally sits two levels under the ST root, but Node

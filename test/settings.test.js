@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { extractSettings } from '../lib/settings.js';
+import { extractSettings } from '../src/proxy/settings.js';
 
 test('auxiliary callers (no panel settings, no effort) default to thinking off', () => {
     const s = extractSettings({ model: 'claude-haiku-4-5', messages: [] });

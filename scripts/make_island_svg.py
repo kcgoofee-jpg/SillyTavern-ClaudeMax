@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Render docs/island.svg: the 灵动岛 cycling through its states, as a looping animated SVG.
+"""Render docs/assets/island.svg: the 灵动岛 cycling through its states, as a looping animated SVG.
 
 Same spring as lib/island.js (stiffness 420, damping 32), sampled into SMIL keyframes, so
-the README shows the real motion without a video. Run: python3 docs/make_island_svg.py
+the README shows the real motion without a video. Run: python3 scripts/make_island_svg.py
 """
 import math, os
 
@@ -182,6 +182,6 @@ svg = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewB
 {''.join(layers)}
 </svg>
 '''
-out = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'island.svg')
+out = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'docs', 'assets', 'island.svg')
 open(out, 'w', encoding='utf-8').write(svg)
 print(out, f'{len(svg) // 1024} KB, loop {TOTAL:.1f}s')

@@ -18,10 +18,10 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 import { extractVolatileBlocks } from './lore-tail.js';
 import { contentToText } from './system-prompt.js';
+import { DATA_DIR } from './paths.js';
 
 const MAX_CHATS = 6;
 // Below this the static part isn't worth a cache breakpoint (Opus 5.5's
@@ -67,7 +67,7 @@ const MAX_REMEMBERED = 30;
 function memoryFile() {
     if (process.env.CLAUDE_SUBSCRIPTION_CACHE_MEMORY_FILE) return process.env.CLAUDE_SUBSCRIPTION_CACHE_MEMORY_FILE;
     if (process.env.NODE_TEST_CONTEXT) return null; // unit tests never touch the real file
-    return join(dirname(fileURLToPath(import.meta.url)), '..', 'data', 'cache-memory.json');
+    return join(DATA_DIR, 'cache-memory.json');
 }
 let remembered = null; // chatKey → { changes, splitAt, at }
 function loadMemory() {
@@ -115,6 +115,18 @@ function firstDiff(a, b) {
     let i = 0;
     while (i < n && a.charCodeAt(i) === b.charCodeAt(i)) i++;
     return i === n && a.length === b.length ? -1 : i;
+}
+
+/** Most of the prompt replaced (another preset, not an edit): over 30% of
+ *  the new prompt's text is in lines the old prompt did not have. A toggled
+ *  entry or a world-info change adds a few lines; a different preset adds
+ *  whole sections. */
+const REWRITE_SHARE = 0.3;
+function isRewrite(a, b) {
+    const old = new Set(a.split('\n'));
+    let fresh = 0;
+    for (const line of b.split('\n')) if (!old.has(line)) fresh += line.length + 1;
+    return fresh > REWRITE_SHARE * b.length;
 }
 
 function openTags(text, offset) {
@@ -166,6 +178,11 @@ export function diagnoseCache(systemText, history, { moveVolatile = false } = {}
     const learned = prev ? null : loadMemory().get(key);
 
     const diffAt = prev ? firstDiff(prev.system, system) : -1;
+    // Switching presets replaces most of the prompt. That turn misses anyway;
+    // remembering its early cut would pin the split there for SPLIT_WINDOW
+    // turns and rewrite the unchanged middle each time (measured: 50k chars ×
+    // 3 turns after 通用 → 庄园). Start the split history over instead.
+    const rewrite = diffAt >= 0 && isRewrite(prev.system, system);
 
     // Split point for the system prompt: the start of the enclosing tag (or
     // line) where it changed, taken as the EARLIEST such point over the last
@@ -184,7 +201,7 @@ export function diagnoseCache(systemText, history, { moveVolatile = false } = {}
             if (system.includes(`<${tag}>`) && system.includes(`</${tag}>`)) changes[tag] = changes[tag] ?? 1;
         }
     }
-    if (diffAt >= 0) {
+    if (diffAt >= 0 && !rewrite) {
         const tag = movableTag(system, diffAt);
         if (tag) changes[tag] = (changes[tag] ?? 0) + 1;
     }
@@ -197,8 +214,10 @@ export function diagnoseCache(systemText, history, { moveVolatile = false } = {}
     const asSent = (text) => (moved.length ? extractVolatileBlocks(text, moved).system : text);
     const sentSystem = asSent(system);
     const sentDiffAt = !prev ? -1 : moved.length ? firstDiff(asSent(prev.system), sentSystem) : diffAt;
-    const recent = (prev?.cuts ?? []).slice(-(SPLIT_WINDOW - 1));
-    if (sentDiffAt >= 0) {
+    const recent = rewrite ? [] : (prev?.cuts ?? []).slice(-(SPLIT_WINDOW - 1));
+    if (rewrite) {
+        // no cut: the new prompt's own changes decide the split from the next turn
+    } else if (sentDiffAt >= 0) {
         // Snap to the start of the innermost enclosing tag: a keyword-triggered
         // section (<world_info>) reorders from turn to turn, so the first
         // differing byte wanders around inside it and a line-based split
@@ -210,7 +229,7 @@ export function diagnoseCache(systemText, history, { moveVolatile = false } = {}
         recent.push(null); // unchanged turn: no new constraint
     }
     const cutPoints = recent.filter((c) => c !== null);
-    let splitAt = cutPoints.length ? Math.min(...cutPoints) : (prev?.splitAt ?? learned?.splitAt ?? null);
+    let splitAt = cutPoints.length ? Math.min(...cutPoints) : rewrite ? null : (prev?.splitAt ?? learned?.splitAt ?? null);
     if (splitAt !== null && (splitAt < MIN_STATIC_CHARS || splitAt > sentSystem.length)) splitAt = null;
 
     previous.delete(key);
@@ -243,6 +262,7 @@ export function diagnoseCache(systemText, history, { moveVolatile = false } = {}
         historyDiffAt: historyDiffAt >= 0 ? historyDiffAt : null,
         historyLen: texts.length,
         ...(reroll ? { reroll: true } : {}),
+        ...(rewrite ? { rewrite: true } : {}),
         splitAt,
         volatileTags: volatileTags(changes),
     };
@@ -255,6 +275,7 @@ export function describeDiag(d) {
     if (d.firstTurn) return `缓存诊断：本聊天第一轮（系统提示词 ${d.systemChars.toLocaleString()} 字）${d.volatileTags?.length ? `，世界书 ${d.volatileTags.map((t) => `<${t}>`).join('、')} 一开始就移到消息里` : ''}，下一轮开始对比`;
     const parts = [];
     if (d.reroll) parts.push('重roll（和上一次请求的聊天记录相同，不代表新一轮的开销）');
+    if (d.rewrite) parts.push('系统提示词大部分换了（多半是换了预设）：这一轮整段重写，之前记下的切分点清零，从下一轮重新学');
     if (d.systemChanged) {
         const covered = d.splitAt && d.splitAt <= d.systemDiffAt;
         parts.push(`系统提示词与上一轮不同，从第 ${d.systemDiffAt.toLocaleString()} / ${d.systemChars.toLocaleString()} 字开始` +

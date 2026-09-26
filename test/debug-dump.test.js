@@ -4,7 +4,7 @@ import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { debugDir, dumpRequest, handleDebugLast, noteDebugSetting, DUMP_FILES } from '../lib/debug-dump.js';
+import { debugDir, dumpRequest, handleDebugLast, noteDebugSetting, DUMP_FILES } from '../src/proxy/debug-dump.js';
 
 function fakeRes() {
     const res = { statusCode: 200 };

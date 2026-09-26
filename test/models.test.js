@@ -10,7 +10,7 @@ import {
     isAdaptiveOnlyModel,
     parseModelRequest,
     listModelsHandler,
-} from '../lib/models.js';
+} from '../src/proxy/models.js';
 
 test('CANONICAL_TIER_MODELS pins flagship models for each tier', () => {
     assert.equal(CANONICAL_TIER_MODELS.fable, 'claude-fable-5-1');
@@ -145,12 +145,15 @@ test('Package versions match across package.json and manifest.json', () => {
     const pkg = JSON.parse(readFileSync(join(here, '..', 'package.json'), 'utf8'));
     const manifest = JSON.parse(readFileSync(join(here, '..', 'manifest.json'), 'utf8'));
 
-    assert.equal(pkg.version, '2.29.1');
-    assert.equal(manifest.version, '2.29.1');
+    // package.json is the only place the version is written (docs/版本规范.md);
+    // scripts/version.mjs copies it into manifest.json.
+    assert.match(pkg.version, /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?$/);
+    assert.equal(manifest.version, pkg.version);
 });
 
-test('handleStatus returns current version 2.29.1', async () => {
-    const { handleStatus } = await import('../lib/status.js');
+test('handleStatus reports the version from package.json', async () => {
+    const pkg = JSON.parse(readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'package.json'), 'utf8'));
+    const { handleStatus } = await import('../src/proxy/status.js');
     let responseData = null;
     const mockRes = {
         json(payload) {
@@ -166,7 +169,7 @@ test('handleStatus returns current version 2.29.1', async () => {
     };
     await handleStatus({}, mockRes);
     assert.ok(responseData);
-    assert.equal(responseData.version, '2.29.1');
+    assert.equal(responseData.version, pkg.version);
     assert.equal(responseData.plugin, 'claude-subscription');
 });
 

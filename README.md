@@ -10,9 +10,9 @@
 [![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%C2%B7%20Android%20TauriTavern-555)](#快速开始)
 [![许可证](https://img.shields.io/badge/%E8%AE%B8%E5%8F%AF%E8%AF%81-AGPL--3.0-blue)](LICENSE)
 
-<img src="docs/island.svg" width="620" alt="灵动岛：思考中 → 写作中 → 完成（字数 · 用时 · 缓存）→ 体检提示 → 缩回小点">
+<img src="docs/assets/island.svg" width="620" alt="灵动岛：思考中 → 写作中 → 完成（字数 · 用时 · 缓存）→ 体检提示 → 缩回小点">
 
-<sub>面板顶部的「灵动岛」：一个形状在状态之间弹簧变形，这张图也是代码画的（<a href="docs/make_island_svg.py">docs/make_island_svg.py</a>）</sub>
+<sub>面板顶部的「灵动岛」：一个形状在状态之间弹簧变形，这张图也是代码画的（<a href="scripts/make_island_svg.py">scripts/make_island_svg.py</a>）</sub>
 
 </div>
 

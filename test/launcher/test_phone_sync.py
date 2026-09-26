@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """phone_sync.py 的测试：用一个假的 adb（在临时文件夹里执行手机那边的 shell 命令），不碰真手机、不碰真数据。
 
-  python3 -m unittest launcher/test_phone_sync.py      （在 extension/ 下）
+  npm run test:py（或 python3 -m unittest discover -s test/launcher）
 """
 import io, json, os, shutil, stat, subprocess, sys, tarfile, tempfile, textwrap, time, unittest
 from contextlib import redirect_stdout
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'launcher'))
 import phone_sync as ps  # noqa: E402
 
 FAKE_ADB = r'''#!/usr/bin/env python3

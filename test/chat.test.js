@@ -11,12 +11,12 @@ process.env.CLAUDE_SUBSCRIPTION_STATS_FILE = join(TMP, 'usage.jsonl');
 process.env.CLAUDE_SUBSCRIPTION_DEBUG_DIR = join(TMP, 'debug');
 process.env.CLAUDE_SUBSCRIPTION_SCRATCH_CWD = join(TMP, 'scratch');
 
-const { watchClient, maxTurnsFrom, statusForError, handleChatCompletions } = await import('../lib/chat.js');
-const { cancelReply, keptReply, __resetKeptReplies } = await import('../lib/reply-keeper.js');
-const { __setSdkForTesting } = await import('../lib/sdk-loader.js');
-const { startStandaloneListener, stopStandaloneListener } = await import('../lib/listener.js');
-const { busyCount } = await import('../lib/control.js');
-const { __resetTurnCaptures } = await import('../lib/turn-capture.js');
+const { watchClient, maxTurnsFrom, statusForError, handleChatCompletions } = await import('../src/proxy/chat.js');
+const { cancelReply, keptReply, __resetKeptReplies } = await import('../src/proxy/reply-keeper.js');
+const { __setSdkForTesting } = await import('../src/proxy/sdk-loader.js');
+const { startStandaloneListener, stopStandaloneListener } = await import('../src/proxy/listener.js');
+const { busyCount } = await import('../src/proxy/control.js');
+const { __resetTurnCaptures } = await import('../src/proxy/turn-capture.js');
 
 const SLOT = 'abcdef0123456789';
 const quiet = (fn) => async (...a) => {
@@ -220,10 +220,10 @@ test('dry run: the stand-in capture chains, and is found by text + the reply it 
     await turn([sys, { role: 'assistant', content: '开场' }, { role: 'user', content: '继续' }]);
     await turn([sys, { role: 'assistant', content: '开场' }, { role: 'user', content: '继续' }, { role: 'assistant', content: '回1' }, { role: 'user', content: '继续' }]);
     // Both 「继续」 are known now, each under its own reply; the uuids chain.
-    const { historyReplay, sentTextFor } = await import('../lib/turn-capture.js');
+    const { historyReplay, sentTextFor } = await import('../src/proxy/turn-capture.js');
     assert.equal(sentTextFor('继续', '开场'), '继续');
     assert.equal(sentTextFor('继续', '回1'), '继续');
-    const { assembleEntries } = await import('../lib/jsonl-entries.js');
+    const { assembleEntries } = await import('../src/proxy/jsonl-entries.js');
     const entries = assembleEntries([{ role: 'assistant', content: '开场' }, { role: 'user', content: '继续' }, { role: 'assistant', content: '回1' }, { role: 'user', content: '继续' }, { role: 'assistant', content: '回2' }],
         { sessionId: 's', cwd: '/x' }, 'm', { replay: historyReplay(null).replay });
     for (let i = 1; i < entries.length; i++) assert.ok(entries[i].parentUuid && entries[i].parentUuid === entries[i - 1].uuid, `entry ${i} chains`);
