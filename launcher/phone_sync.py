@@ -5,7 +5,9 @@
 同步：聊天、角色卡、世界书、预设、头像、背景、生图图片、主题、快速回复。
 扩展：只从电脑推到手机，而且只在手机上的版本是电脑版本的旧版时才推（手机上更新过、或两边分叉时不推，
       说明原因）；推的是 git 管理的文件和 .git，整个换成新文件夹，旧文件夹留一份在 extensions/.cm-previous。
-不同步：设置（两边的代理地址不同）和密钥。另外把手机上的代理地址对准这台 Mac 现在的 IP。
+标签：角色卡上的标签（settings.json 的 tags / tag_map）按标签名合并，只加不删（一边删掉的标签会被另一边加回来）；
+      --push-only 时只把电脑的标签加到对方。
+不同步：其他设置（两边的代理地址不同）和密钥。另外把手机上的代理地址对准这台 Mac 现在的 IP。
 
 规则（按上次同步时记下的状态判断哪边改过）：
   只有一边改过 → 用改过的那边；两边都改过（冲突），或者没有同步记录、两边又不一样 → 用较新的，
@@ -19,7 +21,7 @@
       [--mac-ip IP --port 8901 --lan-key-file F]
       phone_sync.py --st <…> --local-tt <TT 的 data/default-user> [--dry-run] [--port 8901]
 """
-import argparse, io, json, os, re, secrets, shlex, shutil, subprocess, sys, tarfile, tempfile, time
+import argparse, io, json, os, re, secrets, shlex, shutil, subprocess, sys, tarfile, tempfile, time, uuid
 
 PKG = 'com.tauritavern.client'
 REMOTE_ROOTS = [f'/data/media/0/Android/data/{PKG}/data/default-user', f'/sdcard/Android/data/{PKG}/data/default-user']
@@ -695,6 +697,106 @@ def fix_endpoint(ph, ip, port, key, bk):
     return changed, errors
 
 
+# ── 标签 ──────────────────────────────────────
+# 标签存在 settings.json：tags = [{id, name, …}]，tag_map = {角色卡文件名: [标签 id]}。
+# 两边的 id 各是各的（都是随机生成），按标签名对应。
+
+def card_tags(d):
+    """settings → {角色卡文件名: {标签名}}（只看 .png 角色卡；群组的键不是文件名，不管）。"""
+    names = {t.get('id'): t.get('name') for t in d.get('tags') or [] if isinstance(t, dict)}
+    out = {}
+    for key, ids in (d.get('tag_map') or {}).items():
+        if isinstance(key, str) and key.endswith('.png') and isinstance(ids, list):
+            got = {names[i] for i in ids if names.get(i)}
+            if got:
+                out[key] = got
+    return out
+
+
+def new_tag(name, taken):
+    tid = str(uuid.uuid4())   # 和酒馆自己建标签时一样
+    while tid in taken:
+        tid = str(uuid.uuid4())
+    return {'id': tid, 'name': name, 'folder_type': 'NONE', 'filter_state': 'UNDEFINED', 'sort_order': None,
+            'is_hidden_on_character_card': False, 'color': '', 'color2': '', 'create_date': int(time.time() * 1000)}
+
+
+def add_tags(d, want):
+    """把 want = {角色卡文件名: {标签名}} 加进 settings d（原地改）。没有的标签按名字新建。
+    → 加上的 (文件名, 标签名) 列表；已经有的不算。"""
+    tags = d.setdefault('tags', [])
+    by_name = {t.get('name'): t for t in tags if isinstance(t, dict) and t.get('name')}
+    taken = {t.get('id') for t in tags if isinstance(t, dict)}
+    tmap = d.setdefault('tag_map', {})
+    added = []
+    for av in sorted(want):
+        have = set(tmap.get(av) or [])
+        for name in sorted(want[av]):
+            t = by_name.get(name)
+            if not t:
+                t = by_name[name] = new_tag(name, taken)
+                taken.add(t['id'])
+                tags.append(t)
+            if t['id'] not in have:
+                tmap.setdefault(av, [])
+                if not isinstance(tmap[av], list):
+                    tmap[av] = []
+                tmap[av].append(t['id'])
+                have.add(t['id'])
+                added.append((av, name))
+    return added
+
+
+def plan_tags(loc_d, rem_d, loc_cards, rem_cards, push_only=False):
+    """→ (加到对方的 {卡: {名}}, 加到电脑的 {卡: {名}})：只给那边确实有的角色卡加。"""
+    lt, rt = card_tags(loc_d), card_tags(rem_d)
+    to_rem = {av: names - rt.get(av, set()) for av, names in lt.items() if av in rem_cards}
+    to_loc = {} if push_only else {av: names - lt.get(av, set()) for av, names in rt.items() if av in loc_cards}
+    return {k: v for k, v in to_rem.items() if v}, {k: v for k, v in to_loc.items() if v}
+
+
+def sync_tags(ph, st, bk, loc_files, rem_files, push_only=False, dry=False):
+    """标签合并（见文件开头）。→ (说明文字, 出错的说明列表)。"""
+    side = ph.label
+    lpath, rpath = os.path.join(st, 'settings.json'), f'{ph.base}/settings.json'
+    if not os.path.exists(lpath):
+        return None, []   # 还没打开过一次的酒馆：没有标签可合并
+    try:
+        lraw = open(lpath, 'rb').read()
+        loc_d = json.loads(lraw.decode('utf-8'))
+    except (OSError, ValueError) as e:
+        return None, [f'电脑的 settings.json 读不了（{e}）']
+    rraw, err = read_remote_text(ph, rpath)
+    if err:
+        return None, [] if err == 'missing' else [f'{side}的 settings.json：{err}']
+    try:
+        rem_d = json.loads(rraw.decode('utf-8'))
+    except ValueError as e:
+        return None, [f'{side}的 settings.json 不是合法 JSON（{e}）']
+    cards = lambda files: {r.split('/', 1)[1] for r in files if r.startswith('characters/') and r.count('/') == 1}
+    to_rem, to_loc = plan_tags(loc_d, rem_d, cards(loc_files), cards(rem_files), push_only)
+    n_rem, n_loc = sum(map(len, to_rem.values())), sum(map(len, to_loc.values()))
+    text = f'标签：→ {side} {n_rem} 个，← 电脑 {n_loc} 个（{len(to_rem)} / {len(to_loc)} 张卡）'
+    if dry or not (n_rem or n_loc):
+        return text, []
+    errors = []
+    if n_rem:
+        try:
+            add_tags(rem_d, to_rem)
+            atomic_write(os.path.join(bk, side, 'settings.json'), rraw)
+            write_remote_text(ph, rpath, json.dumps(rem_d, ensure_ascii=False, indent=4).encode('utf-8'))
+        except (SyncError, OSError) as e:
+            errors.append(f'{side}的标签没写成：{e}')
+    if n_loc:
+        try:
+            add_tags(loc_d, to_loc)
+            atomic_write(os.path.join(bk, '电脑', 'settings.json'), lraw)
+            atomic_write(lpath, json.dumps(loc_d, ensure_ascii=False, indent=4).encode('utf-8'))
+        except OSError as e:
+            errors.append(f'电脑的标签没写成：{e}')
+    return text, errors
+
+
 # ── 状态 ──────────────────────────────────────
 
 def load_state(path):
@@ -869,6 +971,12 @@ def main(argv=None):
         if not ext_todo:
             print(f'  扩展：没有要推的')
     if a.dry_run:
+        # 预览按同步完成后的样子算：要传过去的角色卡也算对方有
+        text, errs = sync_tags(ph, a.st, None, set(loc) | set(pull), set(rem) | set(push), a.push_only, dry=True)
+        for e in errs:
+            print(f'  ! {e}')
+        if text:
+            print(f'  {text}')
         return 0
 
     bk = os.path.join(a.backups, time.strftime('%Y-%m-%d'), f"{time.strftime('%H%M%S')}-{side}同步前")
@@ -892,6 +1000,14 @@ def main(argv=None):
         save_state(a.state, new_state)
 
     notes = []
+    if rem2 is not None:
+        text, errs = sync_tags(ph, a.st, bk, loc2, rem2, a.push_only)
+        for e in errs:
+            print(f'  ✗ {e}')
+        if errs:
+            notes.append('标签没同步成')
+        elif text:
+            print(f'  ✓ {text}')
     if a.settings and isinstance(ph, LocalTT):
         ch = copy_settings(ph, a.st, bk)
         print(f'  ✓ 扩展设置和对话补全设置已复制到{side}（旧的备份在 {bk}）' if ch else f'  扩展设置：{side}上已是最新')

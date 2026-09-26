@@ -422,6 +422,56 @@ class PhoneSyncTests(unittest.TestCase):
         self.assertTrue(os.path.exists(f'{rext}/Ext/modules/story/data/store.js'))
 
 
+def settings_with(tags):
+    """{卡: [标签名]} → 酒馆 settings.json 的 tags / tag_map（id 每边随机，像真的一样）。"""
+    d = {'power_user': {}, 'tags': [], 'tag_map': {}}
+    ps.add_tags(d, {av: set(names) for av, names in tags.items()})
+    return json.dumps(d, ensure_ascii=False)
+
+
+class TagTests(unittest.TestCase):
+    def test_add_tags_reuses_by_name_and_is_idempotent(self):
+        d = json.loads(settings_with({'a.png': ['都市']}))
+        tid = d['tags'][0]['id']
+        self.assertEqual(ps.add_tags(d, {'a.png': {'都市', '酒馆助手'}, 'b.png': {'都市'}}),
+                         [('a.png', '酒馆助手'), ('b.png', '都市')])
+        self.assertEqual([t['name'] for t in d['tags']], ['都市', '酒馆助手'])
+        self.assertIn(tid, d['tag_map']['b.png'])
+        self.assertEqual(ps.add_tags(d, {'a.png': {'都市'}}), [])
+        self.assertEqual(ps.card_tags(d), {'a.png': {'都市', '酒馆助手'}, 'b.png': {'都市'}})
+
+    def test_plan_only_for_cards_that_side_has(self):
+        loc = json.loads(settings_with({'a.png': ['x'], 'only_mac.png': ['y']}))
+        rem = json.loads(settings_with({'a.png': ['z']}))
+        to_rem, to_loc = ps.plan_tags(loc, rem, {'a.png', 'only_mac.png'}, {'a.png'})
+        self.assertEqual((to_rem, to_loc), ({'a.png': {'x'}}, {'a.png': {'z'}}))
+        self.assertEqual(ps.plan_tags(loc, rem, {'a.png'}, {'a.png'}, push_only=True)[1], {})
+
+    def test_sync_merges_tags_both_ways_with_backup(self):
+        e = Env()
+        try:
+            write(f'{e.st}/characters/a.png', 'A', 1_700_000_000)
+            write(f'{e.phone}/characters/b.png', 'B', 1_700_000_000)
+            write(f'{e.st}/settings.json', settings_with({'a.png': ['都市', 'MVU']}))
+            write(f'{e.phone}/settings.json', settings_with({'b.png': ['仙侠'], 'a.png': ['MVU']}))
+            rc, out = e.sync('--dry-run')
+            self.assertIn('标签：→ 手机 1 个，← 电脑 1 个', out)
+            self.assertEqual(ps.card_tags(json.loads(read(f'{e.phone}/settings.json'))), {'b.png': {'仙侠'}, 'a.png': {'MVU'}})
+            rc, out = e.sync()
+            self.assertEqual(rc, 0, out)
+            self.assertIn('✓ 标签：→ 手机 1 个，← 电脑 1 个', out)
+            self.assertEqual(ps.card_tags(json.loads(read(f'{e.phone}/settings.json'))), {'a.png': {'都市', 'MVU'}, 'b.png': {'仙侠'}})
+            self.assertEqual(ps.card_tags(json.loads(read(f'{e.st}/settings.json'))), {'a.png': {'都市', 'MVU'}, 'b.png': {'仙侠'}})
+            bk = [os.path.join(dp, f) for dp, _, fs in os.walk(e.backups) for f in fs]
+            self.assertTrue(any(p.endswith('手机/settings.json') for p in bk) and any(p.endswith('电脑/settings.json') for p in bk), bk)
+            # 其他设置原样：只动 tags / tag_map
+            self.assertEqual(json.loads(read(f'{e.phone}/settings.json'))['power_user'], {})
+            rc, out = e.sync()
+            self.assertIn('标签：→ 手机 0 个，← 电脑 0 个', out)
+        finally:
+            e.close()
+
+
 class LocalTTTests(unittest.TestCase):
     def test_local_tt_push_only(self):
         root = tempfile.mkdtemp()

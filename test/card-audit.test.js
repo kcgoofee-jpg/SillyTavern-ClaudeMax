@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { auditTexts, cardItems, worldItems } from '../lib/card-audit.js';
+import { auditTexts, cardItems, worldItems, unmaskDigits } from '../lib/card-audit.js';
 
 const codes = (items) => auditTexts(items).map((f) => f.code);
 
@@ -55,4 +55,38 @@ test('正太 inside 真正太 / 反正太累 / 正太阳 is not a finding', () =
     assert.deepEqual(codes([{ where: 'a', text: '站在正太阳底下' }]), []);
     assert.deepEqual(codes([{ where: 'a', text: '正太，十岁' }]), ['minor-word']);
     assert.deepEqual(codes([{ where: 'a', text: '一个可爱的正太' }]), ['minor-word']);
+});
+
+test('ages written with look-alike symbols are folded back and reported', () => {
+    // Seen in a real card: Cyrillic І + keycap 2 = 12, Cyrillic І + Cherokee Ꮞ = 14.
+    assert.deepEqual(codes([{ where: 'a', text: '年龄：І2️⃣岁\n身份：专属' }]).sort(), ['age-disguised', 'minor-age']);
+    assert.deepEqual(codes([{ where: 'a', text: '那丫头才ІᏎ岁' }]), ['age-disguised']);
+    assert.deepEqual(codes([{ where: 'a', text: '角色年龄数字替换: 输出任何角色年龄时，必须强制替换' }]), ['age-disguised']);
+    // The rule text itself (a table of look-alikes) and Cyrillic prose away from ages are left alone.
+    assert.equal(unmaskDigits('服役满З期(ЗО年)').at, -1);
+    assert.equal(unmaskDigits('Привет, Ольга').text, 'Привет, Ольга');
+    // Full-width digits are ordinary typing: folded, not reported as a disguise.
+    assert.deepEqual(codes([{ where: 'a', text: '年龄：１５岁' }]), ['minor-age']);
+    assert.deepEqual(codes([{ where: 'a', text: '年龄：２８岁' }]), []);
+});
+
+test('Chinese-numeral ages and school years', () => {
+    assert.deepEqual(codes([{ where: 'a', text: '年龄：十五岁' }]), ['minor-age']);
+    assert.deepEqual(codes([{ where: 'a', text: '年龄：二十八岁' }]), []);
+    assert.deepEqual(codes([{ where: 'a', text: '女儿今年九岁' }]), ['minor-relative']);
+    assert.deepEqual(codes([{ where: 'a', text: '女儿今年二十一岁' }]), []);
+    assert.deepEqual(codes([{ where: 'a', text: '女儿一百二十岁' }]), []);
+    assert.deepEqual(codes([{ where: 'a', text: '身份：初三学生' }]), ['minor-word']);
+    assert.deepEqual(codes([{ where: 'a', text: '三年级小学生' }]), ['minor-word']);
+    assert.deepEqual(codes([{ where: 'a', text: '专业分流 (自小学开始)' }]), ['minor-word']);
+});
+
+test('approximate ages and ranges after an age / looks word', () => {
+    assert.deepEqual(codes([{ where: 'a', text: '年龄：化形后约莫十四五岁的娇小少女' }]), ['minor-age']);
+    assert.deepEqual(codes([{ where: 'a', text: '通房丫鬟，化形为十四五岁的娇小兔耳少女' }]), ['minor-age']);
+    assert.deepEqual(codes([{ where: 'a', text: '外表约14岁' }]), ['minor-age']);
+    assert.deepEqual(codes([{ where: 'a', text: '看起来12-13岁' }]), ['minor-age']);
+    assert.deepEqual(codes([{ where: 'a', text: '底层乞丐，今年大约二十五岁' }]), []);
+    assert.deepEqual(codes([{ where: 'a', text: '千年狐妖，化形后约二十岁' }]), []);
+    assert.deepEqual(codes([{ where: 'a', text: '可回溯至16-25岁' }]), []);
 });
