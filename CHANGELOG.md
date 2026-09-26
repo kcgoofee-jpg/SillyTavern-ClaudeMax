@@ -4,6 +4,8 @@
 
 ## 未发布
 
+## 3.2.0 - 2026-09-26
+
 ### 新增（3.2 所有来源一个面板）
 - 面板认得酒馆里所有能用 Claude 的来源：Claude 官方源（含反向代理）、OpenRouter、Electron Hub、NanoGPT、AI/ML API、CometAPI、自定义地址；状态栏写明「走哪 · 按什么计费」（订阅 / API 密钥 / OpenRouter 额度 / 中转）。酒馆没有 Bedrock 来源、Vertex 来源只接 Gemini，这两家经中转接入。
 - 「推理」页切模型和预设的按模型配置（`byModel`）在这些来源上都生效，自动换成各来源的模型名（如 OpenRouter 的 `anthropic/claude-opus-4.6`）；来源没有这个模型时只提示，不换别的。
