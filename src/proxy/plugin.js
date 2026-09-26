@@ -69,7 +69,7 @@ function isNewerVersion(a, b) {
 // manifest.json. Only these files make up the extension: the manifest,
 // index.js + style.css, and the browser modules index.js imports from lib/
 // (keep this list in step with index.js's imports).
-const UI_EXTENSION_FILES = ['manifest.json', 'src/panel/index.js', 'src/panel/style.css', 'src/shared/chat-check.js', 'src/shared/preset-reco.js', 'src/shared/lore-constant.js', 'src/shared/card-audit.js', 'src/shared/island.js'];
+const UI_EXTENSION_FILES = ['manifest.json', 'src/panel/index.js', 'src/panel/style.css', 'src/shared/chat-check.js', 'src/shared/preset-reco.js', 'src/shared/lore-constant.js', 'src/shared/card-audit.js', 'src/shared/island.js', 'src/shared/host.js'];
 
 /**
  * Install or update the companion UI extension into SillyTavern's

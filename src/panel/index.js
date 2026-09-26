@@ -60,6 +60,12 @@
     import(new URL('../shared/preset-reco.js', import.meta.url).href)
         .then((m) => { presetReco = m; adoptUnrecordedReco(); })
         .catch(() => { /* preset recommendations unavailable */ });
+    // Cloud-hosted SillyTavern detection (shared/host.js): explains why a
+    // loopback proxy address can't work there.
+    let hostCheck = null;
+    import(new URL('../shared/host.js', import.meta.url).href)
+        .then((m) => { hostCheck = m; renderConnect(); })
+        .catch(() => { /* no cloud note */ });
     // 灵动岛 (lib/island.js): one morphing pill at the top of the CCST
     // panel (never over the chat). It shows the reply being generated and,
     // while the panel is open, the notices; with the panel closed notices are
@@ -154,7 +160,7 @@
         foldTail: true,          // 发言后面的深度 0 注入并进发言（省缓存）
         accessKey: '',           // 局域网访问密码（手机连 Mac 上的代理时用）
         quietEffort: 'low',      // 后台请求（其他插件的生图 tag、总结等）的思考深度；'follow' = 跟随面板
-        panelTab: 'reason',      // 面板上次打开的分页
+        panelTab: 'reason',      // 3.1 前记的分页；现在记在 localStorage，只用来迁移
         compactScriptButtons: true, // 输入栏上方的脚本按钮并排显示
         quietRender: 'auto',     // 省电显示：'auto'（手机 / TauriTavern 上开）| 'on' | 'off'
         checkupMuted: {},        // 体检提示被点掉的次数（按问题类型）；两次后不再弹
@@ -205,7 +211,7 @@
             // assistant-role preset entry), which kills prompt caching.
             $('#custom_prompt_post_processing').val('').trigger('change');
             $('#api_button_openai').trigger('click');
-            notify('ok', '正在连接', '模型列表稍后出现在「API 连接」的模型下拉框中。', { replace: 'connect' });
+            notify('ok', '正在连接', '稍后在「API 连接」里选模型。', { replace: 'connect' });
             if (IS_TAURI) {
                 notify('info', '首次连接', `TauriTavern 会弹出授权框，请允许访问 ${settings.endpoint}。`, { ms: 10000 });
             }
@@ -268,7 +274,7 @@
         warnedPostProcessing = true;
         notify('warn', `提示词后处理是「${POST_PROCESSING_LABELS[mode] ?? mode}」`,
             '它会把预设合并成用户消息，预设失去系统权重，而且世界书一变整段缓存就失效。' +
-            '建议改成「无」（API 连接 → 提示词后处理），或重新点一次 CCST 面板的「一键连接」自动改好。',
+            '改成「无」（API 连接 → 提示词后处理），或在 CCST「设置」点「重新连接」。',
             { ms: 20000 });
     }
 
@@ -651,6 +657,14 @@
         return node;
     }
 
+    /** Coloured note card: one class, the tone picks the colour (info | warn | error | ok). */
+    function note(tone, title) {
+        const box = el('div', 'cm-note');
+        box.dataset.tone = tone;
+        if (title) box.append(el('div', 'cm-note-title', title));
+        return box;
+    }
+
     function iconButton(iconClass, title, onClick) {
         const btn = el('div', `menu_button cm-icon-btn fa-solid ${iconClass}`);
         btn.title = title;
@@ -674,8 +688,8 @@
         const render = () => {
             group.querySelectorAll('button').forEach((b) => b.classList.toggle('active', b.dataset.effort === (nextEffort ?? '')));
             status.textContent = nextEffort
-                ? `下一条回复用「${EFFORT_LABEL[nextEffort]}」，收到后恢复「${EFFORT_LABEL[settings.effort]}」。再点一次取消。`
-                : '关键剧情点一下，只影响下一条回复。实测高约慢 1/3，超高约慢 3 倍；这一轮聊天记录的缓存要重写一次，下一轮切回后原来的缓存照样能用。';
+                ? `下一条用「${EFFORT_LABEL[nextEffort]}」，之后恢复「${EFFORT_LABEL[settings.effort]}」。再点取消。`
+                : '关键剧情用，只影响下一条。高约慢 1/3，超高约慢 3 倍；这一轮缓存重写一次。';
         };
         for (const [value, label] of [['high', '高'], ['xhigh', '超高']]) {
             const b = el('button', 'cm-seg-btn', label);
@@ -703,14 +717,14 @@
         let box = document.getElementById('claude_max_lore');
         if (!box) return;
         if (!loreConst) {
-            box.replaceChildren(el('small', 'cm-hint', '这个功能没有加载（扩展文件不完整），重新安装扩展即可。'));
+            box.replaceChildren(el('small', 'cm-hint', '没加载（扩展文件不完整），重装扩展即可。'));
             return;
         }
         const ctx = SillyTavern.getContext();
         const ch = ctx.groupId ? null : ctx.characters?.[ctx.characterId];
         const name = ch?.data?.extensions?.world;
-        if (!ch) { box.replaceChildren(el('small', 'cm-hint', '打开一张角色卡的聊天后可用。')); return; }
-        if (!name) { box.replaceChildren(el('small', 'cm-hint', `「${ch.name}」没有绑定世界书，不需要处理。`)); return; }
+        if (!ch) { box.replaceChildren(el('small', 'cm-hint', '打开角色卡聊天后可用。')); return; }
+        if (!name) { box.replaceChildren(el('small', 'cm-hint', `「${ch.name}」没绑世界书。`)); return; }
         const charKey = currentCharKey();
         let book;
         try { book = await ctx.loadWorldInfo(name); } catch { book = null; }
@@ -722,22 +736,22 @@
         const backup = loreConst.backupName(name);
         const hasBackup = (ctx.getWorldInfoNames?.() ?? []).includes(backup);
         box.replaceChildren(el('small', 'cm-hint', sum.keyword
-            ? `「${name}」有 ${sum.keyword} 条按关键词触发的条目（约 ${sum.keywordChars.toLocaleString()} 字），会让聊天记录每轮重写缓存。`
-            : `「${name}」的条目已全部常驻，不影响缓存。`));
+            ? `「${name}」有 ${sum.keyword} 条关键词条目（约 ${sum.keywordChars.toLocaleString()} 字），聊天记录每轮重写缓存。`
+            : `「${name}」已全部常驻，不影响缓存。`));
         if (sum.keyword) {
             const why = el('details', 'cm-mini');
-            why.append(el('summary', null, '设为常驻有什么影响'), el('small', 'cm-hint',
-                '每轮触发的条目不同，整段聊天记录的缓存就对不上。设为常驻后每轮都发送这些条目（多占上下文），但聊天记录能命中缓存；实测每轮缓存写入约从 2.8 万降到 3 千 token。'));
+            why.append(el('summary', null, '有什么影响'), el('small', 'cm-hint',
+                '常驻后每轮都发这些条目（多占上下文），但聊天记录能命中缓存；实测每轮缓存写入从约 2.8 万降到 3 千 token。'));
             box.append(why);
         }
-        const row = el('div', 'cm-oneshot-row');
+        const row = el('div', 'cm-btn-row');
         if (sum.keyword) {
-            const b = el('div', 'menu_button', '设为常驻（先自动备份）');
+            const b = el('div', 'menu_button', '设为常驻（自动备份）');
             b.addEventListener('click', () => convertLore(name, book, backup));
             row.append(b);
         }
         if (hasBackup) {
-            const r = el('div', 'menu_button', '恢复为设为常驻之前');
+            const r = el('div', 'menu_button', '恢复原样');
             r.addEventListener('click', () => restoreLore(name, backup));
             row.append(r);
         }
@@ -797,7 +811,7 @@
     function runCheckup({ toast = false } = {}) {
         const box = document.getElementById('claude_max_checkup');
         if (!chatCheck) {
-            box?.replaceChildren(el('small', 'cm-hint', '体检模块没有加载（扩展文件不完整），重新安装扩展即可。'));
+            box?.replaceChildren(el('small', 'cm-hint', '没加载（扩展文件不完整），重装扩展即可。'));
             return;
         }
         const settings = getSettings();
@@ -805,7 +819,7 @@
         const chat = ctx.chat ?? [];
         const ai = chat.filter((m) => !m.is_user && !m.is_system);
         if (chat.length < 2 || !ai.length) {
-            box?.replaceChildren(el('small', 'cm-hint', '还没有 AI 回复。每条回复生成完会自动体检。'));
+            box?.replaceChildren(el('small', 'cm-hint', '还没有 AI 回复，生成后自动体检。'));
             return;
         }
         const prompts = ctx.chatCompletionSettings?.prompts ?? [];
@@ -822,10 +836,7 @@
         glance.issues = r.issues.length;
         renderGlance();
         if (box) {
-            const card = el('div', r.issues.length ? 'cm-last-error cm-tip' : 'cm-cache');
-            card.append(el('div', 'cm-last-error-title', r.issues.length
-                ? `最新回复 · 正文 ${r.chars} 字 / ${r.paragraphs ?? '?'} 段 · ${r.issues.length} 个问题`
-                : `最新回复 · 正文 ${r.chars} 字 / ${r.paragraphs ?? '?'} 段 · 没发现问题`));
+            const card = note(r.issues.length ? 'warn' : 'ok', `${r.chars} 字 / ${r.paragraphs ?? '?'} 段 · ${r.issues.length ? `${r.issues.length} 个问题` : '正常'}`);
             for (const i of r.issues) card.append(el('small', 'cm-hint', `· ${i.text}`));
             box.replaceChildren(card);
         }
@@ -861,12 +872,12 @@
     async function runCardAudit({ toast = false } = {}) {
         let box = document.getElementById('claude_max_card_audit');
         if (!cardAudit) {
-            box?.replaceChildren(el('small', 'cm-hint', '这个功能没有加载（扩展文件不完整），重新安装扩展即可。'));
+            box?.replaceChildren(el('small', 'cm-hint', '没加载（扩展文件不完整），重装扩展即可。'));
             return;
         }
         const ctx = SillyTavern.getContext();
         const ch = ctx.groupId ? null : ctx.characters?.[ctx.characterId];
-        if (!ch) { box?.replaceChildren(el('small', 'cm-hint', '打开一张角色卡的聊天后可用。')); return; }
+        if (!ch) { box?.replaceChildren(el('small', 'cm-hint', '打开角色卡聊天后可用。')); return; }
         const items = cardAudit.cardItems(ch.data ?? ch);
         const books = new Set([ch.data?.extensions?.world].filter(Boolean));
         try {
@@ -885,23 +896,22 @@
         const found = cardAudit.auditTexts(items);
         const high = found.filter((f) => f.level === 'high');
         if (box) {
-            const card = el('div', high.length ? 'cm-last-error' : found.length ? 'cm-last-error cm-tip' : 'cm-cache');
-            card.append(el('div', 'cm-last-error-title', found.length
+            const card = note(high.length ? 'error' : found.length ? 'warn' : 'ok', found.length
                 ? `「${ch.name}」：高风险 ${high.length} 处，提醒 ${found.length - high.length} 处`
-                : `「${ch.name}」：没有发现未成年人物或幼态化描写`));
+                : `「${ch.name}」：未发现未成年相关内容`);
             for (const f of found.slice(0, 12)) {
                 card.append(el('small', 'cm-hint', `${f.level === 'high' ? '✗' : '!'} ${f.text} · ${f.where}${f.disabled ? '（已关闭）' : ''}：${f.snippet}`));
             }
             if (found.length > 12) card.append(el('small', 'cm-hint', `……另有 ${found.length - 12} 处。`));
             if (found.length) {
-                card.append(el('small', 'cm-hint', '这类内容会让 Claude 每轮先在思考里核查年龄、主动收敛剧情，也违反 Anthropic 的使用政策。已关闭的条目也列出来了：换个开关组合就可能被发出去。'));
+                card.append(el('small', 'cm-hint', 'Claude 会因此每轮核查年龄、收敛剧情，也违反 Anthropic 使用政策。已关闭的条目也列出（换个开关就会被发出去）。'));
             }
             box.replaceChildren(card);
         }
         const key = ch.avatar ?? ch.name;
         if (toast && high.length && !auditedCards.has(key)) {
             auditedCards.add(key);
-            notify('bad', `角色卡检查 ·「${ch.name}」`, `有 ${high.length} 处未成年人物相关内容（${[...new Set(high.map((f) => f.where))].slice(0, 3).join('、')}）。详情见 CCST 面板「体检 → 角色卡检查」。`, { ms: 20000 });
+            notify('bad', `角色卡检查 ·「${ch.name}」`, `有 ${high.length} 处未成年人物相关内容（${[...new Set(high.map((f) => f.where))].slice(0, 3).join('、')}）。详见 CCST 面板「体检」。`, { ms: 20000 });
         }
     }
 
@@ -920,7 +930,7 @@
         }
         const wrap = el('div', 'cm-debug-view');
         const s = data.settings ?? {};
-        wrap.append(el('div', 'cm-last-error-title',
+        wrap.append(el('div', 'cm-note-title',
             `${new Date(data.at).toLocaleString('zh-CN')} · ${data.model} · 思考深度 ${s.effort ?? '默认'} · 深度注入${s.systemPlacement === 'hoist' ? '提到系统提示词' : '保持原位'}`));
         wrap.append(el('small', 'cm-hint', `系统提示词 ${data.systemMarked.length.toLocaleString()} 字${s.systemSplitAt ? `，缓存分界在第 ${s.systemSplitAt.toLocaleString()} 字（文中有标记）` : ''}；聊天记录 ${data.messages.length} 条。`));
         const sys = el('details', 'cm-details');
@@ -1037,8 +1047,8 @@
         if (pa === xa && pb === xb) return null;
         const proxyOlder = xa < pa || (xa === pa && xb < pb);
         return proxyOlder
-            ? `代理是 v${proxyVersion}，面板是 v${panelVersion}：代理还在跑旧代码。Mac 上「酒馆工具」选「重启酒馆」（下载的 ZIP 要先换成新版）。`
-            : `面板是 v${panelVersion}，代理是 v${proxyVersion}：面板是旧的。酒馆「扩展」里更新 CCST；手机上用 Mac 的「手机同步」更新。`;
+            ? `代理 v${proxyVersion} 旧于面板 v${panelVersion}：「酒馆工具」里重启代理（ZIP 要先换新版）。`
+            : `面板 v${panelVersion} 旧于代理 v${proxyVersion}：在酒馆「扩展」里更新 CCST（手机用「手机同步」）。`;
     }
 
     /** Card title once the proxy is up: whether SillyTavern is pointed at it, and with which model. */
@@ -1046,10 +1056,10 @@
         const { connected, model } = connectionInfo();
         if (!connected) {
             return connectionInfo().direct
-                ? '代理在线，酒馆直连 Claude（没走代理）：点「一键连接」启用缓存排布、手机防丢回复和额度显示'
+                ? '代理在线，酒馆直连 Claude：连上代理可用缓存排布、防丢回复、额度'
                 : '代理在线，酒馆还没连上';
         }
-        return model ? `已连接 · ${shortModel(model)}` : '已连接 · 请在模型下拉框里选 Claude 模型';
+        return model ? `已连接 · ${shortModel(model)}` : '已连接 · 请选 Claude 模型';
     }
 
     async function refreshProxyStatus() {
@@ -1072,7 +1082,7 @@
                 // Reached the proxy, which turned us away (access key / LAN not on)
                 proxyState = 'offline';
                 setDot('offline');
-                title.textContent = res.status === 401 ? '代理拒绝了连接：访问密码不对' : '代理拒绝了连接';
+                title.textContent = res.status === 401 ? '访问密码不对' : '代理拒绝连接';
                 sub.textContent = data.error?.message ?? `HTTP ${res.status}`;
                 renderConnect();
                 return;
@@ -1086,12 +1096,12 @@
                 setDot('online');
                 title.textContent = statusTitleOnline();
                 const plan = SUBSCRIPTION_LABELS[cred.subscriptionType] ?? cred.subscriptionType ?? '订阅';
-                sub.textContent = `${plan} 订阅 · 凭据来自${SOURCE_LABELS[cred.source] ?? cred.source} · 代理 v${data.version}`;
+                sub.textContent = `${plan} 订阅 · 代理 v${data.version}`;
                 const mismatch = versionMismatch(data.version);
                 if (mismatch) {
                     proxyState = 'warning'; // keeps the status card on screen until they match
                     setDot('warning');
-                    sub.textContent += `。${mismatch}`;
+                    sub.textContent += ` · ${mismatch}`;
                     const key = `${panelVersion}|${data.version}`;
                     if (warnedVersions !== key) {
                         warnedVersions = key;
@@ -1099,11 +1109,11 @@
                     }
                 }
                 const info = document.getElementById('claude_max_proxy_info');
-                if (info) info.textContent = `代理 v${data.version} 在线 · ${plan} 订阅 · 凭据来自${SOURCE_LABELS[cred.source] ?? cred.source}`;
+                if (info) info.textContent = `代理 v${data.version} 在线 · ${plan} 订阅 · 凭据：${SOURCE_LABELS[cred.source] ?? cred.source}`;
             } else {
                 setDot('warning');
                 title.textContent = '代理在线，但未登录';
-                sub.textContent = 'Mac：双击「酒馆工具」选「登录 Claude」。其他系统：在代理目录运行 npm run login。';
+                sub.textContent = '「酒馆工具」选「登录 Claude」，或在代理目录运行 npm run login。';
             }
         } catch {
             requery();
@@ -1115,8 +1125,8 @@
             const where = normalizeEndpoint(getSettings().endpoint);
             const remote = !/\/\/(127\.0\.0\.1|localhost)[:/]/.test(where);
             sub.textContent = remote
-                ? `连不上 ${where}。确认那台电脑开着、代理在运行、「酒馆工具」里的「手机模式」已开启，并且两台设备连着同一个 Wi-Fi；换过 Wi-Fi 的话，那台电脑的地址可能变了。`
-                : `连不上 ${where}。Mac：双击「酒馆工具」选「启动酒馆」；其他系统在代理目录运行 npm start。改过代理端口的话，在下面改代理地址。`;
+                ? `连不上 ${where}。确认那台电脑开着、开了「手机模式」、两边同一个 Wi-Fi（换过 Wi-Fi 地址可能变了）。`
+                : `连不上 ${where}。「酒馆工具」选「启动」，或在代理目录运行 npm start。`;
         }
         renderConnect();
     }
@@ -1152,11 +1162,11 @@
         } else if (!up && !heartbeatDown && connected) {
             heartbeatDown = true;
             if (status === 401) {
-                notify('bad', '代理拒绝了连接：访问密码不对', '在 CCST 面板里填对访问密码，再点「重新连接」。', { ms: 0, replace: 'proxy' });
+                notify('bad', '访问密码不对', '在 CCST「设置」里改好，再点「重新连接」。', { ms: 0, replace: 'proxy' });
             } else if (status === 403) {
-                notify('bad', '代理拒绝了连接', '那台电脑的代理没开「手机模式」，或不接受这个地址。在 Mac 上双击「酒馆工具」选「手机模式」。', { ms: 0, replace: 'proxy' });
+                notify('bad', '代理拒绝连接', '那台电脑没开「手机模式」：在「酒馆工具」里打开。', { ms: 0, replace: 'proxy' });
             } else {
-                notify('bad', '连不上代理，自动重试中', '手机连 Mac 时：确认 Mac 没睡眠、两边在同一个 Wi-Fi。', { ms: 0, replace: 'proxy' });
+                notify('bad', '连不上代理，重试中', '手机连 Mac：确认 Mac 没睡、同一个 Wi-Fi。', { ms: 0, replace: 'proxy' });
             }
             refreshProxyStatus();
         } else if (up && heartbeatDown) {
@@ -1274,16 +1284,15 @@
     function lastTurnCard(data) {
         const c = data.lastCache;
         const last = data.lastRequest;
-        const card = el('div', c.hitPct >= 50 ? 'cm-cache' : 'cm-last-error cm-tip');
-        card.append(el('div', 'cm-last-error-title', `缓存 · ${c.headline}`));
+        const card = note(c.hitPct >= 50 ? 'ok' : 'warn', `缓存 · ${c.headline}`);
         if (last) {
             card.append(el('small', 'cm-hint',
                 `${shortModel(last.model)} · 用时 ${fmtSec(last.durationMs)} · 输出 ${fmtK(last.outputTokens)} token`));
         }
         if (last?.finish === 'content_filter') {
-            card.append(el('small', 'cm-hint cm-warn', '这条回复被 Claude 的安全机制中途截断，结尾缺了内容（例如变量更新的 JSON 不完整、状态栏报错）。可以重新生成，或回退一楼换个说法。'));
+            card.append(el('small', 'cm-hint cm-warn', '被安全机制中途截断，结尾缺内容（变量、状态栏可能报错）。重新生成，或回退一楼换个说法。'));
         } else if (last?.finish === 'length') {
-            card.append(el('small', 'cm-hint cm-warn', '这条回复写到了最大长度被截断。调高酒馆的「最大回复长度」。'));
+            card.append(el('small', 'cm-hint cm-warn', '写到最大长度被截断：调高酒馆的「最大回复长度」。'));
         }
         // The first reason is the conclusion; everything else is detail.
         const [first, ...rest] = c.reasons;
@@ -1404,21 +1413,18 @@
             lastBox?.replaceChildren(data.lastCache ? lastTurnCard(data) : el('small', 'cm-hint', '还没有对话。'));
             box.replaceChildren();
             if (!data.week?.requests) {
-                box.append(el('small', 'cm-hint', '还没有记录。每次对话会在这里记一行（只记耗时和 token 数，不记聊天内容）。'));
+                box.append(el('small', 'cm-hint', '还没有记录（只记耗时和 token，不记内容）。'));
             } else {
                 box.append(usageTable(data.today, data.week));
             }
             const bg = data.background;
             if (bg?.week?.requests) {
-                box.append(el('small', 'cm-hint', `后台请求（其他插件的生图 tag、总结等，不计入上表）：今天 ${bg.today.requests} 次、近 7 天 ${bg.week.requests} 次，输出 ${fmtK(bg.week.outputTokens)} token${bg.week.failed ? `，失败 ${bg.week.failed} 次` : ''}。`));
+                box.append(el('small', 'cm-hint', `后台请求（不计入上表）：今天 ${bg.today.requests} 次，近 7 天 ${bg.week.requests} 次、输出 ${fmtK(bg.week.outputTokens)} token${bg.week.failed ? `、失败 ${bg.week.failed} 次` : ''}。`));
             }
             // Only surface a failure from the last day; older ones are noise.
             if (data.lastError && Date.now() - data.lastError.at < 24 * 3600 * 1000) {
-                const err = el('div', 'cm-last-error');
-                err.append(
-                    el('div', 'cm-last-error-title', `最近一次失败 · ${fmtWhen(data.lastError.at)} · ${shortModel(data.lastError.model)}${data.lastError.background ? ' · 后台请求' : ''}`),
-                    el('small', null, data.lastError.message),
-                );
+                const err = note('error', `最近失败 · ${fmtWhen(data.lastError.at)} · ${shortModel(data.lastError.model)}${data.lastError.background ? ' · 后台' : ''}`);
+                err.append(el('small', null, data.lastError.message));
                 const more = el('details', 'cm-mini');
                 more.append(el('summary', null, '怎么办 · 原始错误'),
                     el('small', 'cm-hint', data.lastError.hint),
@@ -1455,11 +1461,11 @@
         const tag = match[1];
         tip.hidden = false;
         tip.replaceChildren(
-            el('div', 'cm-last-error-title', '当前预设把思维链写在了正文里'),
+            el('div', 'cm-note-title', '预设把思维链写进了正文'),
             el('small', 'cm-hint',
-                `最近的回复里有 <${tag}> 块，所以原生思考框是空的：模型已经在正文里思考，就不会再启用原生思考，而且这部分也会占用输出长度和生成时间。` +
-                `想把它收进折叠框：酒馆「用户设置 → 推理 → 自动解析」，前缀填 <${tag}>、后缀填 </${tag}>。` +
-                '想改用原生思考：关掉预设里的思维链条目即可（需要时在「更多 → 调试选项」把思考模式设为「始终思考」）。'),
+                `回复里有 <${tag}> 块，原生思考框因此是空的，还占输出长度。` +
+                `收进折叠框：酒馆「用户设置 → 推理 → 自动解析」，前缀 <${tag}>、后缀 </${tag}>。` +
+                '改用原生思考：关掉预设里的思维链条目（需要时在「设置 → 调试选项」选「始终思考」）。'),
         );
     }
 
@@ -1476,21 +1482,21 @@
     // ── Settings UI ──
 
     const EFFORT_OPTIONS = [
-        { value: 'auto', label: '自动', hint: '不指定，使用模型默认值（多数模型为「高」，Opus 5.5 为「中」）。' },
-        { value: 'low', label: '低', hint: '最快、最省额度，但长篇角色扮演容易漏规则、人设变浅，一般不推荐。' },
-        { value: 'medium', label: '中', hint: '速度与质量的平衡点。' },
-        { value: 'high', label: '高', hint: '复杂剧情更连贯、规则执行更完整，回复稍慢。长篇角色扮演推荐。' },
-        { value: 'xhigh', label: '超高', hint: '更深入的推理，回复更慢、更耗额度。Opus 4.6 没有这一档，按「高」处理。' },
-        { value: 'max', label: '最大', hint: '最深度的思考，最慢、最耗额度。' },
+        { value: 'auto', label: '自动', hint: '用模型默认（多数为「高」，Opus 5.5 为「中」）。' },
+        { value: 'low', label: '低', hint: '最快最省，但长篇容易漏规则，不推荐。' },
+        { value: 'medium', label: '中', hint: '速度与质量平衡。' },
+        { value: 'high', label: '高', hint: '剧情更连贯、规则更完整，稍慢。长篇推荐。' },
+        { value: 'xhigh', label: '超高', hint: '更慢、更耗额度。Opus 4.6 按「高」处理。' },
+        { value: 'max', label: '最大', hint: '最慢、最耗额度。' },
     ];
 
     const THINKING_OPTIONS = [
-        { value: 'adaptive', label: '自适应', hint: '由模型判断是否需要思考，简单对话不额外等待（推荐）。' },
-        { value: 'on', label: '始终思考', hint: '每次回复前都先思考。Sonnet 5 会按自适应处理。' },
-        { value: 'off', label: '关闭', hint: '不思考。Fable、Opus 4.7 及以上（含 Opus 5 / 5.5）总会思考，此项对它们无效。' },
+        { value: 'adaptive', label: '自适应', hint: '模型自己判断要不要思考（推荐）。' },
+        { value: 'on', label: '始终思考', hint: '每次都先思考。Sonnet 5 按自适应处理。' },
+        { value: 'off', label: '关闭', hint: '不思考。Fable、Opus 4.7 及以上总会思考。' },
     ];
 
-    // ── At-a-glance summary (drawer header + chips above the tabs) ──
+    // ── At-a-glance summary (drawer header + status bar above the tabs) ──
 
     // Filled in by refreshQuota / refreshStats / runCheckup; rendered by
     // renderGlance so the header shows the essentials even when collapsed.
@@ -1528,6 +1534,7 @@
         return { kind: 'other', connected: false, direct: false, model: null };
     }
 
+    /** The status bar (dot · model · effort · 5h quota) and the collapsed drawer's header say the same thing. */
     function renderGlance() {
         const settings = getSettings();
         const { connected, direct, model } = connectionInfo();
@@ -1540,51 +1547,61 @@
         const head = document.getElementById('claude_max_head_sum');
         if (head) head.textContent = parts.join(' · ');
 
-        const chips = document.getElementById('claude_max_glance');
-        if (!chips) return;
-        const chip = (label, value, tab, tone) => {
-            const b = el('button', `cm-chip${tone ? ` ${tone}` : ''}`);
-            b.type = 'button';
-            b.append(el('small', null, label), el('b', null, value));
-            b.addEventListener('click', () => chips.showTab?.(tab));
-            return b;
-        };
-        const q = glance.quota;
-        const c = glance.cache;
-        const n = glance.issues;
-        chips.replaceChildren(
-            // 「1M」goes into the label so the model name fits the narrow chip.
-            chip(linked && / 1M$/.test(shortModel(model)) ? '模型 · 1M' : '模型',
-                linked ? (model ? shortModel(model).replace(/ 1M$/, '') : '未选') : '未连接', 'reason', linked ? '' : 'bad'),
-            chip('5 小时额度', q == null ? '–' : `${q}%`, 'stats', q >= 90 ? 'bad' : q >= 70 ? 'warn' : ''),
-            chip('上轮缓存', c == null ? '–' : `${c}%`, 'stats', c != null && c < 50 ? 'warn' : ''),
-            chip('体检', n == null ? '–' : n ? `${n} 项` : '正常', 'check', n ? 'warn' : ''),
-        );
+        const bar = document.getElementById('claude_max_bar_sum');
+        if (bar) {
+            const q = glance.quota;
+            bar.replaceChildren(
+                el('b', 'cm-bar-model', linked ? (model ? shortModel(model) : '未选模型') : '未连接'),
+                el('span', 'cm-bar-effort', nextEffort ? `下一轮${EFFORT_LABEL[effort]}` : `思考 ${settings.thinking === 'off' ? '关' : EFFORT_LABEL[effort]}`),
+            );
+            if (q != null) {
+                const quota = el('span', 'cm-bar-quota', `5h ${q}%`);
+                if (q >= 70) quota.dataset.tone = q >= 90 ? 'error' : 'warn';
+                bar.append(quota);
+            }
+        }
+        // The check-up result lives on its tab: a count badge instead of another status block.
+        const badge = document.getElementById('claude_max_check_badge');
+        if (badge) {
+            badge.textContent = glance.issues ? String(glance.issues) : '';
+            badge.hidden = !glance.issues;
+        }
     }
 
-    /** Status card + one-click connect, above the tabs. Shown only while
-     *  something needs doing (proxy down, not logged in, ST not connected). */
-    function buildStatusBlock() {
+    /** Status bar + the one note that says what needs doing (proxy down, not logged in,
+     *  SillyTavern not connected, cloud-hosted SillyTavern). Everything fine: just the bar. */
+    function buildStatusBar(showTab) {
         const block = el('div', 'cm-status-block');
-        block.id = 'claude_max_status_block';
-        const card = el('div', 'cm-card cm-status');
-        const statusText = el('div', 'cm-status-text');
-        const statusTitle = el('div', 'cm-status-title');
+        const bar = el('div', 'cm-bar');
+        const sum = el('div', 'cm-bar-sum');
+        sum.id = 'claude_max_bar_sum';
+        bar.append(el('span', 'cm-dot'), sum, iconButton('fa-rotate', '重新检测', refreshAll));
+
+        const alert = note('warn');
+        alert.id = 'claude_max_status_block';
+        const statusTitle = el('div', 'cm-note-title');
         statusTitle.id = 'claude_max_status_title';
         const statusSub = el('small', 'cm-hint');
         statusSub.id = 'claude_max_status_sub';
-        statusText.append(statusTitle, statusSub);
-        card.append(el('span', 'cm-dot cm-dot-lg'), statusText, iconButton('fa-rotate', '重新检测', refreshAll));
+        const row = el('div', 'cm-btn-row');
         const connectBtn = el('div', 'menu_button cm-connect');
         connectBtn.id = 'claude_max_connect';
         connectBtn.append(el('i', 'fa-solid fa-plug'), document.createTextNode(' 一键连接'));
         connectBtn.addEventListener('click', () => connect(getSettings()));
-        const connectHint = el('small', 'cm-hint cm-center', '自动切到 Chat Completion → Custom 并填好地址，连接后在模型下拉框里选择 Claude 模型。');
-        connectHint.id = 'claude_max_connect_hint';
-        const conn = connectionFields(getSettings(), () => saveSettingsDebounced());
-        conn.id = 'claude_max_status_conn';
-        conn.hidden = true;
-        block.append(card, connectBtn, connectHint, conn);
+        // The address / password fields live in 设置 only; this jumps there when they matter.
+        const fieldsBtn = el('div', 'menu_button');
+        fieldsBtn.id = 'claude_max_status_conn';
+        fieldsBtn.append(el('i', 'fa-solid fa-gear'), document.createTextNode(' 改地址'));
+        fieldsBtn.addEventListener('click', () => showTab('settings'));
+        row.append(connectBtn, fieldsBtn);
+        alert.append(statusTitle, statusSub, row);
+
+        const cloud = note('info', '酒馆在云端，连不到你电脑上的代理');
+        cloud.id = 'claude_max_cloud';
+        cloud.hidden = true;
+        cloud.append(el('small', 'cm-hint', '云端酒馆里的 127.0.0.1 是服务器自己。可以：改用 API 密钥直连；在服务器上运行代理；或用内网穿透暴露代理，并设访问密码。'));
+
+        block.append(bar, alert, cloud);
         return block;
     }
 
@@ -1593,39 +1610,42 @@
         steps.append(el('summary', null, '使用说明'));
         const list = el('ol', 'cm-notes');
         for (const line of [
-            '代理要一直开着：在代理目录运行 npm start（原版酒馆装了服务器插件时会自动启动）。',
-            '点「一键连接」，然后在「API 连接」的模型下拉框里选 Claude 模型。',
-            '酒馆自带的「推理强度」保持「自动」，思考深度在本面板「推理」页设置。',
+            '代理要一直开着（npm start；装了服务器插件的酒馆会自动启动）。',
+            '点「一键连接」，再在「API 连接」里选 Claude 模型。',
+            '酒馆自带的「推理强度」保持「自动」，思考深度在「推理」页设。',
             IS_TAURI
-                ? '首次连接时 TauriTavern 会弹出授权框，允许访问代理地址即可。'
-                : `代理地址是默认的 ${DEFAULT_ENDPOINT} 时，从手机等其他设备打开酒馆，额度和状态经由酒馆服务器转发读取；改过代理地址就直接连那个地址。`,
-            '订阅通道不支持温度、Top-P 等采样参数（Agent SDK 限制）。',
-            '「(1M context)」模型提供 100 万上下文；部分套餐需要开通额外用量，失败时自动退回普通版一小时。',
-            '顶部的状态卡只在需要处理时出现（代理没开、没登录、酒馆没连上）；一切正常时，标题旁的绿点就是在线。',
-            '不用本扩展的代理也能用：酒馆直连 Claude（官方 Claude 源，或 OpenRouter 上的 Claude）时，「推理」页的模型切换（Claude 源）、预设推荐模型、发送前检查、体检、角色卡检查、灵动岛照常可用；缓存排布、手机防丢回复、额度和用量统计要连本扩展的代理。',
+                ? '首次连接 TauriTavern 会弹授权框，允许即可。'
+                : `默认地址 ${DEFAULT_ENDPOINT} 时，其他设备打开的酒馆经酒馆服务器读额度和状态。`,
+            '不支持温度、Top-P 等采样参数（Agent SDK 限制）。',
+            '「(1M context)」模型有 100 万上下文；不可用时自动退回普通版一小时。',
+            '直连 Claude（官方源或 OpenRouter）也能用：模型切换、发送前检查、体检、角色卡检查、灵动岛照常；缓存排布、防丢回复、额度统计要走代理。',
         ]) list.append(el('li', null, line));
         steps.append(list);
         return steps;
     }
 
-    /** Hide the status block once everything is fine; connect button only when ST isn't connected. */
+    /** Show the status note only while something needs doing; connect button only when ST isn't connected. */
     function renderConnect() {
         const block = document.getElementById('claude_max_status_block');
         const btn = document.getElementById('claude_max_connect');
-        const hint = document.getElementById('claude_max_connect_hint');
-        if (!block || !btn || !hint) return;
+        if (!block || !btn) return;
         const { connected, direct } = connectionInfo();
         btn.hidden = connected;
-        hint.hidden = connected;
         // Direct to Claude with no proxy running: nothing needs doing, the proxy is optional.
         block.hidden = (connected && proxyState === 'online') || (direct && proxyState !== 'online' && proxyState !== 'warning');
+        block.dataset.tone = proxyState === 'offline' ? 'error' : proxyState === 'online' && !connected ? 'info' : 'warn';
         if (direct) setDot(proxyState === 'online' || proxyState === 'warning' ? 'online' : 'direct');
         const conn = document.getElementById('claude_max_status_conn');
         if (conn) conn.hidden = proxyState !== 'offline';
         const title = document.getElementById('claude_max_status_title');
         if (title && proxyState === 'online') title.textContent = statusTitleOnline();
+        // Cloud SillyTavern + loopback address + proxy unreachable: say why instead of "start the proxy".
+        const cloud = document.getElementById('claude_max_cloud');
+        if (cloud) {
+            cloud.hidden = direct || proxyState !== 'offline' || !hostCheck?.cloudNeedsNote({ hostname: location.hostname, endpoint: getSettings().endpoint, tauri: IS_TAURI });
+        }
+        renderGlance();
     }
-
     /** Tab 推理: one row — how hard to think (or not at all) — plus「仅下一轮」.
      *  Everything else about thinking follows the preset or SillyTavern. */
     /** The two thinking controls (推理 page, 调试选项) show the same settings. */
@@ -1639,8 +1659,8 @@
     // SillyTavern's own custom model field (the same path as its model dropdown), so it lasts
     // until the next preset switch — presets store their own model.
     const MODEL_PICKS = [
-        { value: 'claude-opus-5-5', label: 'Opus 5.5', hint: '思考总是开着。要求把思考写进正文的预设或世界书条目会被拦（reasoning_extraction）。' },
-        { value: 'claude-opus-4-6', label: 'Opus 4.6', hint: '思考可以关；写法更干净，思考过程完整可见。切换预设时会换成预设推荐的模型。' },
+        { value: 'claude-opus-5-5', label: 'Opus 5.5', hint: '总会思考；要求把思考写进正文的条目会被拦。' },
+        { value: 'claude-opus-4-6', label: 'Opus 4.6', hint: '思考可关，思考过程完整可见。' },
     ];
     const modelBase = (id) => String(id ?? '').replace(/\[1m\]$/i, '');
 
@@ -1677,7 +1697,7 @@
         const current = modelBase(model);
         const options = [...MODEL_PICKS];
         if (current && !options.some((o) => o.value === current)) {
-            options.push({ value: current, label: shortModel(current), hint: '现在用的模型（在酒馆的 API 连接里选的）。' });
+            options.push({ value: current, label: shortModel(current), hint: '当前模型（在 API 连接里选的）。' });
         }
         const row = segmented({
             label: '模型',
@@ -1689,7 +1709,7 @@
                 if (id === cur) return;
                 setModel(id);
                 renderGlance();
-                notify('info', `已切到 ${shortModel(id)}`, '到下次切换预设为止（预设推荐了模型的，切过去时会换成推荐的）。', { ms: 6000 });
+                notify('info', `已切到 ${shortModel(id)}`, '到下次切换预设为止。', { ms: 6000 });
             },
         });
         row.id = 'claude_max_model';
@@ -1707,7 +1727,7 @@
         const id = modelBase(model) + (/\[1m\]$/i.test(cur ?? '') ? '[1m]' : '');
         setModel(id);
         renderGlance();
-        notify('info', `预设用 ${shortModel(id)}`, '切换预设时自动换成预设推荐的模型；想临时换，在「推理」页点另一个。', { ms: 5000 });
+        notify('info', `预设用 ${shortModel(id)}`, '临时换：在「推理」页点另一个。', { ms: 5000 });
     }
 
     function syncModelControl() {
@@ -1719,11 +1739,13 @@
         const model = modelRow();
         if (model) pane.append(model);
         if (connectionInfo().direct) {
-            pane.append(el('small', 'cm-hint', '现在酒馆直连 Claude（没走本扩展的代理）：下面的思考设置只对代理生效，直连时用酒馆「AI 回复配置」里的「推理强度」。'));
+            const n = note('info');
+            n.append(el('small', 'cm-hint', '直连 Claude 时下面的思考设置不生效，用酒馆「AI 回复配置」的「推理强度」。'));
+            pane.append(n);
         }
         const depth = segmented({
             label: '思考深度',
-            options: [...EFFORT_OPTIONS, { value: 'off', label: '不思考', hint: '不思考，回得最快。Fable、Opus 4.7 及以上（含 Opus 5 / 5.5）总会思考，对它们无效。' }],
+            options: [...EFFORT_OPTIONS, { value: 'off', label: '不思考', hint: '回得最快。Fable、Opus 4.7 及以上总会思考，对它们无效。' }],
             current: settings.thinking === 'off' ? 'off' : settings.effort,
             onChange: (v) => {
                 if (v === 'off') settings.thinking = 'off';
@@ -1739,14 +1761,14 @@
         depth.id = 'claude_max_depth';
         pane.append(depth);
         pane.append(oneShotEffortRow(settings));
-        const cotTip = el('div', 'cm-last-error cm-tip');
+        const cotTip = note('warn');
         cotTip.id = 'claude_max_cot_tip';
         cotTip.hidden = true;
         pane.append(cotTip);
     }
 
-    /** Tab 统计: quota, usage, last-turn cache, world-info cache tool. */
-    function buildStatsTab(pane) {
+    /** Tab 状态: last-turn cache, quota, usage, world-info cache tool. */
+    function buildStatusTab(pane) {
         const stamp = el('small', 'cm-hint');
         stamp.id = 'claude_max_stats_time';
         const tools = el('div', 'cm-section-tools');
@@ -1759,16 +1781,16 @@
         pane.append(section('订阅额度'));
         const quotaBox = el('div', 'cm-quota');
         quotaBox.id = 'claude_max_quota';
-        quotaBox.append(el('small', 'cm-hint', '展开面板时自动加载。'));
+        quotaBox.append(el('small', 'cm-hint', '加载中…'));
         pane.append(quotaBox);
 
         pane.append(section('用量'));
         const statsBox = el('div', 'cm-stats');
         statsBox.id = 'claude_max_stats';
-        statsBox.append(el('small', 'cm-hint', '展开面板时自动加载。'));
+        statsBox.append(el('small', 'cm-hint', '加载中…'));
         pane.append(statsBox);
 
-        pane.append(section('缓存优化 · 世界书'));
+        pane.append(section('世界书缓存'));
         const loreBox = el('div', 'cm-field');
         loreBox.id = 'claude_max_lore';
         pane.append(loreBox);
@@ -1788,7 +1810,7 @@
         const checkBox = el('div', 'cm-stats');
         checkBox.id = 'claude_max_checkup';
         pane.append(checkBox);
-        pane.append(el('small', 'cm-hint', '检查字数、禁词、破折号、「不是A，是B」、人称、选项格式、重复段落、数值突变等。字数范围和禁词表自动从当前预设读取。'));
+        pane.append(el('small', 'cm-hint', '查字数、禁词、破折号、「不是A，是B」、人称、重复段落等；范围和禁词读自当前预设。'));
 
         const auditTools = el('div', 'cm-section-tools');
         auditTools.append(iconButton('fa-user-shield', '重新检查当前角色卡', () => runCardAudit()));
@@ -1797,26 +1819,26 @@
         auditBox.id = 'claude_max_card_audit';
         pane.append(auditBox);
 
-        pane.append(section('设置'));
+        pane.append(section('隐藏设定'));
         const leakField = el('div', 'cm-field');
-        leakField.append(el('div', 'cm-field-label', '隐藏设定关键词'));
+        leakField.append(el('div', 'cm-field-label', '关键词'));
         const leakInput = el('input', 'text_pole');
         leakInput.type = 'text';
         leakInput.id = 'claude_max_leak';
-        leakInput.placeholder = '如：植物人, 医学院（只对当前角色卡生效）';
+        leakInput.placeholder = '如：植物人, 医学院（仅当前角色卡）';
         leakInput.value = settings.leakWords?.[currentCharKey()] ?? '';
         leakInput.addEventListener('input', () => {
             settings.leakWords = { ...(settings.leakWords ?? {}), [currentCharKey()]: leakInput.value };
             save();
         });
-        leakField.append(leakInput, el('small', 'cm-hint', '剧情揭示前不该出现的词，正文里出现时提醒。'));
+        leakField.append(leakInput, el('small', 'cm-hint', '揭示前不该出现的词，出现就提醒。'));
         pane.append(leakField);
         const muted = Object.entries(settings.checkupMuted ?? {}).filter(([, n]) => n >= 2);
         if (muted.length) {
-            const unmute = el('a', 'cm-more', `恢复 ${muted.length} 类已静音的体检提示`);
+            const unmute = el('a', 'cm-more', `恢复 ${muted.length} 类已静音的提示`);
             unmute.href = '#';
             unmute.addEventListener('click', (e) => { e.preventDefault(); settings.checkupMuted = {}; save(); unmute.remove(); });
-            pane.append(el('small', 'cm-hint', '同一类问题的提示点掉两次（点一下提示就会关掉）就不再弹出。'), unmute);
+            pane.append(el('small', 'cm-hint', '同类提示点掉两次就不再弹。'), unmute);
         }
 
         const perfTools = el('div', 'cm-section-tools');
@@ -1880,10 +1902,10 @@
     function renderPerfNote(note = document.getElementById('claude_max_perf_note')) {
         if (!note) return;
         const mode = ['on', 'off'].includes(getSettings().quietRender) ? getSettings().quietRender : 'auto';
-        const why = mode === 'auto' ? `自动：${quietOn() ? '这台设备是手机或 TauriTavern，已开' : '电脑上不开'}` : `手动设为${mode === 'on' ? '开' : '关'}`;
+        const why = mode === 'auto' ? `自动${quietOn() ? '，手机 / TauriTavern' : '，电脑'}` : '手动';
         note.textContent = quietOn()
-            ? `省电显示已开（${why}）：最新一楼以外的美化动画只播一遍、不做毛玻璃，聊天外的悬浮挂件约 20 秒内停下来。`
-            : `省电显示没开（${why}），动画照常循环。可在「更多 → 调试选项」里改。`;
+            ? `省电显示开（${why}）：旧楼层动画只播一遍、不做毛玻璃。`
+            : `省电显示关（${why}）。在「设置 → 调试选项」可改。`;
     }
 
     async function showPerfDiag() {
@@ -1893,8 +1915,7 @@
         const r = await runPerfDiag();
         box = document.getElementById('claude_max_perf');
         if (!box) return;
-        const card = el('div', r.fps < 30 || r.topInfinite.length > 5 ? 'cm-last-error cm-tip' : 'cm-cache');
-        card.append(el('div', 'cm-last-error-title', `帧率 ${r.fps}/秒 · 一直在动的元素 ${r.topInfinite.reduce((n, [, c]) => n + c, 0)} 个 · 毛玻璃 ${r.backdropBlur} 个`));
+        const card = note(r.fps < 30 || r.topInfinite.length > 5 ? 'warn' : 'ok', `帧率 ${r.fps}/秒 · 循环动画 ${r.topInfinite.reduce((n, [, c]) => n + c, 0)} · 毛玻璃 ${r.backdropBlur}`);
         card.append(el('small', 'cm-hint', `显示 ${r.floorsShown}/${r.chatLength} 楼 · 内嵌窗口 ${r.iframes} 个 · 页面元素 ${r.domNodes} 个 · 卡顿 ${r.longTasks} 次（${r.longTaskMs} ms）`));
         const floors = Object.entries(r.perFloor)
             .map(([f, t]) => [f, (t.infiniteAnimations ?? 0) * 3 + (t.iframes ?? 0) * 2 + (t.backdropBlur ?? 0), t])
@@ -1903,7 +1924,7 @@
             card.append(el('small', 'cm-hint', `${f === 'page' ? '聊天之外' : `第 ${f} 楼`}：循环动画 ${t.infiniteAnimations ?? 0} · 内嵌窗口 ${t.iframes ?? 0} · 毛玻璃 ${t.backdropBlur ?? 0}`));
         }
         if (!quietOn() && floors.length > 2) {
-            card.append(el('small', 'cm-hint cm-warn', '旧楼层还在播动画：把酒馆助手的「渲染深度」设为 3 左右，或在「更多 → 调试选项」里把省电显示设为「开」。'));
+            card.append(el('small', 'cm-hint cm-warn', '旧楼层还在播动画：酒馆助手「渲染深度」设 3 左右，或在「设置 → 调试选项」把省电显示设为「开」。'));
         }
         box.replaceChildren(card);
     }
@@ -1920,8 +1941,8 @@
         });
     }
 
-    // Read only when the 更多 tab is opened; the section stays hidden unless
-    // the proxy was started by the Mac launcher.
+    // Read when the panel opens and when the Mac tab is entered; the tab stays
+    // hidden unless the proxy was started by the Mac launcher.
     async function refreshMac() {
         if (!document.getElementById('claude_max_mac')) return;
         let s;
@@ -1931,26 +1952,26 @@
         } catch {
             s = null;
         }
-        const wrap = document.getElementById('claude_max_mac_wrap');
+        const tab = document.getElementById('claude_max_tab_mac');
         const box = document.getElementById('claude_max_mac');
-        if (!wrap || !box) return;
-        if (s && !s.supported) { wrap.hidden = true; return; }
+        if (!tab || !box) return;
+        if (s && !s.supported) { setMacTab(false); return; }
         if (!s) {
-            // Only worth a line when this proxy was known to be the Mac's.
-            box.replaceChildren(el('small', 'cm-hint', '连不上代理，看不到 Mac 的状态。'));
+            // Only worth a line when this proxy was known to be the Mac's (the tab is shown already).
+            box.replaceChildren(el('small', 'cm-hint', '连不上代理，看不到 Mac 状态。'));
             return;
         }
-        wrap.hidden = false;
+        setMacTab(true);
         const lid = s.lid ?? {};
         const lines = [
             `模式：${s.phoneMode ? '手机模式' : '电脑模式'}${s.watchdog ? '（守护中）' : ''}${s.ip ? ` · ${s.ip}` : ''}`,
             `电量：${s.battery ?? '?'}%${s.onBattery ? '（用电池）' : '（插着电）'}${lid.closed == null ? '' : ` · 盖子${lid.closed ? '合着' : '开着'}`}`,
             `合盖不睡：${!lid.installed ? '没安装' : lid.paused ? '已暂停' : lid.on ? '开着' : '放开了（电量低 / 闲置）'}`,
-            `本地生图：${s.comfy ? '运行中' : '没开'} · 正在写的回复：${s.busy}`,
+            `本地生图：${s.comfy ? '运行中' : '没开'} · 在写的回复：${s.busy}`,
         ];
-        const card = el('div', 'cm-cache');
+        const card = note('info');
         for (const l of lines) card.append(el('small', 'cm-hint', l));
-        for (const e of s.recentErrors ?? []) card.append(el('small', 'cm-hint cm-warn', `最近的错误：${e}`));
+        for (const e of s.recentErrors ?? []) card.append(el('small', 'cm-hint cm-warn', `错误：${e}`));
         const row = el('div', 'cm-btn-row');
         const act = (label, action, confirmText) => {
             const b = el('button', 'menu_button', label);
@@ -2087,47 +2108,52 @@
         } catch { /* proxy unreachable or not the launcher's: nothing to do */ }
     }
 
-    function buildAdvTab(pane, settings, save) {
-        const macWrap = el('div');
-        macWrap.id = 'claude_max_mac_wrap';
-        macWrap.hidden = true; // shown once the proxy says it runs under the Mac launcher
-        const macBox = el('div');
+    /** Tab Mac: the phone's remote for the Mac launcher. The tab itself is hidden until the proxy says it runs there. */
+    function buildMacTab(pane) {
+        const macBox = el('div', 'cm-field');
         macBox.id = 'claude_max_mac';
-        macWrap.append(section('Mac（手机遥控）'), macBox);
-        pane.append(macWrap);
+        pane.append(section('Mac（手机遥控）'), macBox);
+    }
+
+    /** Tab 设置: connection (the only copy of the address / password fields), debug options, notes. */
+    function buildSettingsTab(pane, settings, save) {
+        pane.append(section('连接'));
+        const info = el('small', 'cm-hint');
+        info.id = 'claude_max_proxy_info';
+        pane.append(info, connectionFields(settings, save));
 
         // Everything below decides itself (defaults, the preset's own
         // recommendation, the proxy watching each chat). Kept for chasing
         // problems, folded away so nobody has to think about it.
         const dbg = el('details', 'cm-details cm-debug-box');
-        dbg.append(el('summary', null, '调试选项（排查问题时才需要）'));
-        dbg.append(el('small', 'cm-hint', '自动处理的：缓存相关的几项默认开着，代理按每个聊天的情况决定挪不挪；思考、身份模式等可由预设推荐，切换预设时自动套用和恢复；省电显示按设备自动开关。要手动设置的：「保存最近一次完整请求」，以及「连接」里的代理地址和访问密码。'));
+        dbg.append(el('summary', null, '调试选项'));
+        dbg.append(el('small', 'cm-hint', '一般不用动：缓存项默认开、代理按聊天自动决定；思考和身份模式随预设推荐；省电显示按设备自动。'));
         const add = (x) => dbg.append(x);
 
         add(section('缓存与上下文'));
         add(toggleRow({
-            id: 'claudeMaxResume', title: '会话续接', desc: '聊天记录按真实多轮对话发送，能用上缓存。',
-            more: '关闭后聊天记录会被压成一整段文字，只在排查问题时关闭。',
+            id: 'claudeMaxResume', title: '会话续接', desc: '按真实多轮发送，能用缓存。',
+            more: '关掉会把聊天记录压成一整段，只在排查时关。',
             checked: settings.useResume, onChange: (v) => { settings.useResume = v; save(); },
         }));
         add(toggleRow({
-            id: 'claudeMaxInlineSystem', title: '深度注入保持原位', desc: '深度条目留在聊天记录里原来的位置（预设可推荐）。',
-            more: '预设里「深度 N」的条目、世界书深度条目、作者注释留在原位，和酒馆直连 Claude 的做法一致。关闭则全部提到系统提示词；其中一条变化，整个系统提示词的缓存都会失效。',
+            id: 'claudeMaxInlineSystem', title: '深度注入保持原位', desc: '深度条目留在原位（预设可推荐）。',
+            more: '预设深度条目、世界书深度条目、作者注释留在原位，同酒馆直连。关掉则都提到系统提示词，一条变化整个系统提示词缓存失效。',
             checked: settings.inlineSystem, onChange: (v) => { settings.inlineSystem = v; save(); },
         }));
         add(toggleRow({
-            id: 'claudeMaxLoreTail', title: '世界书变化部分移到末尾', desc: '代理发现世界书每轮在变时，挪到本轮消息里。',
-            more: '系统提示词和之前的聊天记录每轮一字不差，能读缓存，只重写最近一轮。',
+            id: 'claudeMaxLoreTail', title: '世界书变化部分移到末尾', desc: '每轮在变的世界书挪进本轮消息。',
+            more: '系统提示词和旧聊天记录每轮不变，能读缓存，只重写最近一轮。',
             checked: settings.loreTail, onChange: (v) => { settings.loreTail = v; save(); },
         }));
         add(toggleRow({
-            id: 'claudeMaxFoldTail', title: '发言后的注入并进发言', desc: '代理发现卡在你发言后面放了条目时，并进发言里。',
-            more: 'MVU 这类变量卡把状态和规则以「深度 0」放在你的发言后面；并进发言后下一轮原样重放，缓存对得上。',
+            id: 'claudeMaxFoldTail', title: '发言后的注入并进发言', desc: '放在你发言后的条目并进发言。',
+            more: 'MVU 等变量卡把状态以「深度 0」放在发言后；并进去后下一轮原样重放，缓存对得上。',
             checked: settings.foldTail, onChange: (v) => { settings.foldTail = v; save(); },
         }));
         add(toggleRow({
-            id: 'claudeMaxTailBlock', title: '实验：预设后置条目提前', desc: '只对 Ny、图灵这类预设有用，默认关闭。',
-            more: '把每轮一字不差的后置条目挪到对话最前面，旧楼层就能命中缓存；代价是规则离回复更远。',
+            id: 'claudeMaxTailBlock', title: '实验：预设后置条目提前', desc: '只对 Ny、图灵这类预设有用。',
+            more: '把每轮不变的后置条目挪到对话最前，旧楼层能命中缓存；代价是规则离回复更远。',
             checked: settings.tailBlockFront, onChange: (v) => { settings.tailBlockFront = v; save(); },
         }));
 
@@ -2141,21 +2167,21 @@
         thinking.id = 'claude_max_thinking';
         add(thinking);
         add(segmented({
-            label: '后台请求的思考深度',
+            label: '后台请求思考深度',
             options: [
-                { value: 'low', label: '低', hint: '其他插件在后台发的请求（生图 tag、总结等）用「低」，快、省额度。' },
-                { value: 'follow', label: '跟随', hint: '后台请求也用「推理」页的思考深度。' },
+                { value: 'low', label: '低', hint: '其他插件的后台请求（生图 tag、总结）用「低」，快、省额度。' },
+                { value: 'follow', label: '跟随', hint: '后台请求也用「推理」页的深度。' },
             ],
             current: settings.quietEffort === 'follow' ? 'follow' : 'low',
             onChange: (v) => { settings.quietEffort = v === 'follow' ? 'follow' : 'low'; save(); },
         }));
         add(toggleRow({
-            id: 'claudeMaxShowReasoning', title: '显示思考过程', desc: '默认跟随酒馆的「显示模型思维」；关掉则总是不显示。',
+            id: 'claudeMaxShowReasoning', title: '显示思考过程', desc: '跟随酒馆「显示模型思维」；关掉则总不显示。',
             checked: settings.showReasoning, onChange: (v) => { settings.showReasoning = v; save(); },
         }));
         add(toggleRow({
-            id: 'claudeMaxIdentity', title: '身份模式', desc: '角色扮演建议关闭（预设可推荐）。',
-            more: '在角色卡前加上 Claude Code 官方前言，模型能说出自己的型号，但多耗 token，带点编程助手的味道。',
+            id: 'claudeMaxIdentity', title: '身份模式', desc: '角色扮演建议关（预设可推荐）。',
+            more: '加上 Claude Code 官方前言，模型能说出型号，但多耗 token、带编程助手味。',
             checked: settings.identityMode, onChange: (v) => { settings.identityMode = v; save(); },
         }));
 
@@ -2164,14 +2190,14 @@
             label: '省电显示',
             options: [
                 { value: 'auto', label: '自动', hint: '手机和 TauriTavern 上开，电脑上关。' },
-                { value: 'on', label: '开', hint: '最新一楼以外的美化动画只播一遍、不做毛玻璃，聊天外的悬浮挂件约 20 秒内停下来。' },
+                { value: 'on', label: '开', hint: '旧楼层动画只播一遍、不做毛玻璃，悬浮挂件约 20 秒后停。' },
                 { value: 'off', label: '关', hint: '动画照常循环。' },
             ],
             current: ['on', 'off'].includes(settings.quietRender) ? settings.quietRender : 'auto',
             onChange: (v) => { settings.quietRender = v; applyQuietRender(); save(); renderPerfNote(); },
         }));
         add(toggleRow({
-            id: 'claudeMaxCheckupToast', title: '体检发现问题时提示', desc: '点一下提示就会关掉；同一类问题点掉两次后不再提示。',
+            id: 'claudeMaxCheckupToast', title: '体检有问题时提示', desc: '点一下关掉；同类点掉两次不再提示。',
             checked: settings.checkupToast, onChange: (v) => { settings.checkupToast = v; save(); },
         }));
         add(toggleRow({
@@ -2181,38 +2207,24 @@
 
         add(section('请求'));
         add(toggleRow({
-            id: 'claudeMaxDebugDump', title: '保存最近一次完整请求', desc: '存到代理目录 data/debug/（只存本机，每次覆盖）。',
+            id: 'claudeMaxDebugDump', title: '保存最近一次完整请求', desc: '存到代理 data/debug/（本机，每次覆盖）。',
             checked: settings.debugDump, onChange: (v) => { settings.debugDump = v; save(); },
         }));
         const debugBtn = el('div', 'menu_button cm-connect cm-connect-quiet');
-        debugBtn.append(el('i', 'fa-solid fa-magnifying-glass'), document.createTextNode(' 查看实际发给模型的内容'));
+        debugBtn.append(el('i', 'fa-solid fa-magnifying-glass'), document.createTextNode(' 查看发给模型的内容'));
         debugBtn.addEventListener('click', showDebugRequest);
         add(debugBtn);
-
-        add(section('连接'));
-        const info = el('small', 'cm-hint');
-        info.id = 'claude_max_proxy_info';
-        add(info);
-        add(connectionFields(settings, save));
-        pane.append(dbg);
-        pane.append(usageNotes());
+        pane.append(dbg, usageNotes());
     }
 
-    /** Both copies of the address / key fields show the saved values. */
-    function syncConnectionFields() {
-        const s = getSettings();
-        for (const i of document.querySelectorAll('.claude-max .cm-endpoint-input')) if (i !== document.activeElement) i.value = s.endpoint;
-        for (const i of document.querySelectorAll('.claude-max .cm-key-input')) if (i !== document.activeElement) i.value = s.accessKey ?? '';
-    }
-
-    /** Proxy address + access key. Shown in the status card while the proxy
-     *  can't be reached, and in the debug options. */
+    /** Proxy address + access key, in 设置 (the status note links here while the proxy can't be reached). */
     function connectionFields(settings, save) {
         const box = el('div', 'cm-conn-fields');
         const endpointField = el('div', 'cm-field');
         endpointField.append(el('div', 'cm-field-label', '代理地址'));
         const endpointInput = el('input', 'text_pole cm-endpoint-input');
         endpointInput.type = 'text';
+        endpointInput.id = 'claude_max_endpoint';
         endpointInput.value = settings.endpoint;
         endpointInput.placeholder = DEFAULT_ENDPOINT;
         // Committed on change (Enter / leaving the field), not per keystroke:
@@ -2223,26 +2235,24 @@
             settings.endpoint = next;
             endpointInput.value = next;
             save();
-            syncConnectionFields();
             // Requests are only tagged when ST's own Custom URL matches this address.
-            notify('info', '代理地址已改', '点「重新连接」让酒馆改用这个地址，之后的请求才会带上面板的设置。', { ms: 10000, replace: 'endpoint' });
+            notify('info', '代理地址已改', '点「重新连接」让酒馆改用它。', { ms: 10000, replace: 'endpoint' });
             refreshProxyStatus();
         });
-        endpointField.append(endpointInput, el('small', 'cm-hint', `默认 ${DEFAULT_ENDPOINT}。手机连 Mac：填 Mac 上「酒馆工具」标题栏显示的地址（在「手机模式」下；手机同步会自动填好）。`));
+        endpointField.append(endpointInput, el('small', 'cm-hint', `默认 ${DEFAULT_ENDPOINT}。手机连 Mac：填「酒馆工具」标题栏的地址（手机同步会自动填）。`));
         const keyField = el('div', 'cm-field');
         keyField.append(el('div', 'cm-field-label', '访问密码'));
         const keyInput = el('input', 'text_pole cm-key-input');
         keyInput.type = 'password';
         keyInput.autocomplete = 'off';
         keyInput.value = settings.accessKey ?? '';
-        keyInput.placeholder = '在本机用时留空';
+        keyInput.placeholder = '本机使用时留空';
         keyInput.addEventListener('change', () => {
             const next = keyInput.value.trim();
             if ((settings.accessKey ?? '') === next) return;
             settings.accessKey = next;
             save();
-            syncConnectionFields();
-            notify('info', '访问密码已改', '点「重新连接」，酒馆发的请求才会带上新密码。', { ms: 10000, replace: 'endpoint' });
+            notify('info', '访问密码已改', '点「重新连接」后生效。', { ms: 10000, replace: 'endpoint' });
             refreshProxyStatus();
         });
         keyField.append(keyInput);
@@ -2253,7 +2263,30 @@
         return box;
     }
 
-    const TABS = [['reason', '推理'], ['stats', '统计'], ['check', '体检'], ['adv', '更多']];
+    const TABS = [['reason', '推理'], ['status', '状态'], ['check', '体检'], ['mac', 'Mac'], ['settings', '设置']];
+    // Tab keys before 3.1 (统计 / 更多) map onto their successors.
+    const OLD_TABS = { stats: 'status', adv: 'settings' };
+    const TAB_STORE = 'ccst.panelTab';
+
+    /** The tab last picked on this device (localStorage: a phone and the Mac needn't agree). */
+    function savedTab() {
+        let key = null;
+        try { key = localStorage.getItem(TAB_STORE); } catch { /* storage blocked */ }
+        key ??= getSettings().panelTab; // settings from before 3.1
+        key = OLD_TABS[key] ?? key;
+        return TABS.some(([k]) => k === key) ? key : 'reason';
+    }
+
+    let showTab = () => {};
+    let macTabOn = false;
+    /** Show / hide the Mac tab; leaving it hidden while selected falls back to 推理 (the choice stays saved). */
+    function setMacTab(on) {
+        macTabOn = on;
+        const b = document.getElementById('claude_max_tab_mac');
+        if (b) b.hidden = !on;
+        if (!on && document.querySelector('.claude-max .cm-tab.active')?.dataset.tab === 'mac') showTab('reason', false);
+        else if (on && savedTab() === 'mac') showTab('mac', false);
+    }
 
     /** Build the panel into ST's extension settings; false when that container isn't there yet. */
     function addExtensionSettings(settings) {
@@ -2281,47 +2314,53 @@
         toggle.addEventListener('click', () => setTimeout(() => {
             if (drawerContent.offsetParent === null) return flushIsland();
             refreshAll();
-            if (getSettings().panelTab === 'adv') refreshMac();
+            refreshMac(); // decides whether the Mac tab shows
         }, 50));
 
         const panes = Object.fromEntries(TABS.map(([k]) => [k, el('div', 'cm-pane')]));
         buildReasonTab(panes.reason, settings, save);
-        buildStatsTab(panes.stats);
+        buildStatusTab(panes.status);
         buildCheckTab(panes.check, settings, save);
-        buildAdvTab(panes.adv, settings, save);
+        buildMacTab(panes.mac);
+        buildSettingsTab(panes.settings, settings, save);
 
         const bar = el('div', 'cm-tabs');
         bar.setAttribute('role', 'tablist');
-        const show = (key) => {
+        showTab = (key, remember = true) => {
             for (const [k] of TABS) panes[k].hidden = k !== key;
             bar.querySelectorAll('button').forEach((b) => {
                 b.classList.toggle('active', b.dataset.tab === key);
                 b.setAttribute('aria-selected', String(b.dataset.tab === key));
             });
-            if (settings.panelTab !== key) { settings.panelTab = key; save(); }
+            if (remember) { try { localStorage.setItem(TAB_STORE, key); } catch { /* storage blocked: not remembered */ } }
         };
         for (const [k, label] of TABS) {
             const b = el('button', 'cm-tab', label);
             b.type = 'button';
             b.dataset.tab = k;
             b.setAttribute('role', 'tab');
+            if (k === 'mac') { b.id = 'claude_max_tab_mac'; b.hidden = !macTabOn; }
+            if (k === 'check') {
+                const badge = el('span', 'cm-badge');
+                badge.id = 'claude_max_check_badge';
+                badge.hidden = true;
+                b.append(badge);
+            }
             b.addEventListener('click', () => {
-                show(k);
+                showTab(k);
                 // Stats go stale while the panel sits open: re-read on entering the tab
-                if (k === 'stats') { refreshStats(); refreshQuota(); }
-                if (k === 'adv') refreshMac();
+                if (k === 'status') { refreshStats(); refreshQuota(); }
+                if (k === 'mac') refreshMac();
             });
             bar.append(b);
         }
 
-        const chips = el('div', 'cm-glance');
-        chips.id = 'claude_max_glance';
-        chips.showTab = show;
         const islandSlot = el('div', 'cm-island-slot');
         islandSlot.id = 'claude_max_island_slot';
-        content.append(buildStatusBlock(), islandSlot, chips, bar, ...TABS.map(([k]) => panes[k]));
+        content.append(islandSlot, buildStatusBar((k) => showTab(k)), bar, ...TABS.map(([k]) => panes[k]));
         island?.mount(islandSlot);
-        show(TABS.some(([k]) => k === settings.panelTab) ? settings.panelTab : 'reason');
+        const first = savedTab();
+        showTab(first === 'mac' && !macTabOn ? 'reason' : first, false);
         renderConnect();
         renderGlance();
         return true;
