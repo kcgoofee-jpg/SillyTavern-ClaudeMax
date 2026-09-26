@@ -145,8 +145,80 @@ export function parseTsv(text) {
     return out;
 }
 
+// ── 手机（只 Mac 有 adb 这一套）──
+
+export const TT_PKG = 'com.tauritavern.client';
+export const GUARD_MOD = '/data/adb/modules/claudemax_tt_keepalive';
+export const GUARD_DIR = '/data/adb/tt-guard';
+// TT 2.3.0 起生成回复时才开的前台服务（和 tt-root-module 的 common.sh 同一个名字）
+const GEN_SERVICE = 'AiGenerationForegroundService';
+
+/** 一次 adb shell 看手机：TT 开没开、在不在生成回复、TT 守护的版本 / 上次备份 / 在不在恢复。root 部分整条交给 su -c。 */
+export const PHONE_PROBE = [
+    `p=$(pidof ${TT_PKG}); echo "tt_pid=$p"`,
+    `[ -n "$p" ] && dumpsys activity services ${TT_PKG} 2>/dev/null | grep -q ${GEN_SERVICE} && echo gen=1`,
+    `su -c 'sed -n "s/^version=/guard_version=/p" ${GUARD_MOD}/module.prop 2>/dev/null; grep "^last_backup=" ${GUARD_DIR}/state.txt 2>/dev/null; `
+        + `[ -e ${GUARD_DIR}/.restore.lock ] && echo restore_lock=1; [ -e ${GUARD_DIR}/restore.pending ] && echo restore_pending=1; echo su_ok=1'`,
+    'echo probe_end=1',
+].join('; ');
+
+/** PHONE_PROBE 的输出 → 状态；没读全返回 null。 */
+export function parsePhoneProbe(text) {
+    const kv = {};
+    for (const line of String(text ?? '').split(/\r?\n/)) {
+        const i = line.indexOf('=');
+        if (i > 0) kv[line.slice(0, i).trim()] = line.slice(i + 1).trim();
+    }
+    if (kv.probe_end !== '1') return null;
+    const last = Number(kv.last_backup);
+    return {
+        ttRunning: !!kv.tt_pid,
+        generating: kv.gen === '1',
+        root: kv.su_ok === '1',
+        guardVersion: kv.guard_version || null,
+        guardLastBackup: last > 0 ? new Date(last * 1000) : null,
+        restoring: kv.restore_lock === '1',
+        restorePending: kv.restore_pending === '1',
+    };
+}
+
+export function adbRun(adb, serial, args, { timeout = 8000, input } = {}) {
+    return spawnSync(adb, ['-s', serial, ...args], { encoding: 'utf8', timeout, input, windowsHide: true });
+}
+
+export function phoneProbe(adb, serial, run = adbRun) {
+    if (!adb || !serial) return null;
+    const r = run(adb, serial, ['shell', PHONE_PROBE], { timeout: 6000 });
+    return parsePhoneProbe(r.stdout);
+}
+
+// 代理后端的短名字（首页一行放得下）
+const BACKEND_SHORT = { subscription: '订阅', apikey: 'API 密钥', bedrock: 'Bedrock', vertex: 'Vertex', gateway: '网关', openrouter: 'OpenRouter' };
+export function backendInfo(backend, status) {
+    const id = backend?.backend ?? status?.backend?.id ?? null;
+    if (!id) return null;
+    return { id, label: BACKEND_SHORT[id] ?? backend?.label ?? status?.backend?.label ?? id, missing: backend?.missing ?? [] };
+}
+
+/** 「2 小时前」这种说法。 */
+export function ago(d, now = new Date()) {
+    if (!d) return null;
+    const m = Math.max(0, Math.round((now - d) / 60000));
+    if (m < 1) return '刚刚';
+    if (m < 60) return `${m} 分钟前`;
+    const h = Math.round(m / 60);
+    if (h < 24) return `${h} 小时前`;
+    return `${Math.round(h / 24)} 天前`;
+}
+/** 今天的只写时:分，别的天写月-日 时:分。 */
+export function clock(d, now = new Date()) {
+    if (!d) return null;
+    const hm = `${two(d.getHours())}:${two(d.getMinutes())}`;
+    return d.toDateString() === now.toDateString() ? hm : `${two(d.getMonth() + 1)}-${two(d.getDate())} ${hm}`;
+}
+
 /**
- * 菜单要的全部状态。deps 给测试换掉：fetch、exists、mtime、portOpen、osStatus。
+ * 菜单要的全部状态。deps 给测试换掉：fetch、exists、mtime、portOpen、osStatus、phoneProbe。
  * 分系统的字段在别的系统上是 null / false（菜单显示「只支持 Mac」）。
  */
 export async function readState(deps = {}) {
@@ -157,9 +229,10 @@ export async function readState(deps = {}) {
     const probe = deps.portOpen ?? portOpen;
     const base = `http://127.0.0.1:${cfg.proxyPort}`;
     const comfy = hasComfy(cfg, exists);
-    const [status, control, stUp, comfyUp] = await Promise.all([
+    const [status, control, backend, stUp, comfyUp] = await Promise.all([
         getJson(`${base}/status`, deps.fetch),
         getJson(`${base}/v1/control/status`, deps.fetch),
+        getJson(`${base}/v1/backend`, deps.fetch),
         cfg.stDir ? probe(cfg.stPort) : false,
         comfy ? probe(cfg.comfyPort) : false,
     ]);
@@ -169,12 +242,15 @@ export async function readState(deps = {}) {
     const hub = syncHub(cfg);
     const syncFile = join(cfg.root, 'launcher', `phone-sync-state${hub === 'tt' ? '-tt' : ''}.local.json`);
     const synced = mac && nonEmpty(syncFile) ? mtime(syncFile) : null;
+    const phone = local.phone ?? null;
+    const onPhone = mac && (phone === 'usb' || phone === 'wifi') ? (deps.phoneProbe ?? phoneProbe)(local.adb, local.serial) : null;
     return {
         port: cfg.proxyPort,
         proxy: !!status?.ok,
         proxyVersion: status?.version ?? null,
         repoVersion: VERSION,
         loggedIn: status ? !!status.credential?.present : null,
+        backend: backendInfo(backend, status),
         plan: planName(status?.credential?.subscriptionType),
         busy: control?.busy ?? 0,
         phoneMode: (mac && nonEmpty(cfg.lanKeyFile)) || !!control?.phoneMode,
@@ -182,8 +258,12 @@ export async function readState(deps = {}) {
         lidInstalled: on('lid_installed'),
         lidOn: on('lid_on'),
         ip: local.ip || control?.ip || '',
-        phone: local.phone ?? null, // usb | wifi | unauthorized | none | noadb；不是 Mac 时 null
+        phone, // usb | wifi | unauthorized | none | noadb；不是 Mac 时 null
+        adb: local.adb || null,
+        serial: local.serial || null,
+        phoneTT: onPhone, // 手机连着时：{ ttRunning, generating, root, guardVersion, guardLastBackup, restoring, restorePending }
         lastSync: synced ? fmtTime(synced) : null,
+        lastSyncAt: synced ?? null,
         hubLabel: hub === 'tt' ? 'Mac TT' : '电脑酒馆',
         stManaged: !!cfg.stDir && cfg.stAutostart,
         stRunning: !!stUp,
@@ -191,7 +271,7 @@ export async function readState(deps = {}) {
         macTTRunning: on('mactt_running'),
         hasComfy: comfy,
         comfyRunning: !!comfyUp,
-        hasModule: exists(join(cfg.moduleDir, 'build-ksu-module.sh')),
+        hasModule: exists(join(cfg.moduleDir, 'pc', 'pull-backups.sh')),
         canTTImport: mac && !!cfg.stDir && exists(join(cfg.macTTData, 'default-user')),
         autostart: autostartOn(cfg, exists),
         modeMismatch: local.mode_mismatch || '',
@@ -303,6 +383,8 @@ export function reporter(cfg, write = (s) => process.stdout.write(s + '\n')) {
         banner(t) { write(''); write(bold(`══ ${t} ══`) + '  ' + dim(`CCST v${VERSION}`)); log(`===== ${t} =====`); },
         step(t) { write(''); write(bold(`▶ ${t}`)); log(`[步骤] ${t}`); },
         explain(t) { write(dim(`  ${t}`)); },
+        head(t) { write(`  ${bold(t)}`); },
+        line(t) { write(`  ${t}`); },
         ok(t) { write(`  ${green('✓')} ${t}`); log(`[正常] ${t}`); },
         warnLine(t) { write(`  ${yellow('!')} ${t}`); log(`[提醒] ${t}`); r.warn++; },
         failLine(t) { write(`  ${red('✗')} ${t}`); log(`[错误] ${t}`); r.fail++; },
@@ -456,17 +538,57 @@ export async function actionCheck(io = {}) {
             r.explain('· 电脑模式');
             if (st.lidOn) r.warnLine('合盖不睡开着，但手机模式是关的：合盖不会睡，注意发热耗电');
         }
+        const g = st.phoneTT;
+        if (g) {
+            r.explain(`· 手机 TT ${g.ttRunning ? (g.generating ? '开着（在生成回复）' : '开着') : '没开'}；`
+                + (g.guardVersion ? `TT 守护 ${g.guardVersion}，上次备份 ${g.guardLastBackup ? `${clock(g.guardLastBackup)}（${ago(g.guardLastBackup)}）` : '还没有'}` : 'TT 守护没装'));
+            if (g.restoring) r.warnLine('手机上 TT 守护正在恢复备份：恢复完之前别同步');
+            if (g.restorePending) { r.warnLine('手机上次从备份恢复没做完'); r.fix('在手机 KernelSU → 模块 → TT 守护 里重新恢复。'); }
+        }
         if (st.adbNoRoute) {
             r.warnLine('后台连手机的无线调试时报「No route to host」：多半是 macOS 的「本地网络」权限挡住了后台启动的 adb');
             r.fix('在酒馆工具里选一次「手机同步」：它从终端重新启动 adb，之后守护也能连上手机。');
         }
     }
+    if (cfg.os === 'mac') await checkExtUpstream(cfg, r, io);
     r.step('日志诊断：在最近的日志里查找已知错误');
     diagnoseLog(r, [join(cfg.logDir, 'proxy.log'), join(cfg.logDir, 'proxy.err.log')], '代理');
     if (cfg.stDir) diagnoseLog(r, [join(cfg.logDir, 'sillytavern.log'), join(cfg.logDir, 'sillytavern.err.log')], '酒馆');
     r.summary();
     if (io.ask && await io.ask('要打开日志文件夹吗？')) openPath(cfg.logDir, cfg.os);
     return r.fail ? 1 : 0;
+}
+
+/** 本机的第三方扩展目录：电脑酒馆的、Mac TT 的（有才算）。 */
+export function extDirs(cfg, exists = existsSync) {
+    const out = [];
+    if (cfg.stDir) out.push({ label: '电脑酒馆', dir: join(cfg.stDir, 'public', 'scripts', 'extensions', 'third-party') });
+    out.push({ label: 'Mac TT', dir: join(cfg.macTTData, 'extensions', 'third-party') });
+    return out.filter((d) => exists(d.dir));
+}
+
+/** 扩展的当前分支没设上游：TT 查扩展更新会报「Embedded Git branch has no fetch remote」。你同意才设（只改 .git/config）。 */
+async function checkExtUpstream(cfg, r, io, run = (args) => spawnSync('python3', [join(HERE, 'phone_sync.py'), ...args], { encoding: 'utf8', timeout: 30000 })) {
+    const dirs = extDirs(cfg);
+    if (!dirs.length) return;
+    r.step('扩展：能不能检查更新');
+    const args = dirs.flatMap((d) => ['--upstream-check', d.dir]);
+    let res = null;
+    try { res = JSON.parse(run(args).stdout); } catch { r.explain('· 读不了扩展的 git 信息，跳过'); return; }
+    const bad = dirs.flatMap((d) => (res[d.dir] ?? []).map((u) => ({ ...u, label: d.label })));
+    if (!bad.length) { r.ok('扩展的分支都设了上游（TT 能检查更新）'); return; }
+    for (const u of bad) {
+        r.warnLine(`扩展 ${u.name}（${u.label}）：分支 ${u.branch} 没设上游，TT 查更新会报错`);
+        if (!u.target) r.explain('  没有 origin，没法自动设');
+    }
+    const fixable = bad.filter((u) => u.target);
+    if (!fixable.length || !io.ask) { if (fixable.length) r.fix('在酒馆工具里选「检查状态」，按提示设上游；手机上的在「同步手机」里设。'); return; }
+    if (!(await io.ask(`把 ${fixable.length} 个扩展设成跟 origin 的默认分支吗？（只改 .git/config，不动提交）`))) return;
+    let fixed = null;
+    try { fixed = JSON.parse(run([...args, '--upstream-fix']).stdout); } catch { /* 下面报 */ }
+    const names = fixed ? Object.values(fixed).flat().filter((u) => u.fixed).map((u) => u.name) : [];
+    if (names.length) r.ok(`设好了：${names.join('、')}（手机上的在「同步手机」里设）`);
+    else r.failLine('没设成');
 }
 
 export function openPath(target, os = OS) {

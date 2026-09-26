@@ -730,11 +730,18 @@ mac_tt_open() { [[ -d /Applications/TauriTavern.app ]] && open -a TauriTavern; }
 hub_update_mac_tt_ext() {
     local src=$(ext_source_dir)
     [[ "$(sync_hub)" == tt && "$src" != "$MAC_TT_DATA/extensions/third-party" ]] || return 0
-    python3 "$LAUNCHER_DIR/../phone_sync.py" --ext-only --local-tt "$MAC_TT_DATA/default-user" --ext-dir "$src" "$@"
+    python3 "$LAUNCHER_DIR/../phone_sync.py" --ext-only --local-tt "$MAC_TT_DATA/default-user" --ext-dir "$src" \
+        --backups "${PROXY_DIR:h}/backups" "$@"
+}
+
+# 手机上的 TT 守护（tt-root-module）在恢复备份 / 上次恢复没做完：打印 lock / pending（没装模块、都没有时什么都不打印）
+guard_busy() {
+    "$1" -s "$2" shell "su -c '[ -e /data/adb/tt-guard/.restore.lock ] && echo lock; [ -e /data/adb/tt-guard/restore.pending ] && echo pending'" 2>/dev/null | tr -d '\r'
 }
 
 # 手机遥控「同步」：不问问题直接双向同步（关掉手机上的 TT → 同步 → 再打开），结果发通知。
-# 代理在写回复时先等它写完。
+# 代理在写回复时先等它写完。「要你选」的按安全默认（phone_sync.py 不带 --choices）：冲突用较新的并留冲突副本，
+# API 设置和密钥不动；写手机前 phone_sync.py 让 TT 守护先存快照。
 phone_sync_auto() {
     local adb serial args out busy rc n
     adb=$(find_adb) || { notify "手机同步没做成" "Mac 上找不到 adb"; return 1; }
@@ -743,8 +750,16 @@ phone_sync_auto() {
         adb_reconnect "$adb"; sleep 1; serial=$(phone_serial)
     fi
     [[ -n "$serial" ]] || { notify "手机同步没做成" "Mac 连不上手机的无线调试"; return 1; }
-    local why tt_was=0
+    local why tt_was=0 guard
     why=$(hub_ready) || { notify "手机同步没做成" "$why"; return 1; }
+    # TT 守护在恢复备份（或上次恢复没做完）：不同步，也不去关 TT
+    guard=$(guard_busy "$adb" "$serial")
+    if [[ "$guard" == *lock* ]]; then
+        notify "手机同步没做" "TT 守护正在恢复备份，恢复完再同步。"; log_event "[同步] 手机遥控触发：没做（TT 守护在恢复）"; return 1
+    elif [[ "$guard" == *pending* ]]; then
+        notify "手机同步没做" "上次从备份恢复没做完。先在 KernelSU → 模块 → TT 守护 里处理，或在 Mac 的酒馆工具里同步（会问你）。"
+        log_event "[同步] 手机遥控触发：没做（上次恢复没做完）"; return 1
+    fi
     # 按钮就是在 TT 里按的：不倒数，只等代理把正在写的回复写完
     if ! phone_handoff "$serial" "$adb" "同步" 0 >/dev/null; then
         notify "手机同步没做成" "代理一直在写回复，稍后再同步。"

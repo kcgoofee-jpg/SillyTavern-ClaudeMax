@@ -26,4 +26,6 @@ else
     phone=noadb
 fi
 kv phone "$phone"
+kv adb "$adb"
+kv serial "$serial"
 exit 0

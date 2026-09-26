@@ -130,7 +130,8 @@ test('readState on Windows: proxy/HTTP fields filled, Mac-only probes n/a', asyn
     cfg.stDir = 'D:\\SillyTavern';
     const s = await readState({
         cfg,
-        fetch: jsonFetch({ '/status': { ok: true, version: '9.9.9', credential: { present: true, subscriptionType: 'pro' } }, '/v1/control/status': { busy: 1 } }),
+        fetch: jsonFetch({ '/status': { ok: true, version: '9.9.9', credential: { present: true, subscriptionType: 'pro' } }, '/v1/control/status': { busy: 1 },
+            '/v1/backend': { ok: true, backend: 'openrouter', label: 'OpenRouter', missing: [] } }),
         exists: () => false,
         nonEmpty: () => false,
         portOpen: async (p) => p === 8000,
@@ -143,6 +144,8 @@ test('readState on Windows: proxy/HTTP fields filled, Mac-only probes n/a', asyn
     assert.equal(s.stManaged, true);
     assert.equal(s.stRunning, true);
     assert.equal(s.phone, null);
+    assert.equal(s.phoneTT, null);
+    assert.deepEqual(s.backend, { id: 'openrouter', label: 'OpenRouter', missing: [] });
     assert.equal(s.hasTT, false);
     assert.equal(s.lastSync, null);
     assert.equal(s.phoneMode, false);
@@ -158,8 +161,11 @@ test('readState on macOS: proxy down, phone and sync from the OS helper and file
         nonEmpty: (f) => f.endsWith('phone-sync-state-tt.local.json') || f === cfg.lanKeyFile,
         mtime: () => when,
         portOpen: async () => false,
-        osStatus: () => ({ watchdog: '1', phone: 'wifi', ip: '10.0.0.2', lid_on: '0' }),
+        osStatus: () => ({ watchdog: '1', phone: 'wifi', ip: '10.0.0.2', lid_on: '0', adb: '/adb', serial: '10.0.0.3:5555' }),
+        phoneProbe: (adb, serial) => (adb === '/adb' && serial === '10.0.0.3:5555' ? { ttRunning: true, guardVersion: '1.9' } : null),
     });
+    assert.deepEqual(s.phoneTT, { ttRunning: true, guardVersion: '1.9' });
+    assert.equal(+s.lastSyncAt, +when);
     assert.equal(s.proxy, false);
     assert.equal(s.loggedIn, null);
     assert.equal(s.hubLabel, 'Mac TT'); // no SillyTavern: the hub is the Mac TT
@@ -183,4 +189,7 @@ test('action routing: check is Node everywhere; start/stop/restart Node except m
     assert.ok(nodeAction('restart', 'win', false));
     assert.equal(nodeAction('start', 'linux', true), null);
     assert.equal(nodeAction('phone-sync', 'win', false), null);
+    assert.ok(nodeAction('phone-sync', 'mac', false));
+    assert.ok(nodeAction('guard-restore', 'mac', false));
+    assert.equal(nodeAction('guard-pull', 'linux', true), null);
 });
